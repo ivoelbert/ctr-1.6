@@ -44,11 +44,13 @@ await page.waitForFunction(() => window.__finished, { timeout: 600000, polling: 
 console.log('finished', JSON.stringify(await state()));
 
 // the results, then the menu: press cross every couple of seconds until a new race runs
-const pressCross = () => page.evaluate(() => new Promise((done) => {
+const press = (button) => page.evaluate((button) => new Promise((done) => {
   let n = 0;
-  ctr.hold('cross');
+  ctr.hold(button);
   Module.ctrOnVBlank = () => { if (++n === 6) { ctr.release(); Module.ctrOnVBlank = null; done(); } };
-}));
+}), button);
+// a Time Trial record asks for a name: Start saves it (SubmitName)
+const sequence = (process.env.PRESSES ?? 'cross cross start start cross cross cross cross cross cross').split(' ');
 let restarted = false;
 for (let i = 0; i < 20 && !restarted; i++) {
   await sleep(2000);
@@ -56,7 +58,7 @@ for (let i = 0; i < 20 && !restarted; i++) {
   const s = await state();
   console.log(i, JSON.stringify(s));
   if (s.kart && s.time > 0 && s.time < 20000 && !(s.kart.actions & 0x2000000) && i > 1) { restarted = true; break; }
-  await pressCross();
+  await press(sequence[Math.min(i, sequence.length - 1)]);
 }
 console.log(restarted ? 'RETRY OK: a new race is running' : 'NO RESTART');
 await page.screenshot({ path: `${outDir}/end.png` });

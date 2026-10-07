@@ -42,6 +42,9 @@ The launcher has four modes:
 - **CTR menus**: the whole game from its title screen, with Dust 2 in Dingo Canyon's place and
   Dust 2 Tunnels in Dragon Mines'.
 
+The memory card (Time Trial records and ghosts, Adventure saves) is kept in the browser's
+storage for the page.
+
 ## Controls (keyboard)
 
 | | key | PS1 |

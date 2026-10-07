@@ -37,8 +37,9 @@ function fakeGamepads(count) {
   }, 4000));
 }
 
-export async function launch({ query = '', width = 960, height = 720, log = true, pads = 0 } = {}) {
+export async function launch({ query = '', width = 960, height = 720, log = true, pads = 0, profile } = {}) {
   const browser = await puppeteer.launch({
+    ...(profile ? { userDataDir: profile } : {}),
     executablePath: CHROME,
     headless: 'new',
     args: [...RENDER_ARGS, '--autoplay-policy=no-user-gesture-required', '--enable-unsafe-webgpu'],

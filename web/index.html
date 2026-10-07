@@ -258,9 +258,30 @@
   };
 
   // choice: { tracks: { slot: 'dust2' | 'dust2_b' | 'dust2_free' } | null, boot: {level, mode, character, laps, players} | null }
+  // The memory card (/memcards, see engine/platform/native_memcard.c) lives in IndexedDB, so
+  // records, ghosts and Adventure saves outlast the page.
+  async function mountMemoryCard() {
+    try {
+      Module.FS.mkdir('/memcards');
+      Module.FS.mount(Module.FS.filesystems.IDBFS, {}, '/memcards');
+      await new Promise((done) => Module.FS.syncfs(true, (err) => { if (err) console.warn('memory card', err); done(); }));
+      let busy = false;
+      const save = () => {
+        if (busy) return;
+        busy = true;
+        Module.FS.syncfs(false, (err) => { busy = false; if (err) console.warn('memory card', err); });
+      };
+      setInterval(save, 3000);
+      addEventListener('pagehide', save);
+    } catch (e) {
+      console.warn('the memory card will not be kept', e);
+    }
+  }
+
   async function start(choice, discFile) {
     await runtimeReadyPromise;
     const disc = await loadDisc(discFile);
+    await mountMemoryCard();
     Module.FS.mkdir('/assets');
     Module.FS.writeFile('/assets/ctr-u.bin', disc);
     if (choice.tracks) await loadDust2(choice.tracks);
