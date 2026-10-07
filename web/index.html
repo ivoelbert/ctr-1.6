@@ -54,12 +54,17 @@
   #discpick.show { display: block; }
   #nojspi { margin: 0 0 16px; padding: 12px 14px; border-radius: 10px; background: #4a1a10; border: 1px solid #a2412a; }
   #nojspi[hidden] { display: none; }
+  #toast { position: fixed; left: 50%; top: 18px; transform: translateX(-50%); max-width: calc(100% - 32px);
+    background: rgba(20, 14, 8, .92); color: var(--text); border: 1px solid var(--accent); border-radius: 8px;
+    padding: 8px 14px; font: 13px/1.4 ui-monospace, monospace; pointer-events: none; opacity: 0; transition: opacity .3s; }
+  #toast.show { opacity: 1; }
   .off { display: none !important; }
 </style>
 </head>
 <body>
 <div id="stage"><canvas id="canvas" tabindex="0" oncontextmenu="event.preventDefault()"></canvas></div>
 <div id="status"></div>
+<div id="toast"></div>
 
 <div id="launcher" hidden>
   <div class="wrap">
@@ -126,6 +131,7 @@
           <tr><td>Skip the intro</td><td><kbd>Z</kbd></td></tr>
           <tr><td>Pause</td><td><kbd>Enter</kbd></td></tr>
           <tr><td>Full screen</td><td><kbd>F11</kbd> or the browser's (<kbd>⌃⌘F</kbd> on a Mac)</td></tr>
+          <tr><td>Copy where you are</td><td><kbd>P</kbd> (for bug reports)</td></tr>
         </table>
         <p class="note">A gamepad works too, with CTR's own buttons. Power slide: hold Right Shift
           through a turn and tap Left Shift when the exhaust turns black (either Shift starts the
@@ -215,8 +221,30 @@
       release() { Module._NativeWeb_SetButtons(0); },
       teleport(x, y, z, angle = 0) { Module._NativeWeb_Teleport(x | 0, y | 0, z | 0, angle | 0); },
       turbo(on) { Module.ctrTurbo = !!on; },
+      // where player 1 is: "track x,y,z,angle level N mode M", for bug reports (P copies it)
+      where() {
+        const s = window.ctr.state();
+        if (!s.kart) return 'not racing';
+        const k = s.kart;
+        return `${choiceName || 'level'} ${Math.round(k.x)},${Math.round(k.y)},${Math.round(k.z)},${k.angle & 4095} level ${s.level} mode ${(s.gameMode1 >>> 0).toString(16)}`;
+      },
     };
   }
+
+  // P: copy where you are (to paste into a bug report)
+  let toastTimer = 0;
+  function toast(msg) {
+    const el = document.getElementById('toast');
+    el.textContent = msg;
+    el.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove('show'), 3500);
+  }
+  addEventListener('keydown', (e) => {
+    if (e.code !== 'KeyP' || e.repeat || !window.ctr) return;
+    const text = window.ctr.where();
+    navigator.clipboard.writeText(text).then(() => toast('Copied: ' + text), () => toast(text));
+  }, true);
 
   // Dust 2 takes Dingo Canyon's slot (level 0): its LEVs replace the 1P, 2P, 4P and
   // Time Trial/Relic files (BIGFILE entries 1, 3, 5, 7; each is grafted onto the one it
@@ -298,7 +326,9 @@
     }
   }
 
+  let choiceName = '';
   async function start(choice, discFile) {
+    choiceName = choice.tracks ? Object.values(choice.tracks).join('+') : '';
     await runtimeReadyPromise;
     const disc = await loadDisc(discFile);
     await mountMemoryCard();

@@ -133,7 +133,10 @@ def load(glb):
             tris.append(Tri(to_ctr(p), uv.copy(), layer, dir_to_ctr(geo), p, geo))
     patches = door_floor_patches(glb, tris)
     tris.extend(patches)
-    print(f'{len(tris)} triangles ({flipped} turned to face their normals, {len(patches)} floor patches under removed door leaves)')
+    slots = door_slot_fills(glb, layer_of_mat)
+    tris.extend(slots)
+    print(f'{len(tris)} triangles ({flipped} turned to face their normals, {len(patches)} floor patches and '
+          f'{len(slots)} slot fills where door leaves were)')
     fill_black_faces(tris, imgs)
     return tris, imgs
 
@@ -283,6 +286,116 @@ def fill_black_faces(tris, imgs, radius=700.0):
         t.uv = np.array([uv, uv, uv])
         filled += 1
     print(f'{len(black)} black faces: {copied} take a lit twin\'s texture, {filled} the colour around them')
+
+
+def _chains(edges):
+    """Edges (pairs of vertex keys) -> paths (lists of keys), each from one end to the other."""
+    nbr = {}
+    for a, b in edges:
+        nbr.setdefault(a, []).append(b)
+        nbr.setdefault(b, []).append(a)
+    seen, paths = set(), []
+    for start in [v for v, ns in nbr.items() if len(ns) == 1] + list(nbr):
+        if start in seen:
+            continue
+        path, prev, cur = [start], None, start
+        seen.add(start)
+        while True:
+            nxt = [n for n in nbr[cur] if n != prev and n not in seen]
+            if not nxt:
+                break
+            prev, cur = cur, nxt[0]
+            seen.add(cur)
+            path.append(cur)
+        paths.append(path)
+    return paths
+
+
+def door_slot_fills(glb, layer_of_mat):
+    """The arches and jambs were modelled with a slot where each door leaf's top and hinge edges
+    sat (the leaf filled it). With the leaves out, that slot shows the hollow wall and the sky:
+    close it, zipping the two outlines the leaf's faces left (open edges of the remaining mesh),
+    textured as the surface beside it."""
+    key = lambda p: tuple(np.round(p, 1))  # noqa: E731
+    out = []
+    for mat, P, UV, _, name, N in triangles(glb, with_normals=True):
+        leaves = DOOR_LEAVES.get(name, ())
+        if not leaves:
+            continue
+        removed = set().union(*leaves)
+        uvs = UV * LAYER_SIZE
+        layer = layer_of_mat[mat]
+        pos = {}
+        edge_use = {}
+        for k in range(len(P)):
+            if k in removed:
+                continue
+            for e in range(3):
+                a, b = key(P[k][e]), key(P[k][(e + 1) % 3])
+                pos[a], pos[b] = P[k][e], P[k][(e + 1) % 3]
+                edge_use.setdefault(frozenset((a, b)), []).append(k)
+        for ids in leaves:
+            # the leaf's two big faces: vertices by the side of the leaf they are on
+            normals = []
+            for k in ids:
+                n = np.cross(P[k][1] - P[k][0], P[k][2] - P[k][0])
+                normals.append((np.linalg.norm(n), n / (np.linalg.norm(n) + 1e-12), k))
+            main = max(normals)[1]
+            side = {}
+            for _, n, k in normals:
+                d = float(np.dot(n, main))
+                if abs(d) > 0.9:
+                    for p in P[k]:
+                        side[key(p)] = 0 if d > 0 else 1
+            zmin = min(p[2] for k in ids for p in P[k])
+            open_edges = [[], []]
+            owner = {}
+            for e, ks in edge_use.items():
+                if len(ks) != 1 or len(e) != 2:
+                    continue
+                a, b = tuple(e)
+                if a not in side or b not in side or side[a] != side[b]:
+                    continue
+                if abs(pos[a][2] - zmin) < 0.5 and abs(pos[b][2] - zmin) < 0.5:
+                    continue   # the floor cut: door_floor_patches
+                open_edges[side[a]].append((a, b))
+                owner[frozenset((a, b))] = ks[0]
+            ca, cb = _chains(open_edges[0]), _chains(open_edges[1])
+            if len(ca) != 1 or len(cb) != 1:
+                continue
+            A, B = ca[0], cb[0]
+            if (np.linalg.norm(pos[A[0]] - pos[B[0]]) + np.linalg.norm(pos[A[-1]] - pos[B[-1]]) >
+                    np.linalg.norm(pos[A[0]] - pos[B[-1]]) + np.linalg.norm(pos[A[-1]] - pos[B[0]])):
+                B = B[::-1]
+            i = j = 0
+            while i < len(A) - 1 or j < len(B) - 1:
+                if j == len(B) - 1 or (i < len(A) - 1 and
+                                       np.linalg.norm(pos[A[i + 1]] - pos[B[j]]) <= np.linalg.norm(pos[A[i]] - pos[B[j + 1]])):
+                    tri, ok = [A[i], A[i + 1], B[j]], owner[frozenset((A[i], A[i + 1]))]
+                    i += 1
+                else:
+                    tri, ok = [A[i], B[j], B[j + 1]], owner[frozenset((B[j], B[j + 1]))]
+                    j += 1
+                ph = np.array([pos[v] for v in tri])
+                n = np.cross(ph[1] - ph[0], ph[2] - ph[0])
+                if np.linalg.norm(n) < 1e-6:
+                    continue
+                o = P[ok]
+                on = np.cross(o[1] - o[0], o[2] - o[0])
+                if np.dot(n, on) < 0:   # face the way the surface beside it faces
+                    ph = ph[[0, 2, 1]]
+                    n = -n
+                # texture: the neighbour's mapping, carried across the slot
+                e1, e2 = o[1] - o[0], o[2] - o[0]
+                G = np.array([[e1 @ e1, e1 @ e2], [e1 @ e2, e2 @ e2]])
+                uv = []
+                for p in ph:
+                    rhs = np.array([(p - o[0]) @ e1, (p - o[0]) @ e2])
+                    u, v = np.linalg.solve(G, rhs)
+                    uv.append(uvs[ok][0] + u * (uvs[ok][1] - uvs[ok][0]) + v * (uvs[ok][2] - uvs[ok][0]))
+                nh = n / np.linalg.norm(n)
+                out.append(Tri(to_ctr(ph), np.clip(np.array(uv), 0, LAYER_SIZE - 1), layer, dir_to_ctr(nh), ph, nh))
+    return out
 
 
 def door_floor_patches(glb, tris):

@@ -65,7 +65,9 @@ class Quad:
     checkpoint: int = 0xFF
     double_sided: bool = False
     triangle: bool = False
-    hidden: bool = False        # collides, never drawn: kept out of the visibility lists
+    hidden: bool = False        # collides, never drawn: out of the visibility lists (when the
+                                # level has at most 4096 quadblocks; see write_level), and its
+                                # textures should be ones the renderer discards
     draw_order_low: int = None  # raw value (face flags, draw order); None = 0 + double-sided bit
     draw_order_high: int = 0
 
@@ -289,9 +291,11 @@ def write_level(lv: Level):
     vert_off = b.alloc(VERT_SIZE * len(verts))
     bsp_off = b.alloc(BSP_SIZE * nn)
 
-    # PVS: every BSP node visible, and every quadblock that has textures. Retail keeps its
-    # collision-only quadblocks out of the face lists, which is what hides them: the renderer
-    # draws a listed quadblock without textures with texture page 0 (black).
+    # PVS: every BSP node and every quadblock visible. The renderer finds a quadblock's bit at
+    # word (blockID >> 5) & 127 (DrawLevelOvr1P: (blockID >> 3) & 0x1fc bytes), so the face
+    # list only tells apart 4096 quadblocks and quadblock i shares the bit of i mod 4096: with
+    # more, clearing a bit (to hide a collision-only quadblock) hides others too (holes). So
+    # all bits are set, and collision-only quadblocks hide by their texture (see hidden).
     leaf_words = (nn + 31) // 32
     face_words = (nq + 31) // 32
     vis_leaf = b.alloc(4 * leaf_words)
@@ -299,7 +303,7 @@ def write_level(lv: Level):
     b.put(vis_leaf, '%dI' % leaf_words, *([0xFFFFFFFF] * leaf_words))
     face_bits = [0] * face_words
     for qi, q in enumerate(quads):
-        if q.faces[0] is not None and not q.hidden:
+        if q.faces[0] is not None and (nq > 4096 or not q.hidden):
             face_bits[qi >> 5] |= 1 << (qi & 31)   # by array index, low bit first (see block_id)
     b.put(vis_face, '%dI' % face_words, *face_bits)
     pvs = b.alloc(0x10)

@@ -60,6 +60,7 @@ storage for the page.
 | Skip the intro | Z | Triangle |
 | Pause | Enter | Start |
 | Full screen | F11 | |
+| Copy where you are (for bug reports) | P | |
 
 A gamepad works too, with CTR's own buttons.
 

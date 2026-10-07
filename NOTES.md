@@ -34,8 +34,10 @@ the map.
   no textures = collided but never drawn (stair ramps, kill plane 0x2200).
 - blockID gives the quadblock's bit in the visibility list, retail-style: each run of 32
   quadblocks is numbered backwards (index 0 is 31), and the face list holds index i at bit
-  (i & 31). Quadblocks without textures stay out of the face list: listed, they are drawn
-  black (the stair ramps showed as black wedges).
+  (i & 31). The renderer reads the word at (blockID >> 3) & 0x1fc bytes: only 4096 quadblocks
+  have bits of their own, and quadblock i shares the bit of i mod 4096. Dust 2 has 16,000, so
+  every bit is set (clearing one to hide a stair ramp hid three other quadblocks: holes in
+  walls and floors), and collision-only quadblocks hide by their texture instead (layer 15).
 - Texture layouts: (u0v0, u1v1, u2v2, u3v3) = face corners (0,4,5,6), (4,1,6,7), (5,6,2,8),
   (6,7,8,3) with face flags 0. The "mosaic" word (layout + 0x24) is tested as a heap pointer:
   keep CLUTs >= 1024 (atlas cells start at 1).
@@ -108,7 +110,9 @@ the map.
   vertices (u16 indices).
 - Door leaves are taken out (swung open, they z-fought with the frames). The frames had faces
   only the leaves hid from behind: every triangle around a doorway gets a reversed twin, as
-  does any triangle a ray from a reachable spot hits from behind (tools/visibility.py).
+  does any triangle a ray from a reachable spot hits from behind (tools/visibility.py). The
+  arches and jambs had a slot where each leaf's edge sat (the leaf filled it): the two outlines
+  the leaf's faces left (open mesh edges) are zipped closed with the arch's texture.
 - The memory pool is 32 MiB on the web (the levels are ~7.7 MB, 16,000 quadblocks).
 - An edge at A site (CTR ~6300, -6700) is two steps (ramped, drivable) for most of its width
   and a 32-unit ledge (a wall, in Counter-Strike too) for the rest; the nav grid's 64-unit
