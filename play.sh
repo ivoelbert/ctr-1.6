@@ -78,6 +78,9 @@ if curl -s -I "$URL" 2>/dev/null | grep -qi '^x-ctr-dust2:'; then
   open_browser
   exit 0
 fi
+if curl -s -o /dev/null "$URL" 2>/dev/null; then
+  die "something else is using port $PORT: set PORT to another one"
+fi
 
 echo "Serving $URL (Ctrl-C to stop)"
 CTR_DISC="$DISC" node tools/serve.mjs "$PORT" &
