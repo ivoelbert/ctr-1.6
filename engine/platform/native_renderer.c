@@ -259,6 +259,13 @@ int NativeRenderer_InitialiseRender(char *windowName, int width, int height, int
 	SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
 
 	SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 1);
+#if defined(__EMSCRIPTEN__)
+	// NOTE(web): the screen gets VRAM's mask bit as alpha (ctr_present_vram_shader). A desktop
+	// window ignores it, but a canvas with alpha is composited with it, and the browser shows
+	// the page through every pixel without the bit (the level, the HUD). The render targets
+	// keep their own alpha; the canvas needs none.
+	SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, 0);
+#endif
 
 	if (!NativeRenderer_InitialiseGLContext(windowName, fullscreen))
 	{

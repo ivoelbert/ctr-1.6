@@ -17,6 +17,11 @@ the map.
   - `LOAD_IsCustomLevel`: overridden levels get 2.5 MB of primitive memory and a 64000-word
     clip buffer (everything is visible from everywhere, unlike retail's PVS).
 
+- The canvas has no alpha channel (`SDL_GL_ALPHA_SIZE` 0): the frame reaches the screen with
+  VRAM's mask bit as alpha, and in a real Chrome window on macOS every pixel without the bit
+  (the level, the HUD) showed the black page instead. Headless screenshots go through Chrome's
+  own compositor and looked fine, so they can't catch this: check the context attributes.
+
 ## LEV files (tools/ctrlev.py reads, tools/levwriter.py writes)
 
 - u32 data size, data (pointers as data offsets), u32 map byte count, pointer slot offsets.
@@ -88,8 +93,9 @@ the map.
 ## Left to do
 
 - Track select previews and menu maps still show Dingo Canyon's and Dragon Mines'.
-- A two-level edge at A site (CTR ~6300, -6700): its stair ramp covers the first 64 units of
-  128, so a kart can't climb it there (free drive only; the slope just east of it works).
+- An edge at A site (CTR ~6300, -6700) is two steps (ramped, drivable) for most of its width
+  and a 32-unit ledge (a wall, in Counter-Strike too) for the rest; the nav grid's 64-unit
+  cells blur the two, so a tour route can cut across the ledge.
 - Driving off-centre round both loops (`OFFSET`) and a tour of every landmark (`CONTINUE`)
   found no snags beyond real obstacles (crates, the 90-degree corner at the top of long A).
 - 2P/4P: work (tested with fake gamepads, `tools/e2e/lib.mjs`). With one gamepad, the gamepad
