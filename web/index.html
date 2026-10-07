@@ -187,6 +187,7 @@
             distToFinish: v[19], terrain: v[22], angle: v[23], jump: v[24], reserves: v[25], checkpoint: v[26],
             item: v[29], wumpa: v[30], rank: v[31] };
           s.camera = { x: v[32], y: v[33], z: v[34], quad: v[35] };
+          s.music = { flags: v[36] & 0xff, song: v[36] >> 8, time: v[37] };
         }
         return s;
       },

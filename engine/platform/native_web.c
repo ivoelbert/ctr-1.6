@@ -15,6 +15,13 @@ EM_JS(int, NativeWeb_BootValue, (int index, int fallback), {
 	return (v === undefined || v === null || Number.isNaN(Number(v))) ? fallback : (Number(v) | 0);
 });
 
+// Booting straight into a race skips the first-boot waits: the SCEA voice line and the
+// copyright page held for the Naughty Dog crate intro (MainMain, LOAD_TenStages).
+int NativeWeb_IsDirectBoot(void)
+{
+	return NativeWeb_BootValue(0, -1) >= 0;
+}
+
 void NativeWeb_ApplyBootOverride(struct GameTracker *gGT)
 {
 	const int level = NativeWeb_BootValue(0, -1);
@@ -137,6 +144,9 @@ EMSCRIPTEN_KEEPALIVE int NativeWeb_GetState(int *out)
 	out[33] = gGT->pushBuffer[0].pos.y;
 	out[34] = gGT->pushBuffer[0].pos.z;
 	out[35] = NativeWeb_QuadIndex(gGT->cameraDC[0].ptrQuadBlock);
+	// the music: song pool 0's flags (1 = playing) | song id << 8, and its play time
+	out[36] = sdata->songPool[0].flags | (sdata->songPool[0].id << 8);
+	out[37] = sdata->songPool[0].timeSpentPlaying;
 	return 40;
 }
 

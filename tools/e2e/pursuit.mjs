@@ -2,6 +2,8 @@
 // with the game, and reports how far round the kart got and where it got stuck.
 //   node tools/e2e/pursuit.mjs ROUTE.json [max frames] [look-ahead units]   OUT=trace.txt SHOT=end.png
 //   MODE=1 (Arcade) LAPS=3 NO_TELEPORT=1 (start from the grid) DUST2=free (the free-drive level)
+//   OFFSET=n (drive n units right of the route, negative: left). Reports SNAGs: the speed
+//   falling by 40% in 8 frames with the gas held (a wall or an obstacle hit).
 // Steering: CTR yaw grows when turning left; forward is (sin, cos) of yaw in (x, z).
 import fs from 'node:fs';
 import { launch } from './lib.mjs';
@@ -13,6 +15,16 @@ const route = JSON.parse(fs.readFileSync(routeFile, 'utf8'));
 const laps = Number(process.env.LAPS ?? 1);
 let path = [];
 for (let l = 0; l < laps; l++) path = path.concat(route.path.map(([x, y, z]) => [x, y, z]));
+// OFFSET=n drives n units to the right of the route (negative: left), to rub along walls
+const offset = Number(process.env.OFFSET ?? 0);
+if (offset) {
+  path = path.map(([x, y, z], i) => {
+    const a = path[Math.max(0, i - 3)], b = path[Math.min(path.length - 1, i + 3)];
+    const dx = b[0] - a[0], dz = b[2] - a[2], len = Math.hypot(dx, dz) || 1;
+    // right of heading (dx, dz) in CTR's x/z: (-dz, dx) is left when yaw grows to the left
+    return [x + (dz / len) * offset, y, z - (dx / len) * offset];
+  });
+}
 // and on past the line, so the last lap counts
 if (process.env.LAPS) path = path.concat(route.path.slice(1, 40));
 const noTeleport = process.env.NO_TELEPORT === '1';
@@ -90,6 +102,14 @@ await page.evaluate((path, maxFrames, lookahead, noTeleport) => {
     let turn = 0;
     if (far - ahead >= 2 && ahead - idx >= 2) {
       turn = Math.abs(wrap(((heading(ahead, far) - heading(idx, ahead)) / (2 * Math.PI)) * TAU));
+    }
+    // snags: speed falling by more than 40% in a few frames with the gas held
+    const hist = (window.__speeds = window.__speeds || []);
+    hist.push(k.speed);
+    if (hist.length > 8) hist.shift();
+    if (hist.length === 8 && hist[0] > 4000 && k.speed < hist[0] * 0.6 && (window.__lastSnag ?? -999) < t - 60) {
+      window.__lastSnag = t;
+      window.__events.push(`t=${t} SNAG ${hist[0]}->${k.speed} at ${k.x | 0},${k.y | 0},${k.z | 0} touching ${k.touching} quad ${k.quad}`);
     }
     const sharp = Math.abs(diff);
     const target = turn > 900 ? 4000 : turn > 600 ? 5500 : turn > 300 ? 7500 : 20000;

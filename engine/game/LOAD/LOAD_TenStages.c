@@ -95,7 +95,12 @@ int LOAD_TenStages(struct GameTracker *unusedGameTracker, int loadingStage, stru
 			// the point retail normally reaches while loading the ND crate.
 			// Present every wait tick so both host swapchain images are
 			// overwritten with copyright instead of briefly revealing SCEA.
-			while (((sdata->songPool[0].flags & 3) == 1) && (sdata->songPool[0].timeSpentPlaying < LOAD_NATIVE_NDBOX_INTRO_SONG_SYNC_TIME))
+			// NOTE(web): no Naughty Dog crate to sync with on a direct boot into a race.
+			while (((sdata->songPool[0].flags & 3) == 1) && (sdata->songPool[0].timeSpentPlaying < LOAD_NATIVE_NDBOX_INTRO_SONG_SYNC_TIME)
+#if defined(__EMSCRIPTEN__)
+			       && (NativeWeb_IsDirectBoot() == 0)
+#endif
+			)
 			{
 				VSync(0);
 				Platform_PresentVRAMDisplay();

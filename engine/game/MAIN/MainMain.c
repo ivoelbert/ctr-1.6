@@ -655,6 +655,10 @@ void StateZero()
 	Music_Start(0);
 
 	// "Start your engines, for Sony Computer..."
+#if defined(__EMSCRIPTEN__)
+	// NOTE(web): a direct boot into a race goes straight to loading it.
+	if (NativeWeb_IsDirectBoot() == 0)
+#endif
 	CDSYS_XAPlay(CDSYS_XA_TYPE_EXTRA, 0x50);
 
 	while (sdata->XA_State != 0)
