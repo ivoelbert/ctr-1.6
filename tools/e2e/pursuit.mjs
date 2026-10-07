@@ -1,6 +1,7 @@
 // Drives a planned route (tools/route.py's json: a dense CTR path) by pure pursuit, in step
 // with the game, and reports how far round the kart got and where it got stuck.
 //   node tools/e2e/pursuit.mjs ROUTE.json [max frames] [look-ahead units]   OUT=trace.txt SHOT=end.png
+//   MODE=1 (Arcade) LAPS=3 NO_TELEPORT=1 (start from the grid) DUST2=free (the free-drive level)
 // Steering: CTR yaw grows when turning left; forward is (sin, cos) of yaw in (x, z).
 import fs from 'node:fs';
 import { launch } from './lib.mjs';
@@ -17,7 +18,7 @@ if (process.env.LAPS) path = path.concat(route.path.slice(1, 40));
 const noTeleport = process.env.NO_TELEPORT === '1';
 
 const mode = Number(process.env.MODE ?? 0);
-const { browser, page } = await launch({ query: `?level=0&mode=${mode}&dust2=1`, log: !!process.env.LOG });
+const { browser, page } = await launch({ query: `?level=0&mode=${mode}&dust2=${process.env.DUST2 ?? 1}`, log: !!process.env.LOG });
 await page.waitForFunction(() => window.ctr && Module._NativeWeb_GetState, { timeout: 120000 });
 if (process.env.SHOTS_DIR) await page.evaluate(() => { window.__noTurbo = true; });
 await page.evaluate((path, maxFrames, lookahead, noTeleport) => {

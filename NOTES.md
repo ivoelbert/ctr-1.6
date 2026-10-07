@@ -49,8 +49,13 @@ the map.
 - Model: "De_Dust 2 with real light" (Neo_minigan, CC-BY-4.0): 9061 triangles in Hammer
   units, 11 baked 1024^2 atlases. Hammer (x, y, z) -> CTR 4 * (x + 320, z, -(y - 1120)).
 - Stairs get invisible ramps (tools/stairs.py); mid doors and long doors swing open.
-- The race loop circles the block between T ramp and mid (T spawn is a dead end in Dust 2):
-  outside long, long doors, long A, CT ramp, CT spawn, mid doors, mid. 36034 units.
+- Two race loops (`LOOPS`), both starting on long A heading north: round the block between T
+  ramp and mid (outside long, long doors, long A, CT ramp, CT spawn, mid doors, mid; 36034
+  units), and the long way round (long A, CT spawn, B doors, B site, upper tunnels, T spawn,
+  outside long; 52036 units). Each is its own LEV (dust2.lev, dust2_b.lev); the page loads
+  the chosen one into Dingo Canyon's slot and renames it.
+- Floors near a loop that the nav grid doesn't reach take the nearest route point's checkpoint
+  (`ROUTE_REACH`); pickups without floor at their spot take the nearest drivable one.
 - Grafted onto Dingo Canyon (entry 1): its models, skybox, textures; 16 crates, 16 fruit.
 
 ## Tools
@@ -62,6 +67,6 @@ the map.
 
 ## Left to do
 
-- Launcher page + play script; release build; track name; minimap.
+- Minimap; the tunnels loop in the CTR menus too (another slot, with Dingo Canyon's VRM).
 - Black (unbaked) faces; kart lighting from the baked light; wall snags.
-- Free-roam variant without checkpoints; 2P/4P check.
+- 2P/4P check.

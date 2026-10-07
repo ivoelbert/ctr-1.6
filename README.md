@@ -31,9 +31,13 @@ fruit, start banner and skybox), so keep it to yourself.
 
 The launcher has four modes:
 
-- **Race**: an Arcade race against seven CTR racers, with weapon crates and wumpa fruit, round
-  a loop: outside long, long doors, long A, CT ramp, CT spawn, mid doors, mid.
-- **Time Trial**: the same loop alone against the clock.
+- **Race**: an Arcade race against seven CTR racers, with weapon crates and wumpa fruit, on
+  one of two loops, both starting on long A:
+  - *Long A and mid* (Dust 2, ~33 s laps): long A, CT ramp, CT spawn, mid doors, mid, outside
+    long, long doors;
+  - *The long way* (Dust 2 Tunnels, ~47 s laps): long A, CT spawn, B doors, B site, the upper
+    tunnels, T spawn, outside long, long doors.
+- **Time Trial**: either loop alone against the clock.
 - **Free drive**: the whole map without laps (A site, B, the tunnels, T spawn).
 - **CTR menus**: the whole game from its title screen, with Dust 2 in Dingo Canyon's place.
 
@@ -64,7 +68,8 @@ node tools/serve.mjs                                            # http://localho
 ```
 
 `?dust2&level=0&mode=1` boots straight into a race on Dust 2 (`mode=0` Time Trial,
-`dust2=free` free drive, `character=N`, `laps=N`); without `dust2`, `level=N` is any CTR track
+`dust2=b` the tunnels loop, `dust2=free` free drive, `character=N`, `laps=N`); without
+`dust2`, `level=N` is any CTR track
 (`enum LevelID` in `engine/include/namespace_Level.h`). `tools/e2e/` drives the game headless
 (see its scripts' headers) and `NOTES.md` has what was learned on the way.
 

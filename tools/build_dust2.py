@@ -7,9 +7,12 @@ keeps that track's models -- weapon crates, wumpa fruit, the start banner -- its
 its textures), so the output contains data from your disc. Never share it.
 
 Writes
-  OUTDIR/dust2.lev        the level (a CTR LEV file, see levwriter.py)
+  OUTDIR/dust2.lev        a race round long A and mid (a CTR LEV file, see levwriter.py)
+  OUTDIR/dust2_b.lev      a race the long way round, through B site and the tunnels
+  OUTDIR/dust2_free.lev   the map with no laps, checkpoints everywhere
+  OUTDIR/*_route.json     each race loop as a dense path, its checkpoints and AI lines (tests)
   OUTDIR/dust2_atlas.jpg  the model's textures in one image, sampled through tpage mode 3
-  OUTDIR/dust2.json       numbers the page and the tests use (scale, spawn, atlas size)
+  OUTDIR/dust2.json       numbers the page and the tests use (scale, spawn, atlas size, tracks)
 
 The model is in Hammer units (x east, y north, z up). CTR is right-handed with y up (a kart
 facing -z turns left toward -x), so a Hammer point (x, y, z) goes to SCALE * (x - cx, z, -(y - cy)).
@@ -518,21 +521,25 @@ def add_stair_ramps(tris, out):
     print(f'{len(stairs)} staircases and steps get ramps ({sum(len(s) for s in stairs)} risers)')
 
 
-# Starts on long A (the widest straight), heading north
-RACE_ROUTE = ['long_start', 'long_top', 'ct_spawn', 'mid_doors', 'mid_top', 'mid_bottom', 'mid_exit', 'race_start',
-              'ring_bottom_e', 'ring_east', 'long_doors', 'long_corner', 'long_bottom', 'long_start']
+# The race loops, through landmarks. Both start on long A (the widest straight), heading north.
+LOOPS = {
+    # round the block between T ramp and mid: long A, CT spawn, mid doors, mid, outside long
+    'dust2': ['long_start', 'long_top', 'ct_spawn', 'mid_doors', 'mid_top', 'mid_bottom', 'mid_exit', 'race_start',
+              'ring_bottom_e', 'ring_east', 'long_doors', 'long_corner', 'long_bottom', 'long_start'],
+    # the long way round: long A, CT spawn, B doors, B site, the tunnels, T spawn, outside long
+    'dust2_b': ['long_start', 'long_top', 'ct_spawn', 'b_halls', 'b_site', 'upper_tunnels', 't_to_tunnels', 'start',
+                'ring_bottom', 'ring_east', 'long_doors', 'long_corner', 'long_bottom', 'long_start'],
+}
 NODE_SPACING = 800.0     # checkpoint nodes along the route, CTR units
 ROUTE_RADIUS = 14        # grid cells (64 units) around the route that count as on the track
 ROUTE_REACH = 720.0      # and floors this close to it (xz distance + height difference), CTR units
 FLAG_KILL_PLANE = 0x0200
 
 
-def plan_route(out, landmarks):
-    """Plans the race loop on a nav grid of the level: dense CTR points from start back to start."""
-    from navgrid import NavGrid
-    g = NavGrid([(q.flags, q.pos, q.triangle) for q in out])
+def plan_route(g, landmarks, names):
+    """Plans a race loop on the level's nav grid: dense CTR points from start back to start."""
     nodes = []
-    for a, b in zip(RACE_ROUTE, RACE_ROUTE[1:]):
+    for a, b in zip(names, names[1:]):
         la, lb = landmarks[a], landmarks[b]
         na = g.nearest(la[0], la[1] or 0, la[2])
         nb = g.nearest(lb[0], lb[1] or 0, lb[2])
@@ -540,13 +547,15 @@ def plan_route(out, landmarks):
         if p is None:
             raise SystemExit(f'no route {a} -> {b}')
         nodes.extend(p if not nodes else p[1:])
-    return g, nodes
+    return nodes
 
 
-def race_setup(out, landmarks):
-    """Checkpoint nodes along the race loop, each floor quadblock's checkpoint, and the start grid."""
+def race_setup(out, g, landmarks, names):
+    """Checkpoint nodes along a race loop, each floor quadblock's checkpoint, and the start grid."""
     from navgrid import route_cells
-    g, path_nodes = plan_route(out, landmarks)
+    for q in out:
+        q.checkpoint = 0xFF
+    path_nodes = plan_route(g, landmarks, names)
     pts = np.array([g.pos[n] for n in path_nodes], dtype=float)
     seg = np.linalg.norm(np.diff(pts[:, [0, 2]], axis=0), axis=1)
     arc = np.concatenate([[0.0], np.cumsum(seg)])
@@ -606,7 +615,7 @@ def race_setup(out, landmarks):
           f'{len(nav)} AI paths of {len(nav[0])} frames')
     route = dict(length=L, path=pts.tolist(), nodes=[n.pos for n in nodes],
                  ai=[[f['pos'] for f in path] for path in nav])
-    return nodes, spawns, route, nav, g
+    return nodes, spawns, route, nav
 
 
 NAV_SPACING = 400.0   # AI path frames, CTR units (retail tracks: ~150-700)
@@ -851,6 +860,7 @@ def place_pickups(route, g, by_model):
 
 
 def main(glb, disc, outdir):
+    from navgrid import NavGrid
     os.makedirs(outdir, exist_ok=True)
     tris, imgs = load(glb)
     out = []
@@ -863,31 +873,43 @@ def main(glb, disc, outdir):
     print(f'{len(out)} quadblocks')
 
     landmarks = landmark_positions(tris)
-    nodes, spawns, route, nav, g = race_setup(out, landmarks)
+    g = NavGrid([(q.flags, q.pos, q.triangle) for q in out])
     kill_plane(out)
     base, big = base_level(disc)
-    pickups = place_pickups(route, g, base_instances(base))
-    print(f'{len(pickups)} pickups placed')
-    names = {i: n for n, ids in base_instances(base).items() for i in ids}
+    by_model = base_instances(base)
+    names = {i: n for n, ids in by_model.items() for i in ids}
     hitbox_of = {'crate_question': (76, 48), 'crate_fruit': (76, 48), 'fruit': (64, 64)}
-    hitboxes = []
-    for k, pk in enumerate(pickups):
-        kind = names.get(pk['src'])
-        if kind in hitbox_of:
-            r, lift = hitbox_of[kind]
-            hitboxes.append(dict(inst=k, radius=r, lift=lift, flags=0x4C0))
+    tracks = {}
+    first = None
+    for name, stops in LOOPS.items():
+        print(f'{name}:')
+        nodes, spawns, route, nav = race_setup(out, g, landmarks, stops)
+        pickups = place_pickups(route, g, by_model)
+        print(f'{len(pickups)} pickups placed')
+        hitboxes = []
+        for k, pk in enumerate(pickups):
+            kind = names.get(pk['src'])
+            if kind in hitbox_of:
+                r, lift = hitbox_of[kind]
+                hitboxes.append(dict(inst=k, radius=r, lift=lift, flags=0x4C0))
+        lv = Level(quads=out, nodes=nodes, spawns=spawns,
+                   clear_colors=[(170, 190, 220, 1), (230, 200, 160, 1), (200, 210, 230, 1)],
+                   build_name='de_dust2', nav_paths=nav, base=base, instances=pickups, hitboxes=hitboxes,
+                   flyin=base_flyin(base))
+        data, info = write_level(lv)
+        data += b'\0' * ((-len(data)) % 2048)
+        with open(os.path.join(outdir, f'{name}.lev'), 'wb') as f:
+            f.write(data)
+        with open(os.path.join(outdir, f'{name}_route.json'), 'w') as f:
+            json.dump(route, f)
+        tracks[name] = dict(lev=f'{name}.lev', route=f'{name}_route.json', length=route['length'],
+                            spawn=spawns[0], stops=stops)
+        print(info, 'bytes', len(data))
+        if first is None:
+            first = (lv, spawns, info, len(data))
 
-    lv = Level(quads=out, nodes=nodes, spawns=spawns,
-               clear_colors=[(170, 190, 220, 1), (230, 200, 160, 1), (200, 210, 230, 1)],
-               build_name='de_dust2', nav_paths=nav, base=base, instances=pickups, hitboxes=hitboxes,
-               flyin=base_flyin(base))
-    data, info = write_level(lv)
-    data += b'\0' * ((-len(data)) % 2048)
-    with open(os.path.join(outdir, 'dust2.lev'), 'wb') as f:
-        f.write(data)
-
-    # free drive: the same level with checkpoints everywhere and no laps
-    race_checkpoints = [q.checkpoint for q in out]
+    # free drive: the first loop's level with checkpoints everywhere and no laps
+    lv, spawns, info, size_bytes = first
     free_nodes, free_cp = free_setup(out, g)
     for qi, q in enumerate(out):
         q.checkpoint = free_cp.get(qi, 0xFF)
@@ -896,16 +918,11 @@ def main(glb, disc, outdir):
     free += b'\0' * ((-len(free)) % 2048)
     with open(os.path.join(outdir, 'dust2_free.lev'), 'wb') as f:
         f.write(free)
-    for q, c in zip(out, race_checkpoints):
-        q.checkpoint = c
     size = build_atlas(imgs, os.path.join(outdir, 'dust2_atlas.jpg'))
     meta = dict(scale=SCALE, center=CENTER, atlas=dict(image='dust2_atlas.jpg', width=size[0], height=size[1]),
-                spawn=spawns[0], info=info, bytes=len(data), landmarks=landmarks)
-    with open(os.path.join(outdir, 'dust2_route.json'), 'w') as f:
-        json.dump(route, f)
+                spawn=spawns[0], info=info, bytes=size_bytes, landmarks=landmarks, tracks=tracks)
     with open(os.path.join(outdir, 'dust2.json'), 'w') as f:
         json.dump(meta, f, indent=1)
-    print(info, 'bytes', len(data))
 
 
 if __name__ == '__main__':

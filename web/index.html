@@ -64,7 +64,8 @@
   <div class="wrap">
     <h1>Crash Team Racing <span class="x">×</span> de_dust2</h1>
     <p class="sub">CTR's own driving, AI and weapons (the decompiled game, running in your browser) on
-      Counter-Strike's Dust 2: outside long, long doors, long A, CT, mid doors and mid.</p>
+      Counter-Strike's Dust 2: two race loops through long doors, long A, CT spawn, mid, B site and
+      the tunnels, or the whole map to drive round.</p>
     <p id="nojspi" hidden>This browser can't run the game: it needs WebAssembly JSPI, which Chrome and
       Edge have had since version 137. Open this page in one of those.</p>
     <div class="grid">
@@ -85,6 +86,12 @@
               <option value="9">Papu Papu</option><option value="10">Ripper Roo</option><option value="11">Komodo Joe</option>
               <option value="12">N. Tropy</option><option value="13">Penta Penguin</option><option value="14">Fake Crash</option>
               <option value="15">Nitros Oxide</option>
+            </select>
+          </label>
+          <label id="trackBox">Track
+            <select id="track">
+              <option value="dust2">Long A and mid</option>
+              <option value="dust2_b">The long way: B site and tunnels</option>
             </select>
           </label>
           <label id="lapsBox">Laps
@@ -185,6 +192,7 @@
   // Dust 2 takes Dingo Canyon's slot (level 0): its LEV replaces the 1P, 2P, 4P and
   // Time Trial/Relic files (BIGFILE entries 1, 3, 5, 7), and its textures go in the atlas
   // the renderer samples for tpage mode 3 ("CTRA", width, height, RGBA).
+  const TRACK_NAMES = { dust2: 'DUST 2', dust2_b: 'DUST 2 TUNNELS', dust2_free: 'DUST 2' };
   async function loadDust2(levName) {
     const base = params.get('dust2dir') || 'lev/';
     const meta = await (await fetch(base + 'dust2.json', { cache: 'no-store' })).json();
@@ -205,7 +213,7 @@
     file.set(pixels, 12);
     Module.FS.mkdirTree('/assets/dust2');
     Module.FS.writeFile('/assets/dust2/atlas.rgba', file);
-    Module.ctrRename = { 0: 'DUST 2' };
+    Module.ctrRename = { 0: TRACK_NAMES[levName.replace(/\.lev$/, '')] || 'DUST 2' };
     window.ctrDust2 = meta;
   }
 
@@ -228,7 +236,7 @@
     onRuntimeInitialized() { runtimeReady(); },
   };
 
-  // choice: { dust2: 'dust2.lev' | 'dust2_free.lev' | null, boot: {level, mode, character, laps} | null }
+  // choice: { dust2: 'dust2.lev' | 'dust2_b.lev' | 'dust2_free.lev' | null, boot: {level, mode, character, laps} | null }
   async function start(choice, discFile) {
     await runtimeReadyPromise;
     const disc = await loadDisc(discFile);
@@ -253,7 +261,7 @@
   // The engine suspends its game loop at each VBlank wait through JSPI.
   const hasJspi = typeof WebAssembly.Suspending === 'function' && typeof WebAssembly.promising === 'function';
 
-  // ?level=N&mode=0|1|2&character=N&laps=N[&dust2[=free]] boots straight away (tests, links);
+  // ?level=N&mode=0|1|2&character=N&laps=N[&dust2[=b|free]] boots straight away (tests, links);
   // with no parameters the launcher asks.
   if (!hasJspi) {
     launcher.hidden = false;
@@ -264,19 +272,22 @@
       level: Number(params.get('level')), mode: Number(params.get('mode') ?? 0),
       character: Number(params.get('character') ?? 0), laps: Number(params.get('laps') ?? 3),
     } : null;
-    const dust2 = params.has('dust2') ? (params.get('dust2') === 'free' ? 'dust2_free.lev' : 'dust2.lev') : null;
+    const which = params.get('dust2');
+    const dust2 = params.has('dust2') ? ({ free: 'dust2_free.lev', b: 'dust2_b.lev' }[which] || 'dust2.lev') : null;
     start({ dust2, boot }).catch((e) => { say(String(e)); console.error(e); });
   } else {
     launcher.hidden = false;
     let mode = 'race';
     const modes = document.getElementById('modes');
     const lapsBox = document.getElementById('lapsBox');
+    const trackBox = document.getElementById('trackBox');
     modes.addEventListener('click', (e) => {
       const b = e.target.closest('.mode');
       if (!b) return;
       mode = b.dataset.mode;
       for (const m of modes.children) m.setAttribute('aria-pressed', String(m === b));
       lapsBox.style.visibility = (mode === 'race' || mode === 'tt') ? 'visible' : 'hidden';
+      trackBox.style.visibility = lapsBox.style.visibility;
     });
     // the disc is served by tools/serve.mjs; if it isn't, ask for it
     fetch('game-data/ctr-u.bin', { method: 'HEAD' }).then((r) => {
@@ -285,10 +296,11 @@
     document.getElementById('go').addEventListener('click', () => {
       const character = Number(document.getElementById('character').value);
       const laps = Number(document.getElementById('laps').value);
+      const track = document.getElementById('track').value + '.lev';
       const discFile = document.getElementById('discfile').files[0] || null;
       const boots = {
-        race: { dust2: 'dust2.lev', boot: { level: 0, mode: 1, character, laps } },
-        tt: { dust2: 'dust2.lev', boot: { level: 0, mode: 0, character, laps } },
+        race: { dust2: track, boot: { level: 0, mode: 1, character, laps } },
+        tt: { dust2: track, boot: { level: 0, mode: 0, character, laps } },
         free: { dust2: 'dust2_free.lev', boot: { level: 0, mode: 0, character, laps: 99 } },
         menus: { dust2: 'dust2.lev', boot: null },
       };
