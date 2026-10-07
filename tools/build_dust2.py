@@ -24,6 +24,7 @@ import io
 import json
 import math
 import os
+import struct
 import sys
 
 import numpy as np
@@ -860,6 +861,7 @@ MODES = [('', 1), ('_2p', 3), ('_4p', 5), ('_tt', 7)]
 
 
 def base_levels(disc):
+    """Dingo Canyon's level and texture (VRM) files for each mode, by level entry."""
     from psxiso import Disc
     from bigfile import Bigfile
     from ctrlev import Lev
@@ -870,7 +872,119 @@ def base_levels(disc):
             big = Bigfile(d.read(lba, size))
     if big is None:
         raise SystemExit('no BIGFILE.BIG on the disc')
-    return {entry: Lev(big.get(entry)) for _, entry in MODES}
+    return {entry: Lev(big.get(entry)) for _, entry in MODES}, {entry: big.get(entry - 1) for _, entry in MODES}
+
+
+# The minimap: CTR draws a track's map as two 80 x 40 halves that share one 4-bit image, each
+# half through its own palette (the top half shows the high two bits of each texel, the bottom
+# half the low two), additively blended. Dust 2's palettes: clear, opaque white (the loop), an
+# added grey (edges) and an opaque dark slate (the floors, like Counter-Strike's radar). Racer
+# icons go at icon start + world position * icon size / world range (UI_Map_GetIconPos); the
+# image sits with its bottom-right corner at (500, 195) on the 512 x 240 screen.
+MAP_SIZE = 80
+MAP_SCREEN = (420, 115)    # its top-left corner on screen
+MAP_CLEAR, MAP_WHITE, MAP_EDGE, MAP_FLOOR = 0, 1, 2, 3
+MAP_COLORS = (0x0000, 0x7FFF, 0xA108, 0x1CC6)   # 15-bit BGR; 0x8000 = blended
+
+
+def minimap_window(out, margin=0.03):
+    """A square of the world (x0, z0, side) around everything drivable."""
+    pts = np.array([p for q in out if q.flags & FLAG_GROUND and not q.flags & FLAG_KILL_PLANE for p in q.pos], dtype=float)
+    x0, x1 = pts[:, 0].min(), pts[:, 0].max()
+    z0, z1 = pts[:, 2].min(), pts[:, 2].max()
+    side = max(x1 - x0, z1 - z0) * (1 + 2 * margin)
+    return ((x0 + x1) / 2 - side / 2, (z0 + z1) / 2 - side / 2, side)
+
+
+def minimap_placement(window):
+    """struct UIMap (+ topHalfMode) for a window, north up (mode 0: x right, z down)."""
+    x0, z0, side = window
+    rng = int(round(side))
+    start_x = int(round(MAP_SCREEN[0] - x0 * MAP_SIZE / rng))
+    start_y = int(round(MAP_SCREEN[1] - z0 * MAP_SIZE / rng)) + 16
+    return (int(x0) + rng, int(z0) + rng, int(x0), int(z0), MAP_SIZE, MAP_SIZE // 2, start_x, start_y, 0, 0)
+
+
+def minimap_image(out, window, route=None, scale=4):
+    """The map: floors in slate, a race loop over them in white."""
+    from PIL import ImageDraw
+    x0, z0, side = window
+    n = MAP_SIZE * scale
+    k = n / side
+    floor = Image.new('L', (n, n), 0)
+    d = ImageDraw.Draw(floor)
+    for q in out:
+        if not q.flags & FLAG_GROUND or q.flags & FLAG_KILL_PLANE:
+            continue
+        ring = [q.pos[i] for i in ((0, 1, 2) if q.triangle else (0, 1, 3, 2))]
+        d.polygon([((p[0] - x0) * k, (p[2] - z0) * k) for p in ring], fill=255)
+    cover = np.asarray(floor.resize((MAP_SIZE, MAP_SIZE), Image.BOX), dtype=np.float32) / 255
+    img = np.full((MAP_SIZE, MAP_SIZE), MAP_CLEAR, dtype=np.uint8)
+    img[cover > 0.4] = MAP_FLOOR
+    img[(cover > 0.15) & (cover <= 0.4)] = MAP_EDGE
+    if route is None:
+        return img
+    line = Image.new('L', (n, n), 0)
+    pts = [((p[0] - x0) * k, (p[2] - z0) * k) for p in route]
+    ImageDraw.Draw(line).line(pts + [pts[0]], fill=255, width=int(2.2 * scale), joint='curve')
+    lc = np.asarray(line.resize((MAP_SIZE, MAP_SIZE), Image.BOX), dtype=np.float32) / 255
+    img[lc > 0.35] = MAP_WHITE
+    return img
+
+
+def map_icon(base):
+    """Where a base level's map is in VRAM: (page x, page y, u, v, width, height, the top
+    half's palette x, y, the bottom half's palette x, y)."""
+    h = base.header()
+    ltl = h['levTexLookup']
+    icons = base.u32(ltl + 4)
+    found = {}
+    for i in range(base.u32(ltl)):
+        o = icons + 0x20 * i
+        found[base.data[o:o + 16].split(b'\0')[0]] = struct.unpack_from('<BBHBBHBB', base.data, o + 20)
+    if b'map-proto8-01' not in found or b'map-proto8-02' not in found:
+        raise SystemExit('the base level has no minimap')
+    u0, v0, clut, u1, v1, tpage, u2, v2 = found[b'map-proto8-01']
+    clut2 = found[b'map-proto8-02'][2]
+    return ((tpage & 0xF) * 64, ((tpage >> 4) & 1) * 256, u0, v0, u1 - u0 + 1, v2 - v0 + 1,
+            (clut & 0x3F) * 16, clut >> 6, (clut2 & 0x3F) * 16, clut2 >> 6)
+
+
+def patch_vrm(vrm, icon, img):
+    """A copy of a VRM (16-bit VRAM blocks) with the 4-bit map texels redrawn from img."""
+    page_x, page_y, u0, v0, w, h, top_x, top_y, bottom_x, bottom_y = icon
+    assert (w, h) == (MAP_SIZE, MAP_SIZE // 2), (w, h)
+    out = bytearray(vrm)
+    blocks = []
+    o = 4
+    while o + 4 <= len(out):
+        size = struct.unpack_from('<I', out, o)[0]
+        if size == 0:
+            break
+        _, bx, by, bw, bh = struct.unpack_from('<IHHHH', out, o + 4 + 8)
+        blocks.append((o + 4 + 8 + 12, bx, by, bw, bh))
+        o += 4 + size
+
+    def put(x, y, word):
+        for data, bx, by, bw, bh in blocks:
+            if bx <= x < bx + bw and by <= y < by + bh:
+                struct.pack_into('<H', out, data + 2 * ((y - by) * bw + (x - bx)), word)
+                return
+        raise SystemExit(f'VRAM {x},{y} is in no block of the VRM')
+
+    for i in range(16):
+        put(top_x + i, top_y, MAP_COLORS[i >> 2])
+        put(bottom_x + i, bottom_y, MAP_COLORS[i & 3])
+    texels = (img[:h].astype(np.uint16) << 2) | img[h:]
+    for row in range(h):
+        y = page_y + v0 + row
+        for col in range(0, w, 4):
+            x = page_x + (u0 + col) // 4
+            word = 0
+            for j in range(4):
+                word |= int(texels[row, col + j]) << (4 * ((u0 + col + j) % 4))
+            put(x, y, word)
+    return bytes(out)
 
 
 def base_flyin(lev):
@@ -999,12 +1113,16 @@ def place_pickups(route, g, by_model):
     return out
 
 
-def write_modes(outdir, name, out, nodes, spawns, nav, route, g, bases):
-    """The track as one LEV per mode, each grafted onto that mode's Dingo Canyon level."""
+def write_modes(outdir, name, out, nodes, spawns, nav, route, g, bases, vrms, minimap):
+    """The track as one LEV per mode, each grafted onto that mode's Dingo Canyon level, and that
+    mode's texture file with the track's minimap drawn in."""
     hitbox_of = {'crate_question': (76, 48), 'crate_fruit': (76, 48), 'fruit': (64, 64)}
+    window, map_img = minimap
     info = None
     for suffix, entry in MODES:
         base = bases[entry]
+        with open(os.path.join(outdir, f'{name}{suffix}.vrm'), 'wb') as f:
+            f.write(patch_vrm(vrms[entry], map_icon(base), map_img))
         by_model = base_instances(base)
         names = {i: n for n, ids in by_model.items() for i in ids}
         pickups = place_pickups(route, g, by_model)
@@ -1017,7 +1135,7 @@ def write_modes(outdir, name, out, nodes, spawns, nav, route, g, bases):
         lv = Level(quads=out, nodes=nodes, spawns=spawns,
                    clear_colors=[(170, 190, 220, 1), (230, 200, 160, 1), (200, 210, 230, 1)],
                    build_name='de_dust2', nav_paths=nav, base=base, instances=pickups, hitboxes=hitboxes,
-                   flyin=base_flyin(base))
+                   flyin=base_flyin(base), minimap=minimap_placement(window))
         data, mode_info = write_level(lv)
         data += b'\0' * ((-len(data)) % 2048)
         with open(os.path.join(outdir, f'{name}{suffix}.lev'), 'wb') as f:
@@ -1047,13 +1165,15 @@ def main(glb, disc, outdir):
     landmarks = landmark_positions(tris)
     g = NavGrid([(q.flags, q.pos, q.triangle) for q in out])
     kill_plane(out)
-    bases = base_levels(disc)
+    bases, vrms = base_levels(disc)
+    window = minimap_window(out)
     tracks = {}
     first = None
     for name, stops in LOOPS.items():
         print(f'{name}:')
         nodes, spawns, route, nav = race_setup(out, g, landmarks, stops)
-        info = write_modes(outdir, name, out, nodes, spawns, nav, route, g, bases)
+        map_img = minimap_image(out, window, route['path'])
+        info = write_modes(outdir, name, out, nodes, spawns, nav, route, g, bases, vrms, (window, map_img))
         with open(os.path.join(outdir, f'{name}_route.json'), 'w') as f:
             json.dump(route, f)
         tracks[name] = dict(lev=f'{name}.lev', route=f'{name}_route.json', length=route['length'],
@@ -1068,7 +1188,8 @@ def main(glb, disc, outdir):
     free_nodes, free_cp = free_setup(out, g)
     for qi, q in enumerate(out):
         q.checkpoint = free_cp.get(qi, 0xFF)
-    write_modes(outdir, 'dust2_free', out, free_nodes, spawns, nav, route, g, bases)
+    write_modes(outdir, 'dust2_free', out, free_nodes, spawns, nav, route, g, bases, vrms,
+                (window, minimap_image(out, window)))
     size = build_atlas(imgs, os.path.join(outdir, 'dust2_atlas.jpg'))
     meta = dict(scale=SCALE, center=CENTER, atlas=dict(image='dust2_atlas.jpg', width=size[0], height=size[1]),
                 spawn=spawns[0], info=info, landmarks=landmarks, tracks=tracks,

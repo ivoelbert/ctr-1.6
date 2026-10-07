@@ -41,6 +41,11 @@ the map.
   loading the 1P VRM everywhere fixed those but broke the 2P HUD's fruit.)
 - Instances draw only if their flags have the bit for the player count (`sdata->LOD`: 1P 1,
   2P 2, 3-4P 4, relic 8).
+- The minimap: SpawnType1 slot 0 is a struct UIMap (world range, icon size and start, rotation)
+  and the image is two global icons ('map-proto8-01'/'-02') that share one 80x40 4-bit image
+  in the mode's VRM, each half through its own palette (high/low two bits of a texel). A VRM
+  is two raw 16-bit VRAM blocks, so build_dust2 redraws the texels and palettes (slate
+  floors, the loop in white) in a copy of each mode's VRM; the page loads those too.
 - Laps: distToFinish (x8) must exceed 32000 at the line; a lap counts when it jumps from
   < 1200 to > 32000. Checkpoint indices are u8 (255 = none). Mask grab fires on GROUND
   quadblocks that jump more than a quarter lap ahead of the last valid one.
@@ -81,7 +86,7 @@ the map.
 
 ## Left to do
 
-- Minimap; the tunnels loop in the CTR menus too (another slot, with Dingo Canyon's VRM).
+- The tunnels loop in the CTR menus too (another slot, with Dingo Canyon's VRMs).
 - Wall snags.
 - 2P/4P: work (tested with fake gamepads, `tools/e2e/lib.mjs`). With one gamepad, the gamepad
   is player 1 and the keyboard player 2.

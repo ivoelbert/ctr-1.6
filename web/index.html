@@ -200,17 +200,21 @@
 
   // Dust 2 takes Dingo Canyon's slot (level 0): its LEVs replace the 1P, 2P, 4P and
   // Time Trial/Relic files (BIGFILE entries 1, 3, 5, 7; each is grafted onto the one it
-  // replaces, to match that mode's textures), and the model's textures go in the atlas the
-  // renderer samples for tpage mode 3 ("CTRA", width, height, RGBA).
+  // replaces, to match that mode's textures), its VRMs (those textures, with a Dust 2
+  // minimap) entries 0, 2, 4, 6, and the model's textures go in the atlas the renderer
+  // samples for tpage mode 3 ("CTRA", width, height, RGBA).
   const TRACK_NAMES = { dust2: 'DUST 2', dust2_b: 'DUST 2 TUNNELS', dust2_free: 'DUST 2' };
   async function loadDust2(levName) {
     const base = params.get('dust2dir') || 'lev/';
     const meta = await (await fetch(base + 'dust2.json', { cache: 'no-store' })).json();
     const name = levName.replace(/\.lev$/, '');
     Module.FS.mkdirTree('/assets/override');
-    for (const [suffix, entry] of [['', '001'], ['_2p', '003'], ['_4p', '005'], ['_tt', '007']]) {
+    for (const [suffix, entry] of [['', 1], ['_2p', 3], ['_4p', 5], ['_tt', 7]]) {
+      // each mode's level, and its textures with the Dust 2 minimap drawn in (entry before)
       const lev = await fetchWithProgress(`${base}${name}${suffix}.lev`, 'Dust 2');
-      Module.FS.writeFile(`/assets/override/${entry}.bin`, lev);
+      Module.FS.writeFile(`/assets/override/${String(entry).padStart(3, '0')}.bin`, lev);
+      const vrm = await fetchWithProgress(`${base}${name}${suffix}.vrm`, 'Dust 2');
+      Module.FS.writeFile(`/assets/override/${String(entry - 1).padStart(3, '0')}.bin`, vrm);
     }
     const jpg = await fetchWithProgress(base + meta.atlas.image, 'Textures');
     const bitmap = await createImageBitmap(new Blob([jpg], { type: 'image/jpeg' }));
