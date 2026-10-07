@@ -96,6 +96,20 @@ the map.
 ## Left to do
 
 - Track select previews and menu maps still show Dingo Canyon's and Dragon Mines'.
+- Collision-only quadblocks (stair ramps, the kill plane) use atlas layer 15, which the atlas
+  shader discards, and stay out of the visibility lists (a quadblock without textures is drawn
+  black, with texture page 0).
+- Floors are cut along a world grid of 256 units, and floor T-junctions closed: the renderer
+  gave up on big floor quads right under the camera (holes to the void), and floor pieces split
+  their own way left dotted cracks. 1-pixel cracks remain where neighbouring quadblocks are
+  subdivided differently by distance (DYNAMIC_SUBDIV leaves; the PS1 snaps the split points to
+  whole pixels); they show where something dark is under the floor (A site). Leaf render flags
+  4X1/4X2/4X4 didn't help (4X1 adds sparkles). Walls aren't T-junction-fixed: past 65536
+  vertices (u16 indices).
+- Door leaves are taken out (swung open, they z-fought with the frames). The frames had faces
+  only the leaves hid from behind: every triangle around a doorway gets a reversed twin, as
+  does any triangle a ray from a reachable spot hits from behind (tools/visibility.py).
+- The memory pool is 32 MiB on the web (the levels are ~7.7 MB, 16,000 quadblocks).
 - An edge at A site (CTR ~6300, -6700) is two steps (ramped, drivable) for most of its width
   and a 32-unit ledge (a wall, in Counter-Strike too) for the rest; the nav grid's 64-unit
   cells blur the two, so a tour route can cut across the ledge.

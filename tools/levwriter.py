@@ -65,6 +65,7 @@ class Quad:
     checkpoint: int = 0xFF
     double_sided: bool = False
     triangle: bool = False
+    hidden: bool = False        # collides, never drawn: kept out of the visibility lists
     draw_order_low: int = None  # raw value (face flags, draw order); None = 0 + double-sided bit
     draw_order_high: int = 0
 
@@ -298,7 +299,7 @@ def write_level(lv: Level):
     b.put(vis_leaf, '%dI' % leaf_words, *([0xFFFFFFFF] * leaf_words))
     face_bits = [0] * face_words
     for qi, q in enumerate(quads):
-        if q.faces[0] is not None:
+        if q.faces[0] is not None and not q.hidden:
             face_bits[qi >> 5] |= 1 << (qi & 31)   # by array index, low bit first (see block_id)
     b.put(vis_face, '%dI' % face_words, *face_bits)
     pvs = b.alloc(0x10)

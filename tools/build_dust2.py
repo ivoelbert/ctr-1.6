@@ -21,6 +21,7 @@ Collision in CTR is one-sided: a quadblock's front is (p2 - p0) x (p1 - p0), so 
 wound to face the side its model normal points to (into the playable space).
 """
 import io
+import itertools
 import json
 import math
 import os
@@ -38,6 +39,16 @@ from levwriter import (FLAG_CAMERA_SEARCH, FLAG_COLLISION_SURFACE, FLAG_GROUND, 
 SCALE = 4.0             # CTR units per Hammer unit
 CENTER = (-320.0, 1120.0)  # Hammer x, y of the map's middle
 MAX_EDGE = 800.0        # longest quadblock edge, CTR units
+# floors: the renderer gives up on big faces right under the camera (a big floor quad showed
+# as a hole to the void), so floors are cut along a world grid of FLOOR_CELL units (as retail
+# floors are about that size). A grid, not each triangle split its own way: neighbours then
+# share the same vertices along their edges (T-junctions leave dotted cracks).
+FLOOR_CELL = 256.0
+FLOOR_MAX_EDGE = 400.0   # a cell's diagonal and then some: grid pieces are never split again
+
+
+def max_edge(n):
+    return FLOOR_MAX_EDGE if n[1] > 0.7 else MAX_EDGE
 LAYER_SIZE = 1024       # each model texture is 1024 x 1024
 ATLAS_COLS = 4
 PAGE_ALIGN = 32         # texture page origins are 32-texel aligned (TF_VIRTUAL_ATLAS)
@@ -79,28 +90,15 @@ class Tri:
 
 # Model edits for driving.
 # Triangles to leave out: (mesh name) -> indices.
-REMOVED = {}
-# Door leaves swung open, so a kart fits: (mesh name) -> [(triangles, hinge (x, y), degrees CCW)].
-SWUNG = {
-    # mid doors stand half closed with a gap a kart can't fit through: open them along the frame
-    'part8_part8_0': [
-        ({300, 301, 302, 305, 306, 307, 867, 868}, (-288.0, 1633.0), -64.0),
-        ({403, 404, 405, 408, 409, 410, 973, 974}, (-480.0, 1635.0), -63.0),
-    ],
-    # long doors make a zig-zag: open both leaves the rest of the way
-    'part11_part11_0': [
-        ({201, 202, 203, 204, 205, 215, 216, 217, 218, 219, 643, 644}, (544.0, 289.0), 60.0),
-        ({210, 211, 212, 213, 214, 220, 221, 222, 223, 224, 645, 646}, (736.0, 288.0), 60.0),
-    ],
+# Door leaves, taken out (by mesh name: one set of triangles per leaf). The mid doors stand half
+# closed with a gap a kart can't fit through and the long doors make a zig-zag; swung open, the
+# leaves z-fought with the frames and looked broken. The floor was cut around them: patched.
+DOOR_LEAVES = {
+    'part8_part8_0': [{300, 301, 302, 305, 306, 307, 867, 868}, {403, 404, 405, 408, 409, 410, 973, 974}],     # mid
+    'part11_part11_0': [{201, 202, 203, 204, 205, 215, 216, 217, 218, 219, 643, 644},                          # long
+                        {210, 211, 212, 213, 214, 220, 221, 222, 223, 224, 645, 646}],
 }
-
-
-def swing(p, n, hinge, deg):
-    a = math.radians(deg)
-    c, s_ = math.cos(a), math.sin(a)
-    rot = np.array([[c, -s_, 0], [s_, c, 0], [0, 0, 1]])
-    h = np.array([hinge[0], hinge[1], 0.0])
-    return (p - h) @ rot.T + h, n @ rot.T
+REMOVED = {name: set().union(*leaves) for name, leaves in DOOR_LEAVES.items()}
 
 
 def load(glb):
@@ -115,16 +113,12 @@ def load(glb):
     for mat, P, UV, _, name, N in triangles(glb, with_normals=True):
         layer = layer_of_mat[mat]
         skip = REMOVED.get(name, ())
-        swings = SWUNG.get(name, ())
         for k in range(len(P)):
             if k in skip:
                 continue
             p = P[k].copy()
             uv = UV[k] * LAYER_SIZE
             nk = N[k].copy()
-            for ids, hinge, deg in swings:
-                if k in ids:
-                    p, nk = swing(p, nk, hinge, deg)
             geo = np.cross(p[1] - p[0], p[2] - p[0])
             area2 = np.linalg.norm(geo)
             if area2 < 1e-3:
@@ -139,16 +133,17 @@ def load(glb):
             tris.append(Tri(to_ctr(p), uv.copy(), layer, dir_to_ctr(geo), p, geo))
     patches = door_floor_patches(glb, tris)
     tris.extend(patches)
-    print(f'{len(tris)} triangles ({flipped} turned to face their normals, {len(patches)} floor patches under swung doors)')
+    print(f'{len(tris)} triangles ({flipped} turned to face their normals, {len(patches)} floor patches under removed door leaves)')
     fill_black_faces(tris, imgs)
     return tris, imgs
 
 
 def fill_black_faces(tris, imgs, radius=700.0):
-    """Faces the model's light baking left (mostly) black take one texel from around them: of
-    the lit faces within radius (facing the same way if there are any), the sample nearest
-    their median brightness, so a fill is no brighter than its surroundings. (The neighbour's
-    own colour was too bright in covered spots; these faces are mostly tucked away.)"""
+    """Faces the model's light baking left (mostly) black. Most have a twin somewhere in the map,
+    a lit triangle of the same shape (Dust 2 repeats its crates, frames and steps): they take
+    the nearest twin's texture, corner for corner. The rest take one texel from around them: of
+    the lit faces within radius (facing the same way if there are any), the sample nearest their
+    median brightness, so a fill is no brighter than its surroundings."""
     lum = {}
     for i, data in enumerate(imgs):
         a = np.asarray(Image.open(io.BytesIO(data)).convert('RGB'), dtype=np.float32)
@@ -169,13 +164,113 @@ def fill_black_faces(tris, imgs, radius=700.0):
     def kind(t):
         return 0 if t.n[1] > 0.7 else 2 if t.n[1] < -0.7 else 1
 
-    black = [i for i, t in enumerate(tris) if sum(sm[0] < 10 for sm in samples(t)) * 2 >= len(weights)]
+    # black means unbaked: every sample (near) zero. Dark faces stay as they are: the passages and
+    # their crates are dark in the model's light, and a dark texture is not a broken one (taking
+    # "mostly darker than 10" for black once repainted a dark crate in the long doors passage).
+    rgb = {i + 1: np.asarray(Image.open(io.BytesIO(data)).convert('RGB')) for i, data in enumerate(imgs)}
+
+    def brightest(t):
+        A = rgb[t.layer]
+        return max(int(A[int(np.clip(q[1], 0, LAYER_SIZE - 1)), int(np.clip(q[0], 0, LAYER_SIZE - 1))].max())
+                   for q in (np.dot(w, t.uv) for w in weights))
+
+    black = [i for i, t in enumerate(tris) if brightest(t) < 6]
     blackset = set(black)
     centres = np.array([t.p.mean(axis=0) for t in tris])
     kinds = np.array([kind(t) for t in tris])
-    filled = 0
+
+    def edges(t):
+        return [float(np.linalg.norm(t.ph[(k + 1) % 3] - t.ph[k])) for k in range(3)]
+
+    def shape(t):
+        return tuple(round(e * 2) / 2 for e in sorted(edges(t)))
+
+    twins = {}
+    for k, t in enumerate(tris):
+        if k not in blackset and min(edges(t)) > 0.5:
+            twins.setdefault(shape(t), []).append(k)
+
+    # a quad's two halves: triangles sharing an edge in one plane
+    def vkey(p):
+        return tuple(np.round(p, 1))
+
+    edge_tris = {}
+    for k, t in enumerate(tris):
+        for e in range(3):
+            edge_tris.setdefault(frozenset((vkey(t.ph[e]), vkey(t.ph[(e + 1) % 3]))), []).append(k)
+
+    def partner(k):
+        t = tris[k]
+        for e in range(3):
+            for m in edge_tris.get(frozenset((vkey(t.ph[e]), vkey(t.ph[(e + 1) % 3]))), ()):
+                if m != k and float(np.dot(tris[m].nh, t.nh)) > 0.999:
+                    return m
+        return None
+
+    def copy_pair(i, j):
+        """Black halves i, j of a quad take a lit quad's texture (twins sharing the same edge)."""
+        ti, tj = tris[i], tris[j]
+        shared = [vkey(p) for p in ti.ph if vkey(p) in {vkey(q) for q in tj.ph}]
+        if len(shared) != 2:
+            return False
+        best = None
+        for k in twins.get(shape(ti), ()):
+            m = partner(k)
+            if m is None or m in blackset or shape(tris[m]) != shape(tj) or kinds[k] != kinds[i]:
+                continue
+            tk, tm = tris[k], tris[m]
+            sk = [vkey(p) for p in tk.ph if vkey(p) in {vkey(q) for q in tm.ph}]
+            if len(sk) != 2:
+                continue
+            for c, d in ((sk[0], sk[1]), (sk[1], sk[0])):
+                # corners of i and j onto corners of k and m: the shared edge either way round
+                to_k = {shared[0]: c, shared[1]: d}
+                oi = [vkey(p) for p in ti.ph if vkey(p) not in shared][0]
+                oj = [vkey(p) for p in tj.ph if vkey(p) not in shared][0]
+                ok = [vkey(p) for p in tk.ph if vkey(p) not in sk][0]
+                om = [vkey(p) for p in tm.ph if vkey(p) not in sk][0]
+                to_k[oi], to_m = ok, {shared[0]: c, shared[1]: d, oj: om}
+                err = sum(abs(np.linalg.norm(np.subtract(a, b)) - np.linalg.norm(np.subtract(to_k[a], to_k[b])))
+                          for a, b in ((shared[0], oi), (shared[1], oi)))
+                err += sum(abs(np.linalg.norm(np.subtract(a, b)) - np.linalg.norm(np.subtract(to_m[a], to_m[b])))
+                           for a, b in ((shared[0], oj), (shared[1], oj)))
+                dist = float(np.linalg.norm(centres[k] - centres[i]))
+                if err < 1.0 and (best is None or dist < best[0]):
+                    best = (dist, k, m, dict(to_k), dict(to_m))
+        if best is None:
+            return False
+        _, k, m, to_k, to_m = best
+        uv_k = {vkey(p): uv for p, uv in zip(tris[k].ph, tris[k].uv)}
+        uv_m = {vkey(p): uv for p, uv in zip(tris[m].ph, tris[m].uv)}
+        ti.layer, tj.layer = tris[k].layer, tris[m].layer
+        ti.uv = np.array([uv_k[to_k[vkey(p)]] for p in ti.ph])
+        tj.uv = np.array([uv_m[to_m[vkey(p)]] for p in tj.ph])
+        return True
+
+    copied = filled = 0
+    done = set()
     for i in black:
+        j = partner(i)
+        if i not in done and j is not None and j in blackset and j not in done and copy_pair(i, j):
+            done |= {i, j}
+            copied += 2
+    for i in black:
+        if i in done:
+            continue
         t = tris[i]
+        cands = [k for k in twins.get(shape(t), ()) if kinds[k] == kinds[i]] or twins.get(shape(t), [])
+        if cands:
+            k = min(cands, key=lambda k: float(np.linalg.norm(centres[k] - centres[i])))
+            et, src = edges(t), tris[k]
+            # corners matched so each edge lands on an edge of the same length (edge j runs from
+            # corner j to corner j + 1)
+            best = min(itertools.permutations(range(3)),
+                       key=lambda pm: sum(abs(et[j] - float(np.linalg.norm(src.ph[pm[(j + 1) % 3]] - src.ph[pm[j]])))
+                                          for j in range(3)))
+            t.layer = src.layer
+            t.uv = src.uv[list(best)].copy()
+            copied += 1
+            continue
         d = np.linalg.norm(centres - centres[i], axis=1)
         near = [k for k in np.argsort(d) if d[k] < radius and k not in blackset]
         same = [k for k in near if kinds[k] == kinds[i]]
@@ -187,17 +282,16 @@ def fill_black_faces(tris, imgs, radius=700.0):
         t.layer = layer
         t.uv = np.array([uv, uv, uv])
         filled += 1
-    print(f'{filled} of {len(black)} black faces take the colour around them')
+    print(f'{len(black)} black faces: {copied} take a lit twin\'s texture, {filled} the colour around them')
 
 
 def door_floor_patches(glb, tris):
-    """The floor was cut around the closed door leaves: fill where a swung leaf stood.
-
-    Each patch takes one floor color (the texel of the nearest floor at its middle)."""
+    """The floor was cut around the closed door leaves: fill where a leaf stood, with the texture
+    of the floor beside it."""
     out = []
     floors = [t for t in tris if t.nh[2] > 0.99]
     for mat, P, UV, _, name, N in triangles(glb, with_normals=True):
-        for ids, hinge, deg in SWUNG.get(name, ()):
+        for ids in DOOR_LEAVES.get(name, ()):
             pts = np.concatenate([P[k] for k in ids])
             zmin = pts[:, 2].min()
             base = pts[np.abs(pts[:, 2] - zmin) < 1.0][:, :2]
@@ -205,23 +299,28 @@ def door_floor_patches(glb, tris):
             if len(hull) < 3:
                 continue
             mid = hull.mean(axis=0)
-            best = None
-            for t in floors:
-                if abs(t.ph[0, 2] - zmin) > 1.0:
-                    continue
-                d = np.linalg.norm(t.ph[:, :2].mean(axis=0) - mid)
-                if best is None or d < best[0]:
-                    best = (d, t)
-            if best is None:
+            # the biggest floor triangle near the door lends its texture: the patch is laid on it,
+            # centred, so it samples the middle of that floor's island (the floor's own mapping,
+            # extended under the door, ran into other islands: black and orange strips)
+            near = [t for t in floors if abs(t.ph[0, 2] - zmin) <= 1.0 and
+                    np.linalg.norm(t.ph[:, :2].mean(axis=0) - mid) < 160]
+            if not near:
                 continue
-            ft = best[1]
-            uv = ft.uv.mean(axis=0)
+            area = lambda t: abs(np.cross(t.ph[1, :2] - t.ph[0, :2], t.ph[2, :2] - t.ph[0, :2])) / 2  # noqa: E731
+            ft = max(near, key=area)
+            A = np.column_stack([ft.ph[:, :2], np.ones(3)])
+            try:
+                to_uv = np.linalg.solve(A, ft.uv)   # Hammer (x, y, 1) -> texel, on that floor
+            except np.linalg.LinAlgError:
+                continue
+            shift = ft.ph[:, :2].mean(axis=0) - mid
             for i in range(1, len(hull) - 1):
                 tri = np.array([[*hull[0], zmin], [*hull[i], zmin], [*hull[i + 1], zmin]])
                 if np.cross(tri[1] - tri[0], tri[2] - tri[0])[2] < 0:
                     tri = tri[[0, 2, 1]]
                 n = np.array([0.0, 0.0, 1.0])
-                out.append(Tri(to_ctr(tri), np.array([uv, uv, uv]), ft.layer, dir_to_ctr(n), tri, n))
+                uv = np.column_stack([tri[:, :2] + shift, np.ones(3)]) @ to_uv
+                out.append(Tri(to_ctr(tri), np.clip(uv, 0, LAYER_SIZE - 1), ft.layer, dir_to_ctr(n), tri, n))
     return out
 
 
@@ -288,6 +387,13 @@ def pair_quads(tris):
                 pred = uA + coef[0] * (uB - uA) + coef[1] * (uC - uA)
                 if np.abs(pred - uD).max() > 0.75:
                     continue
+                if t.n[1] > 0.7:
+                    # floors stay inside their grid cell (see grid_cut_floors)
+                    q4 = np.array([A, D, B, C])
+                    c0 = np.floor((q4[:, [0, 2]].min(axis=0) + 0.5) / FLOOR_CELL)
+                    c1 = np.floor((q4[:, [0, 2]].max(axis=0) - 0.5) / FLOOR_CELL)
+                    if np.any(c0 != c1):
+                        continue
                 poly = [A, D, B, C]
                 convex = True
                 for i in range(4):
@@ -337,14 +443,21 @@ def surface_flags(n, solid=True):
     return FLAG_COLLISION_SURFACE, 0
 
 
+# Collision-only quadblocks (stair ramps, the kill plane) are left out of the visibility lists,
+# and in case some draw path doesn't look there, their texture is atlas layer 15, which the
+# atlas shader discards (a quadblock without textures is drawn black).
+INVISIBLE = TexLayout(uv=((0, 0), (0, 0), (0, 0), (0, 0)), clut=15 << 10, tpage=TPAGE_ATLAS)
+
+
 def invisible_quad(P9, n, triangle=False):
-    """A quadblock that collides but is never drawn (no textures): stair ramps."""
+    """A quadblock that collides but is never drawn: stair ramps."""
     P9 = [np.asarray(p) for p in P9]
     if np.dot(np.cross(P9[2] - P9[0], P9[1] - P9[0]), n) < 0:
         raise ValueError('wrong winding')
     flags, terrain = surface_flags(n)
     pos = [tuple(int(round(v)) for v in p) for p in P9]
-    return Quad(pos=pos, faces=[None] * 4, low=None, flags=flags, terrain=terrain, triangle=triangle)
+    return Quad(pos=pos, faces=[INVISIBLE] * 4, low=INVISIBLE, flags=flags, terrain=terrain, triangle=triangle,
+                hidden=True)
 
 
 def quad_block(P9, UV9, layer, n, triangle, solid=True):
@@ -384,7 +497,7 @@ def shade_ramps(out):
     P = np.array([p for p, _ in lit], dtype=np.float64)
     C = [c for _, c in lit]
     for q in out:
-        if q.flags & FLAG_GROUND and q.faces[0] is None and q.color is None:
+        if q.flags & FLAG_GROUND and q.hidden and q.color is None:
             colors = []
             for p in q.pos:
                 d = np.abs(P - np.array(p, dtype=np.float64)).sum(axis=1)
@@ -422,8 +535,8 @@ def emit_quad(pts, uvs, layer, n, out, depth=0, solid=True):
     len_t = max(np.linalg.norm(corners[2] - corners[0]), np.linalg.norm(corners[3] - corners[1]))
     uv_s = max(np.abs(ucorners[1] - ucorners[0]).max(), np.abs(ucorners[3] - ucorners[2]).max())
     uv_t = max(np.abs(ucorners[2] - ucorners[0]).max(), np.abs(ucorners[3] - ucorners[1]).max())
-    ns = max(1, math.ceil(len_s / MAX_EDGE), math.ceil(uv_s / MAX_UV_SPAN * 1.0001))
-    nt = max(1, math.ceil(len_t / MAX_EDGE), math.ceil(uv_t / MAX_UV_SPAN * 1.0001))
+    ns = max(1, math.ceil(len_s / max_edge(n)), math.ceil(uv_s / MAX_UV_SPAN * 1.0001))
+    nt = max(1, math.ceil(len_t / max_edge(n)), math.ceil(uv_t / MAX_UV_SPAN * 1.0001))
     for i in range(ns):
         for j in range(nt):
             s0, s1 = i / ns, (i + 1) / ns
@@ -461,7 +574,7 @@ def emit_triangle(p, uv, layer, n, out, solid=True):
     ua, ub, uc = uv
     longest = max(np.linalg.norm(b - a), np.linalg.norm(c - a), np.linalg.norm(c - b))
     uvlong = max(np.abs(ub - ua).max(), np.abs(uc - ua).max(), np.abs(uc - ub).max())
-    k = max(1, math.ceil(longest / MAX_EDGE), math.ceil(uvlong / MAX_UV_SPAN * 1.0001))
+    k = max(1, math.ceil(longest / max_edge(n)), math.ceil(uvlong / MAX_UV_SPAN * 1.0001))
 
     def P(i, j):
         return a + (b - a) * (i / k) + (c - a) * (j / k)
@@ -569,12 +682,33 @@ def landmark_positions(tris):
     return out
 
 
+def dilate(im, steps=24):
+    """Spreads each baked island's edge colours into the black gaps around it (the usual light
+    map padding), so a triangle that reaches a little past its island isn't black at the edge."""
+    a = np.asarray(im, dtype=np.float32)
+    known = a.max(axis=2) > 4
+    for _ in range(steps):
+        if known.all():
+            break
+        acc = np.zeros_like(a)
+        cnt = np.zeros(a.shape[:2], dtype=np.float32)
+        for dy, dx in ((-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1)):
+            src = np.roll(np.roll(a * known[..., None], dy, axis=0), dx, axis=1)
+            k = np.roll(np.roll(known, dy, axis=0), dx, axis=1)
+            acc += src
+            cnt += k
+        grow = ~known & (cnt > 0)
+        a[grow] = acc[grow] / cnt[grow][:, None]
+        known = known | grow
+    return Image.fromarray(np.clip(a + 0.5, 0, 255).astype(np.uint8))
+
+
 def build_atlas(imgs, path):
     n = len(imgs) + 1  # cell 0 stays empty (see load)
     rows = math.ceil(n / ATLAS_COLS)
     atlas = Image.new('RGB', (ATLAS_COLS * LAYER_SIZE, rows * LAYER_SIZE))
     for i, data in enumerate(imgs):
-        im = Image.open(io.BytesIO(data)).convert('RGB')
+        im = dilate(Image.open(io.BytesIO(data)).convert('RGB'))
         assert im.size == (LAYER_SIZE, LAYER_SIZE), im.size
         cell = i + 1
         atlas.paste(im, ((cell % ATLAS_COLS) * LAYER_SIZE, (cell // ATLAS_COLS) * LAYER_SIZE))
@@ -596,7 +730,7 @@ def emit_ramp(ramp_h, out):
         corners = [A, B, D, C]
     len_s = max(np.linalg.norm(corners[1] - corners[0]), np.linalg.norm(corners[3] - corners[2]))
     len_t = max(np.linalg.norm(corners[2] - corners[0]), np.linalg.norm(corners[3] - corners[1]))
-    ns, nt = max(1, math.ceil(len_s / MAX_EDGE)), max(1, math.ceil(len_t / MAX_EDGE))
+    ns, nt = max(1, math.ceil(len_s / max_edge(n))), max(1, math.ceil(len_t / max_edge(n)))
     for i in range(ns):
         for j in range(nt):
             s0, s1, t0, t1 = i / ns, (i + 1) / ns, j / nt, (j + 1) / nt
@@ -824,7 +958,7 @@ def free_setup(out, g):
         nodes.append(Node((int(p[0]), int(p[1]) + 1000, int(p[2])), 4000, i, i))
     checkpoints = {}
     for qi, q in enumerate(out):
-        if not (q.flags & FLAG_GROUND) or q.faces[0] is None and q.flags & FLAG_KILL_PLANE:
+        if not (q.flags & FLAG_GROUND) or q.hidden and q.flags & FLAG_KILL_PLANE:
             continue
         c = np.mean(np.array(q.pos, dtype=float), axis=0)
         d = np.linalg.norm(pos[:, [0, 2]] - c[[0, 2]], axis=1) + np.abs(pos[:, 1] - c[1]) * 3
@@ -1146,24 +1280,225 @@ def write_modes(outdir, name, out, nodes, spawns, nav, route, g, bases, vrms, mi
     return info
 
 
-def main(glb, disc, outdir):
-    global light_maps
-    from navgrid import NavGrid
-    os.makedirs(outdir, exist_ok=True)
-    tris, imgs = load(glb)
-    light_maps = load_light_maps(imgs)
+def _split(poly, axis, c, eps=0.01):
+    """A convex polygon (list of (pos, uv, ph)) cut by the plane pos[axis] = c: (below, above)."""
+    lo, hi = [], []
+    n = len(poly)
+    for i in range(n):
+        a, b = poly[i], poly[(i + 1) % n]
+        da, db = a[0][axis] - c, b[0][axis] - c
+        if da <= eps:
+            lo.append(a)
+        if da >= -eps:
+            hi.append(a)
+        if (da < -eps and db > eps) or (da > eps and db < -eps):
+            f = da / (da - db)
+            m = tuple(a[k] + (b[k] - a[k]) * f for k in range(3))
+            lo.append(m)
+            hi.append(m)
+    return lo, hi
+
+
+def grid_cut_floors(tris, cell=FLOOR_CELL):
+    """Floor triangles cut along the lines x, z = cell * i (CTR units), as fans of triangles."""
     out = []
-    add_stair_ramps(tris, out)
+    cut = 0
+    for t in tris:
+        if t.n[1] <= 0.7:
+            out.append(t)
+            continue
+        polys = [[(t.p[k].astype(float), t.uv[k].astype(float), t.ph[k].astype(float)) for k in range(3)]]
+        for axis in (0, 2):
+            done = []
+            for poly in polys:
+                vals = [v[0][axis] for v in poly]
+                for i in range(int(math.floor(min(vals) / cell)) + 1, int(math.ceil(max(vals) / cell))):
+                    lo, hi = _split(poly, axis, i * cell)
+                    if len(lo) >= 3:
+                        done.append(lo)
+                    poly = hi
+                    if len(poly) < 3:
+                        break
+                if len(poly) >= 3:
+                    done.append(poly)
+            polys = done
+        if len(polys) == 1 and len(polys[0]) == 3:
+            out.append(t)
+            continue
+        cut += 1
+        for poly in polys:
+            for i in range(1, len(poly) - 1):
+                a, b, c = poly[0], poly[i], poly[i + 1]
+                p = np.array([a[0], b[0], c[0]])
+                if np.linalg.norm(np.cross(p[1] - p[0], p[2] - p[0])) < 1.0:
+                    continue   # a sliver where a line grazed a corner
+                r = Tri(p, np.array([a[1], b[1], c[1]]), t.layer, t.n, np.array([a[2], b[2], c[2]]), t.nh)
+                r.solid = t.solid
+                out.append(r)
+    print(f'{cut} floor triangles cut along the {cell:.0f}-unit grid: {len(tris)} -> {len(out)} triangles')
+    return out
+
+
+def _child(t, p, uv, ph):
+    r = Tri(np.asarray(p, dtype=float), np.asarray(uv, dtype=float), t.layer, t.n, np.asarray(ph, dtype=float), t.nh)
+    r.solid = t.solid
+    return r
+
+
+def is_floor(t):
+    return t.n[1] > 0.7
+
+
+def fix_t_junctions(tris, eps=0.6, cell=32.0, which=is_floor):
+    """Splits each floor triangle at the vertices of other floor triangles that lie on its edges,
+    so neighbours share every vertex along their common edges (a T-junction is a dotted crack,
+    and on floors, which the camera looks down at, they showed). Walls are left as they are:
+    their seams hardly show, and splitting them too runs past the format's 65536 vertices."""
+    grid = {}
+    seen = set()
+    for t in tris:
+        if not which(t):
+            continue
+        for p in t.p:
+            key = tuple(np.round(p, 2))
+            if key not in seen:
+                seen.add(key)
+                grid.setdefault(tuple(np.floor(p / cell).astype(int)), []).append(p)
+
+    def cells_along(a, b):
+        n = int(np.linalg.norm(b - a) / (cell / 2)) + 1
+        out = set()
+        for s_ in range(n + 1):
+            p = a + (b - a) * (s_ / n)
+            base = np.floor(p / cell)
+            frac = p / cell - base
+            opts = [[int(base[k])] + ([int(base[k]) - 1] if frac[k] * cell < eps else []) +
+                    ([int(base[k]) + 1] if (1 - frac[k]) * cell < eps else []) for k in range(3)]
+            for x in opts[0]:
+                for y in opts[1]:
+                    for z in opts[2]:
+                        out.add((x, y, z))
+        return out
+
+    def on_edge(a, b):
+        """Vertices on the open segment a-b, as (fraction along it, position), in order."""
+        d = b - a
+        L2 = float(np.dot(d, d))
+        if L2 < 1e-6:
+            return []
+        found = {}
+        for key in cells_along(a, b):
+            for v in grid.get(key, ()):
+                f = float(np.dot(v - a, d)) / L2
+                if f * f * L2 <= eps * eps or (1 - f) * (1 - f) * L2 <= eps * eps or not 0 < f < 1:
+                    continue
+                if np.linalg.norm(a + d * f - v) <= eps:
+                    found[tuple(np.round(v, 2))] = (f, v)
+        return sorted(found.values(), key=lambda fv: fv[0])
+
+    out, splits = [], 0
+    for t in tris:
+        if not which(t):
+            out.append(t)
+            continue
+        # each edge's extra vertices, found once; then split recursively without new queries
+        pts = [on_edge(t.p[e], t.p[(e + 1) % 3]) for e in range(3)]
+        if not any(pts):
+            out.append(t)
+            continue
+
+        def split(P, UV, PH, E):
+            # P, UV, PH: 3 corners; E[e]: list of (f, pos) on edge e (corner e -> e + 1)
+            for e in range(3):
+                if E[e]:
+                    i, j, k = e, (e + 1) % 3, (e + 2) % 3
+                    f, v = E[e][0]
+                    uv = UV[i] + (UV[j] - UV[i]) * f
+                    ph = PH[i] + (PH[j] - PH[i]) * f
+                    rest = [((g - f) / (1 - f), w) for g, w in E[e][1:]]
+                    # (i, v, k): edges i-v (none), v-k (inside), k-i (edge k's points)
+                    e1 = [None] * 3
+                    e1[0], e1[1], e1[2] = [], [], E[k]
+                    # (v, j, k): edges v-j (the rest of this edge), j-k (edge j's points), k-v (inside)
+                    e2 = [rest, E[j], []]
+                    split([P[i], v, P[k]], [UV[i], uv, UV[k]], [PH[i], ph, PH[k]], e1)
+                    split([v, P[j], P[k]], [uv, UV[j], UV[k]], [ph, PH[j], PH[k]], e2)
+                    return
+            out.append(_child(t, P, UV, PH))
+
+        split(list(t.p), list(t.uv), list(t.ph), pts)
+        splits += sum(len(p) for p in pts)
+    print(f'{splits} T-junctions closed: {len(tris)} -> {len(out)} triangles')
+    return out
+
+
+def emit_level(tris, ramps):
+    """Quadblocks for the model's triangles, after the stair ramps."""
+    out = list(ramps)
+    tris = fix_t_junctions(grid_cut_floors(tris))
     quads, singles = pair_quads(tris)
     for pts, uvs, layer, n, solid in quads:
         emit_quad(pts, uvs, layer, n, out, solid=solid)
     for t in singles:
         emit_triangle(t.p, t.uv, t.layer, t.n, out, solid=t.solid)
     shade_ramps(out)
-    print(f'{len(out)} quadblocks')
+    return out
 
+
+def door_frames(glb, tris, margin=256.0, above=192.0):
+    """Triangles around the doorways whose leaves were taken out: the frames and arches have
+    faces that only the leaves hid from behind (seen through gaps in the arch from a few spots
+    only, too few for the ray sampling to be sure of), so they all get twins."""
+    boxes = []
+    for mat, P, UV, _, name, N in triangles(glb, with_normals=True):
+        for leaves in [DOOR_LEAVES.get(name, ())]:
+            if not leaves:
+                continue
+            pts = np.concatenate([P[k] for ids in leaves for k in ids])
+            boxes.append((pts.min(axis=0) - [margin, margin, 0.0], pts.max(axis=0) + [margin, margin, above]))
+    out = set()
+    for k, t in enumerate(tris):
+        c = t.ph.mean(axis=0)
+        if any(np.all(c >= lo) and np.all(c <= hi) for lo, hi in boxes):
+            out.add(k)
+    return out
+
+
+def reversed_twins(tris, exposed):
+    """Back-to-back copies of the triangles seen from behind (see visibility.py): CTR draws and
+    collides with one side of a face, so a twin facing the other way closes the hole."""
+    out = []
+    for k in sorted(exposed):
+        t = tris[k]
+        r = Tri(t.p[[0, 2, 1]].copy(), t.uv[[0, 2, 1]].copy(), t.layer, -t.n, t.ph[[0, 2, 1]].copy(), -t.nh)
+        r.solid = t.solid
+        out.append(r)
+    return out
+
+
+def main(glb, disc, outdir):
+    global light_maps
+    import time
+    from navgrid import NavGrid
+    from visibility import exposed_backfaces
+    os.makedirs(outdir, exist_ok=True)
+    tris, imgs = load(glb)
+    light_maps = load_light_maps(imgs)
+    ramps = []
+    add_stair_ramps(tris, ramps)
+    out = emit_level(tris, ramps)
     landmarks = landmark_positions(tris)
     g = NavGrid([(q.flags, q.pos, q.triangle) for q in out])
+
+    # faces seen from behind from anywhere a kart can drive to get a twin facing the other way
+    t0 = time.time()
+    s = landmarks[LOOPS['dust2'][0]]
+    exposed = exposed_backfaces([t.p for t in tris], [t.n for t in tris], g, g.nearest(s[0], s[1] or 0, s[2]))
+    twins = reversed_twins(tris, set(exposed) | door_frames(glb, tris))
+    print(f'{len(twins)} triangles seen from behind get a reversed twin ({time.time() - t0:.0f} s)')
+    if twins:
+        out = emit_level(tris + twins, ramps)
+    print(f'{len(out)} quadblocks')
     kill_plane(out)
     bases, vrms = base_levels(disc)
     window = minimap_window(out)

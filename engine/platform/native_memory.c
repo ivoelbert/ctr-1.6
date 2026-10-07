@@ -14,8 +14,10 @@
 
 #if defined(CTR_DUST2_EXPANDED_MEMPACK)
 // NOTE(ctr-dust2): Custom levels (Dust 2) are several megabytes; the heap keeps
-// the retail start offset but runs to the end of a 16 MiB buffer.
-#define CTR_NATIVE_MEMPACK_BUFFER_SIZE  0x1000000u
+// the retail start offset but runs to the end of a 32 MiB buffer. (Primitive links
+// are 24-bit tokens for registered ranges, native_gpu_links.c, not raw addresses, so
+// the heap's size doesn't touch them.)
+#define CTR_NATIVE_MEMPACK_BUFFER_SIZE  0x2000000u
 #define CTR_NATIVE_MEMPACK_START_OFFSET 0xba9f0u
 #define CTR_NATIVE_MEMPACK_SIZE         (CTR_NATIVE_MEMPACK_BUFFER_SIZE - CTR_NATIVE_MEMPACK_START_OFFSET - MEMPACK_PS1_END_GUARD_SIZE)
 #else

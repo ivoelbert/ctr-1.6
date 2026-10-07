@@ -893,7 +893,8 @@ const char *gte_shader_32_rgba = "	uniform sampler2D s_texture;\n"
 //   layer = clut >> 10, origin = layer cell (4 per row, 1024 texels) + 32 * (clut & 31, (clut >> 5) & 31)
 // and sample the RGBA atlas at origin + the primitive's texel UV (mipmapped). The atlas
 // textures carry their own baked light: vertex colours are left out (a custom level's floor
-// colours only light the karts, COLL_FIXED_PlayerSearch_UpdateLighting).
+// colours only light the karts, COLL_FIXED_PlayerSearch_UpdateLighting). Layer 15 is never
+// drawn: collision-only quadblocks (stair ramps) use it.
 const char *gte_shader_virtual_atlas = "	uniform sampler2D s_texture;\n"
                                        "	uniform int psxDrawMaskSet;\n"
                                        "	uniform vec2 atlasSize;\n"
@@ -902,6 +903,7 @@ const char *gte_shader_virtual_atlas = "	uniform sampler2D s_texture;\n"
                                        "		float clutHi = floor(v_page_clut.w * 512.0 + 0.5);\n"
                                        "		float clut = clutLo + clutHi * 64.0;\n"
                                        "		float layer = floor(clut / 1024.0);\n"
+                                       "		if (layer > 14.5) discard;\n"
                                        "		float cell = mod(clut, 1024.0);\n"
                                        "		vec2 origin = vec2(mod(layer, 4.0) * 1024.0 + mod(cell, 32.0) * 32.0,\n"
                                        "		                   floor(layer / 4.0) * 1024.0 + floor(cell / 32.0) * 32.0);\n"

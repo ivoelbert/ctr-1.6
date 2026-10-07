@@ -147,6 +147,8 @@ EMSCRIPTEN_KEEPALIVE int NativeWeb_GetState(int *out)
 	// the music: song pool 0's flags (1 = playing) | song id << 8, and its play time
 	out[36] = sdata->songPool[0].flags | (sdata->songPool[0].id << 8);
 	out[37] = sdata->songPool[0].timeSpentPlaying;
+	// free bytes in the memory pool (the level, models, sounds share it)
+	out[38] = MEMPACK_GetFreeBytes();
 	return 40;
 }
 
@@ -181,6 +183,28 @@ EMSCRIPTEN_KEEPALIVE int NativeWeb_GetDrivers(int *out)
 		count = i + 1;
 	}
 	return count;
+}
+
+// Player 1's camera: out[0..8] the view rotation (s16, 4096 = 1), out[9..11] its position,
+// out[12] the distance to the screen (projection), out[13..16] the viewport rect.
+EMSCRIPTEN_KEEPALIVE void NativeWeb_GetCamera(int *out)
+{
+	struct PushBuffer *pb = &sdata->gGT->pushBuffer[0];
+	for (int r = 0; r < 3; r++)
+	{
+		for (int c = 0; c < 3; c++)
+		{
+			out[r * 3 + c] = pb->matrix_ViewProj.m[r][c];
+		}
+	}
+	out[9] = pb->pos.x;
+	out[10] = pb->pos.y;
+	out[11] = pb->pos.z;
+	out[12] = pb->distanceToScreen_PREV;
+	out[13] = pb->rect.x;
+	out[14] = pb->rect.y;
+	out[15] = pb->rect.w;
+	out[16] = pb->rect.h;
 }
 
 // Prints the level's instances: what each InstDef became and how it's flagged.

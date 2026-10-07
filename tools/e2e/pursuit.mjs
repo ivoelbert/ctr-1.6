@@ -14,8 +14,21 @@ const maxFrames = Number(process.argv[3] ?? 12000);
 const lookahead = Number(process.argv[4] ?? 640);
 const route = JSON.parse(fs.readFileSync(routeFile, 'utf8'));
 const laps = Number(process.env.LAPS ?? 1);
+// the line to follow: the AI's middle racing line (smoothed, clear of corners) when the route
+// has one, densified to a point every 64 units; LINE=path for the raw grid path
+function densify(points, step = 64) {
+  const out = [];
+  for (let i = 0; i < points.length; i++) {
+    const a = points[i], b = points[(i + 1) % points.length];
+    const n = Math.max(1, Math.round(Math.hypot(b[0] - a[0], b[2] - a[2]) / step));
+    for (let k = 0; k < n; k++) out.push([0, 1, 2].map((j) => a[j] + (b[j] - a[j]) * (k / n)));
+  }
+  return out;
+}
+const line = route.ai && process.env.LINE !== 'path' ? densify(route.ai[0]) : route.path;
+// start where the route starts (the AI line begins at its first frame, near the start line)
 let path = [];
-for (let l = 0; l < laps; l++) path = path.concat(route.path.map(([x, y, z]) => [x, y, z]));
+for (let l = 0; l < laps; l++) path = path.concat(line.map(([x, y, z]) => [x, y, z]));
 // OFFSET=n drives n units to the right of the route (negative: left), to rub along walls
 const offset = Number(process.env.OFFSET ?? 0);
 if (offset) {
@@ -27,7 +40,7 @@ if (offset) {
   });
 }
 // and on past the line, so the last lap counts
-if (process.env.LAPS) path = path.concat(route.path.slice(1, 40));
+if (process.env.LAPS) path = path.concat(line.slice(1, 40));
 const noTeleport = process.env.NO_TELEPORT === '1';
 
 const mode = Number(process.env.MODE ?? 0);
