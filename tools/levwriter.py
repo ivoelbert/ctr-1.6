@@ -141,6 +141,14 @@ class Blob:
         return bytes(out)
 
 
+def block_id(qi):
+    """A quadblock's blockID, from its index in the array. Retail numbers each run of 32
+    backwards (index 0 is 31, index 31 is 0, index 32 is 63): the renderer starts a BSP leaf's
+    visibility bit at 31 - (blockID & 31) and steps up a bit per quadblock, so the face list
+    holds index i at bit (i & 31) of word i >> 5."""
+    return (qi & ~31) | (31 - (qi & 31))
+
+
 def _cross(a, b):
     return (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
 
@@ -280,13 +288,19 @@ def write_level(lv: Level):
     vert_off = b.alloc(VERT_SIZE * len(verts))
     bsp_off = b.alloc(BSP_SIZE * nn)
 
-    # PVS: every BSP node and quadblock visible
+    # PVS: every BSP node visible, and every quadblock that has textures. Retail keeps its
+    # collision-only quadblocks out of the face lists, which is what hides them: the renderer
+    # draws a listed quadblock without textures with texture page 0 (black).
     leaf_words = (nn + 31) // 32
     face_words = (nq + 31) // 32
     vis_leaf = b.alloc(4 * leaf_words)
     vis_face = b.alloc(4 * face_words)
     b.put(vis_leaf, '%dI' % leaf_words, *([0xFFFFFFFF] * leaf_words))
-    b.put(vis_face, '%dI' % face_words, *([0xFFFFFFFF] * face_words))
+    face_bits = [0] * face_words
+    for qi, q in enumerate(quads):
+        if q.faces[0] is not None:
+            face_bits[qi >> 5] |= 1 << (qi & 31)   # by array index, low bit first (see block_id)
+    b.put(vis_face, '%dI' % face_words, *face_bits)
     pvs = b.alloc(0x10)
     b.ptr(pvs + 0, vis_leaf)
     b.ptr(pvs + 4, vis_face)
@@ -358,7 +372,7 @@ def write_level(lv: Level):
             b.ptr(o + 0x1C + 4 * f, layout_off(q.faces[f]))
         b.put(o + 0x2C, '6h', *bbox(q.pos))
         b.put(o + 0x38, 'BBBb', q.terrain, 0, 0, 0)
-        b.put(o + 0x3C, 'hBb', qi, q.checkpoint, 0)
+        b.put(o + 0x3C, 'hBb', block_id(qi), q.checkpoint, 0)
         tl = layout_off(q.low)
         if tl is not None:
             # ptr_texture_low points at a single TextureLayout (the "far" member works)

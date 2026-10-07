@@ -32,7 +32,10 @@ the map.
   keeping s16 -- matches retail exactly.
 - Floors 0x1800 (GROUND | CAMERA_SEARCH), walls 0x2000; flags 0 = drawn but never collided;
   no textures = collided but never drawn (stair ramps, kill plane 0x2200).
-- blockID is the quadblock's bit in the visibility list.
+- blockID gives the quadblock's bit in the visibility list, retail-style: each run of 32
+  quadblocks is numbered backwards (index 0 is 31), and the face list holds index i at bit
+  (i & 31). Quadblocks without textures stay out of the face list: listed, they are drawn
+  black (the stair ramps showed as black wedges).
 - Texture layouts: (u0v0, u1v1, u2v2, u3v3) = face corners (0,4,5,6), (4,1,6,7), (5,6,2,8),
   (6,7,8,3) with face flags 0. The "mosaic" word (layout + 0x24) is tested as a heap pointer:
   keep CLUTs >= 1024 (atlas cells start at 1).
