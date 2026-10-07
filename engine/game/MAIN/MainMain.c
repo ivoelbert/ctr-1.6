@@ -608,6 +608,9 @@ void StateZero()
 
 	gGT->levelID = NAUGHTY_DOG_CRATE;
 	memcpy(gGT->levelName, sdata->s_ndi, sizeof(sdata->s_ndi));
+#if defined(__EMSCRIPTEN__)
+	NativeWeb_ApplyBootOverride(gGT);
+#endif
 	// gGT->levelID = OXIDE_TRUE_ENDING;
 
 	InitGeom();

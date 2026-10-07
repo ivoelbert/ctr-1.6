@@ -1364,3 +1364,8 @@ void VehPhysGeneral_JumpAndFriction(struct Thread *thread, struct Driver *driver
 void CS_LoadBoss(const struct BossCutsceneData *bcd);
 
 #endif
+
+#if defined(__EMSCRIPTEN__)
+// platform/native_web.c
+void NativeWeb_ApplyBootOverride(struct GameTracker *gGT);
+#endif

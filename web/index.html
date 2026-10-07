@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CTR on Dust 2</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; height: 100%; background: #000; color: #ddd; font: 14px/1.4 system-ui, sans-serif; }
+  #stage { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; }
+  canvas { width: 100%; height: 100%; display: block; outline: none; }
+  #status { position: fixed; left: 12px; bottom: 10px; opacity: .8; white-space: pre; pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="canvas" tabindex="0" oncontextmenu="event.preventDefault()"></canvas></div>
+<div id="status">Loading…</div>
+<script>
+  const statusEl = document.getElementById('status');
+  const canvas = document.getElementById('canvas');
+  const params = new URLSearchParams(location.search);
+  const say = (msg) => { statusEl.textContent = msg; };
+
+  async function fetchWithProgress(url, label) {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
+    const total = Number(res.headers.get('content-length')) || 0;
+    const reader = res.body.getReader();
+    const out = total ? new Uint8Array(total) : null;
+    const chunks = [];
+    let got = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (out) out.set(value, got); else chunks.push(value);
+      got += value.length;
+      if (total) say(`${label} ${Math.round((got / total) * 100)}%`);
+    }
+    if (out) return out;
+    const all = new Uint8Array(got);
+    let o = 0;
+    for (const c of chunks) { all.set(c, o); o += c.length; }
+    return all;
+  }
+
+  // ?level=N&mode=0|1|2&character=N&laps=N boots straight into a race (see engine/platform/native_web.c).
+  const boot = params.has('level') ? {
+    level: Number(params.get('level')), mode: Number(params.get('mode') ?? 0),
+    character: Number(params.get('character') ?? 0), laps: Number(params.get('laps') ?? 3),
+  } : null;
+
+  var Module = {
+    canvas,
+    ctrBoot: boot,
+    noInitialRun: true,
+    print: (t) => console.log(t),
+    printErr: (t) => console.warn(t),
+    onRuntimeInitialized() { start().catch((e) => { say(String(e)); console.error(e); }); },
+  };
+
+  async function start() {
+    const disc = await fetchWithProgress(params.get('disc') || 'game-data/ctr-u.bin', 'Disc');
+    Module.FS.mkdir('/assets');
+    Module.FS.writeFile('/assets/ctr-u.bin', disc);
+    for (const extra of (params.get('files') || '').split(',').filter(Boolean)) {
+      // extra=SRC_URL:DEST_PATH, e.g. lev/dust2.lev:/assets/mods/dust2.lev
+      const [src, dst] = extra.split(':');
+      const bytes = await fetchWithProgress(src, src);
+      const dir = dst.slice(0, dst.lastIndexOf('/'));
+      Module.FS.mkdirTree(dir);
+      Module.FS.writeFile(dst, bytes);
+    }
+    say('');
+    canvas.focus();
+    Module.callMain([]);
+  }
+</script>
+<script src="ctr.js"></script>
+</body>
+</html>

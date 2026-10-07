@@ -547,6 +547,61 @@ global_variable u64 s_nextVBlankCounter = 0;
 global_variable u64 s_vblankRemainder = 0;
 global_variable int s_nativeVBlankCount = 0;
 
+#if defined(__EMSCRIPTEN__)
+#include <emscripten.h>
+
+// NOTE(web): The browser owns the clock. web/ctr-web.js counts VBlanks off
+// requestAnimationFrame (locked 1:1 or 1:2 to 60/120 Hz displays so frames are
+// presented evenly, by elapsed time otherwise). The game still advances only
+// through emitted VBlanks, exactly as on the native build.
+EM_ASYNC_JS(int, NativeWeb_WaitForVBlanks, (void), {
+	return await Module.ctrWaitForVBlanks();
+});
+EM_JS(int, NativeWeb_TakeDueVBlanks, (void), {
+	return Module.ctrTakeDueVBlanks();
+});
+
+global_variable int s_webBankedVBlanks = 0;
+
+internal void Native_EmitVBlank(void);
+
+internal int Native_CatchUpDueVBlanks(void)
+{
+	int emittedVBlanks = 0;
+	int due = s_webBankedVBlanks + NativeWeb_TakeDueVBlanks();
+
+	s_webBankedVBlanks = 0;
+
+	// NOTE(web): Same rule as the host clock: replay a few late VBlanks, drop
+	// the rest after a long stall (a hidden tab, a debugger break).
+	if (due > NATIVE_VSYNC_CATCHUP_MAX)
+	{
+		due = NATIVE_VSYNC_CATCHUP_MAX;
+	}
+
+	for (; emittedVBlanks < due; emittedVBlanks++)
+	{
+		Native_EmitVBlank();
+	}
+
+	return emittedVBlanks;
+}
+
+internal void Native_WaitAndEmitVBlank(void)
+{
+	NativePerf_BeginScope(NATIVE_PERF_BUCKET_VSYNC_WAIT);
+	while (s_webBankedVBlanks <= 0)
+	{
+		s_webBankedVBlanks += NativeWeb_WaitForVBlanks();
+	}
+	NativePerf_EndScope(NATIVE_PERF_BUCKET_VSYNC_WAIT);
+
+	s_webBankedVBlanks--;
+	Native_EmitVBlank();
+}
+#endif
+
+#if !defined(__EMSCRIPTEN__)
 internal u64 Native_CounterFromMicroseconds(u64 freq, u64 microseconds)
 {
 	return (freq * microseconds) / 1000000;
@@ -624,6 +679,8 @@ internal void Native_WaitUntilVBlankTarget(void)
 	}
 }
 
+#endif
+
 internal void Native_EmitVBlank(void)
 {
 	NativeRCnt_EmitVBlank();
@@ -637,6 +694,7 @@ internal void Native_EmitVBlank(void)
 	s_nativeVBlankCount++;
 }
 
+#if !defined(__EMSCRIPTEN__)
 internal int Native_CatchUpDueVBlanks(void)
 {
 	int emittedVBlanks = 0;
@@ -696,6 +754,8 @@ internal void Native_WaitAndEmitVBlank(void)
 	Native_EmitVBlank();
 	Native_AdvanceVBlankTarget();
 }
+
+#endif
 
 int VSync(int mode)
 {

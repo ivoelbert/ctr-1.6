@@ -64,6 +64,7 @@
 #include "platform/native_savestate.c"
 #include "platform/native_state.c"
 #include "platform/native_str.c"
+#include "platform/native_web.c"
 
 #ifndef CC
 #if defined(__GNUC__)

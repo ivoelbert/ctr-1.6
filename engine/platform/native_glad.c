@@ -159,6 +159,14 @@ internal void *get_proc(const char *namez)
 	return result;
 }
 
+#if defined(__EMSCRIPTEN__)
+#include <SDL3/SDL_video.h>
+int gladLoadGL(void)
+{
+	// NOTE(web): WebGL2 entry points come from Emscripten's GL emulation through SDL.
+	return gladLoadGLLoader((GLADloadproc)SDL_GL_GetProcAddress);
+}
+#else
 int gladLoadGL(void)
 {
 	int status = 0;
@@ -171,6 +179,7 @@ int gladLoadGL(void)
 
 	return status;
 }
+#endif
 
 struct gladGLversionStruct GLVersion = {0, 0};
 

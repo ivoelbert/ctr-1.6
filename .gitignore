@@ -1,0 +1,12 @@
+# Upstream checkouts used for reference
+/ext/
+# Extracted game data, models and intermediate files (never commit CTR data)
+/work/
+/build/
+/.cache/
+/web/game-data/
+*.bin
+*.BIG
+*.pyc
+__pycache__/
+.DS_Store

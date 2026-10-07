@@ -173,6 +173,9 @@ global_variable GLuint s_glVramFramebuffer;
 internal int NativeRenderer_InitialiseGLContext(char *windowName, int fullscreen)
 {
 	SDL_WindowFlags windowFlags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE;
+#if defined(__EMSCRIPTEN__)
+	windowFlags |= SDL_WINDOW_HIGH_PIXEL_DENSITY;
+#endif
 
 	if (fullscreen)
 	{
@@ -187,9 +190,16 @@ internal int NativeRenderer_InitialiseGLContext(char *windowName, int fullscreen
 		return 0;
 	}
 
+#if defined(__EMSCRIPTEN__)
+	// NOTE(web): WebGL2 is OpenGL ES 3.0.
+	int major_version = 3;
+	int minor_version = 0;
+	int profile = SDL_GL_CONTEXT_PROFILE_ES;
+#else
 	int major_version = 3;
 	int minor_version = 3;
 	int profile = SDL_GL_CONTEXT_PROFILE_CORE;
+#endif
 
 	// find best OpenGL version
 	do
@@ -315,7 +325,12 @@ internal void NativeRenderer_ResolveGpuMeasurements(b32 waitForResults)
 
 void NativeRenderer_UpdateSwapIntervalState(int swapInterval)
 {
+#if defined(__EMSCRIPTEN__)
+	// NOTE(web): The browser presents the canvas; pacing is the VBlank clock's.
+	(void)swapInterval;
+#else
 	SDL_GL_SetSwapInterval(swapInterval);
+#endif
 }
 
 void NativeRenderer_BeginScene(void)
@@ -449,6 +464,19 @@ internal void NativeRenderer_SetPresentationAspect(int width, int height)
 
 internal void NativeRenderer_UpdatePresentationViewport(void)
 {
+#if defined(__EMSCRIPTEN__)
+	// NOTE(web): The page sizes the canvas; follow its size in device pixels.
+	if (g_window != NULL)
+	{
+		int pixelW = 0;
+		int pixelH = 0;
+		if (SDL_GetWindowSizeInPixels(g_window, &pixelW, &pixelH) && (pixelW > 0) && (pixelH > 0))
+		{
+			g_windowWidth = pixelW;
+			g_windowHeight = pixelH;
+		}
+	}
+#endif
 	if ((g_windowWidth <= 0) || (g_windowHeight <= 0) || (s_presentAspectW <= 0) || (s_presentAspectH <= 0))
 	{
 		s_presentViewport.x = 0;
@@ -915,16 +943,22 @@ internal int NativeRenderer_Shader_CheckProgramStatus(GLuint program)
 	return 0;
 }
 
+#if defined(__EMSCRIPTEN__)
+#define GLSL_VERSION_LINE "#version 300 es\n"
+#else
+#define GLSL_VERSION_LINE "	#version 140\n"
+#endif
+
 internal ShaderID NativeRenderer_Shader_Compile(const char *source, bool isPsxShader)
 {
-	const char *GLSL_HEADER_VERT = "	#version 140\n"
+	const char *GLSL_HEADER_VERT = GLSL_VERSION_LINE
 	                               "	precision lowp  int;\n"
 	                               "	precision highp float;\n"
 	                               "	#define varying   out\n"
 	                               "	#define attribute in\n"
 	                               "	#define texture2D texture\n";
 
-	const char *GLSL_HEADER_FRAG = "	#version 140\n"
+	const char *GLSL_HEADER_FRAG = GLSL_VERSION_LINE
 	                               "	precision lowp  int;\n"
 	                               "	precision highp float;\n"
 	                               "	#define varying     in\n"
@@ -2232,7 +2266,11 @@ internal void NativeRenderer_SetViewPort(int x, int y, int width, int height)
 
 internal void NativeRenderer_SetWireframe(int enable)
 {
+#if !defined(__EMSCRIPTEN__)
 	glPolygonMode(GL_FRONT_AND_BACK, enable ? GL_LINE : GL_FILL);
+#else
+	(void)enable;
+#endif
 }
 
 void NativeRenderer_UpdateVertexBuffer(const GrVertex *vertices, int num_vertices)

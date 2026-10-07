@@ -1,0 +1,9 @@
+{
+  "name": "ctr-dust2-e2e",
+  "private": true,
+  "type": "module",
+  "description": "Headless Chrome harness for the CTR web build",
+  "dependencies": {
+    "puppeteer-core": "^24.0.0"
+  }
+}
