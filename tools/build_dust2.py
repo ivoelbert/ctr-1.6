@@ -48,40 +48,136 @@ def dir_to_ctr(n):
 
 
 class Tri:
-    __slots__ = ('p', 'uv', 'layer', 'n')
+    __slots__ = ('p', 'uv', 'layer', 'n', 'ph', 'nh', 'solid')
 
-    def __init__(self, p, uv, layer, n):
+    def __init__(self, p, uv, layer, n, ph, nh):
         self.p = p        # (3,3) CTR space
         self.uv = uv      # (3,2) texels in the layer
         self.layer = layer
         self.n = n        # unit normal, CTR space (the side that faces the player)
+        self.ph = ph      # (3,3) Hammer space
+        self.nh = nh      # unit normal, Hammer space
+        self.solid = True  # False: drawn but not collided with (stair risers under a ramp)
+
+
+# Model edits for driving.
+# Triangles to leave out: (mesh name) -> indices.
+REMOVED = {}
+# Door leaves swung open, so a kart fits: (mesh name) -> [(triangles, hinge (x, y), degrees CCW)].
+SWUNG = {
+    # mid doors stand half closed with a gap a kart can't fit through: open them along the frame
+    'part8_part8_0': [
+        ({300, 301, 302, 305, 306, 307, 867, 868}, (-288.0, 1633.0), -64.0),
+        ({403, 404, 405, 408, 409, 410, 973, 974}, (-480.0, 1635.0), -63.0),
+    ],
+    # long doors make a zig-zag: open both leaves the rest of the way
+    'part11_part11_0': [
+        ({201, 202, 203, 204, 205, 215, 216, 217, 218, 219, 643, 644}, (544.0, 289.0), 60.0),
+        ({210, 211, 212, 213, 214, 220, 221, 222, 223, 224, 645, 646}, (736.0, 288.0), 60.0),
+    ],
+}
+
+
+def swing(p, n, hinge, deg):
+    a = math.radians(deg)
+    c, s_ = math.cos(a), math.sin(a)
+    rot = np.array([[c, -s_, 0], [s_, c, 0], [0, 0, 1]])
+    h = np.array([hinge[0], hinge[1], 0.0])
+    return (p - h) @ rot.T + h, n @ rot.T
 
 
 def load(glb):
     js, imgs = images(glb)
-    layer_of_mat = {i: js['textures'][m['pbrMetallicRoughness']['baseColorTexture']['index']]['source']
+    # Images go in atlas cells 1..11, never 0: a near quadblock's "mosaic" layout word
+    # (u0, v0, clut) is tested by the renderer as a possible pointer into the heap
+    # (DrawLevelOvr1P_GetProjectedMidTexture); clut >= 1024 keeps it far from the heap.
+    layer_of_mat = {i: 1 + js['textures'][m['pbrMetallicRoughness']['baseColorTexture']['index']]['source']
                     for i, m in enumerate(js['materials'])}
     tris = []
     flipped = 0
     for mat, P, UV, _, name, N in triangles(glb, with_normals=True):
         layer = layer_of_mat[mat]
+        skip = REMOVED.get(name, ())
+        swings = SWUNG.get(name, ())
         for k in range(len(P)):
+            if k in skip:
+                continue
             p = P[k].copy()
             uv = UV[k] * LAYER_SIZE
+            nk = N[k].copy()
+            for ids, hinge, deg in swings:
+                if k in ids:
+                    p, nk = swing(p, nk, hinge, deg)
             geo = np.cross(p[1] - p[0], p[2] - p[0])
             area2 = np.linalg.norm(geo)
             if area2 < 1e-3:
                 continue
             geo /= area2
-            vn = N[k].sum(axis=0)
+            vn = nk.sum(axis=0)
             if np.dot(geo, vn) < 0:  # wound against its normals: turn it around
                 p = p[[0, 2, 1]]
                 uv = uv[[0, 2, 1]]
                 geo = -geo
                 flipped += 1
-            tris.append(Tri(to_ctr(p), uv.copy(), layer, dir_to_ctr(geo)))
-    print(f'{len(tris)} triangles ({flipped} turned to face their normals)')
+            tris.append(Tri(to_ctr(p), uv.copy(), layer, dir_to_ctr(geo), p, geo))
+    patches = door_floor_patches(glb, tris)
+    tris.extend(patches)
+    print(f'{len(tris)} triangles ({flipped} turned to face their normals, {len(patches)} floor patches under swung doors)')
     return tris, imgs
+
+
+def door_floor_patches(glb, tris):
+    """The floor was cut around the closed door leaves: fill where a swung leaf stood.
+
+    Each patch takes one floor color (the texel of the nearest floor at its middle)."""
+    out = []
+    floors = [t for t in tris if t.nh[2] > 0.99]
+    for mat, P, UV, _, name, N in triangles(glb, with_normals=True):
+        for ids, hinge, deg in SWUNG.get(name, ()):
+            pts = np.concatenate([P[k] for k in ids])
+            zmin = pts[:, 2].min()
+            base = pts[np.abs(pts[:, 2] - zmin) < 1.0][:, :2]
+            hull = convex_hull(base)
+            if len(hull) < 3:
+                continue
+            mid = hull.mean(axis=0)
+            best = None
+            for t in floors:
+                if abs(t.ph[0, 2] - zmin) > 1.0:
+                    continue
+                d = np.linalg.norm(t.ph[:, :2].mean(axis=0) - mid)
+                if best is None or d < best[0]:
+                    best = (d, t)
+            if best is None:
+                continue
+            ft = best[1]
+            uv = ft.uv.mean(axis=0)
+            for i in range(1, len(hull) - 1):
+                tri = np.array([[*hull[0], zmin], [*hull[i], zmin], [*hull[i + 1], zmin]])
+                if np.cross(tri[1] - tri[0], tri[2] - tri[0])[2] < 0:
+                    tri = tri[[0, 2, 1]]
+                n = np.array([0.0, 0.0, 1.0])
+                out.append(Tri(to_ctr(tri), np.array([uv, uv, uv]), ft.layer, dir_to_ctr(n), tri, n))
+    return out
+
+
+def convex_hull(pts):
+    pts = sorted(set((round(float(x), 3), round(float(y), 3)) for x, y in pts))
+    if len(pts) < 3:
+        return np.array(pts)
+
+    def cross(o, a, b):
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+    lower, upper = [], []
+    for p in pts:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], p) <= 0:
+            lower.pop()
+        lower.append(p)
+    for p in reversed(pts):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], p) <= 0:
+            upper.pop()
+        upper.append(p)
+    return np.array(lower[:-1] + upper[:-1])
 
 
 def pair_quads(tris):
@@ -110,7 +206,7 @@ def pair_quads(tris):
                 if tj == ti or used[tj]:
                     continue
                 u = tris[tj]
-                if u.layer != t.layer or np.dot(u.n, t.n) < 0.9999:
+                if u.layer != t.layer or np.dot(u.n, t.n) < 0.9999 or u.solid != t.solid:
                     continue
                 # cyclic quad: t = (A, B, C) with shared edge A->B (index e), u has B->A
                 A, B, C = t.p[e], t.p[(e + 1) % 3], t.p[(e + 2) % 3]
@@ -144,7 +240,7 @@ def pair_quads(tris):
         if best:
             _, tj, pts, uvs = best
             used[ti] = used[tj] = True
-            quads.append((np.array(pts), np.array(uvs), t.layer, t.n))
+            quads.append((np.array(pts), np.array(uvs), t.layer, t.n, t.solid))
     singles = [t for i, t in enumerate(tris) if not used[i]]
     print(f'{len(quads)} quads from pairs, {len(singles)} triangles left')
     return quads, singles
@@ -169,13 +265,25 @@ def layout(uv4, layer, origin):
 FACE_CORNERS = [(0, 4, 5, 6), (4, 1, 6, 7), (5, 6, 2, 8), (6, 7, 8, 3)]
 
 
-def surface_flags(n):
+def surface_flags(n, solid=True):
+    if not solid:
+        return 0, 0  # drawn only: no collision search wants it
     if n[1] > 0.7:
         return FLAG_GROUND | FLAG_CAMERA_SEARCH, 0
     return FLAG_COLLISION_SURFACE, 0
 
 
-def quad_block(P9, UV9, layer, n, triangle):
+def invisible_quad(P9, n, triangle=False):
+    """A quadblock that collides but is never drawn (no textures): stair ramps."""
+    P9 = [np.asarray(p) for p in P9]
+    if np.dot(np.cross(P9[2] - P9[0], P9[1] - P9[0]), n) < 0:
+        raise ValueError('wrong winding')
+    flags, terrain = surface_flags(n)
+    pos = [tuple(int(round(v)) for v in p) for p in P9]
+    return Quad(pos=pos, faces=[None] * 4, low=None, flags=flags, terrain=terrain, triangle=triangle)
+
+
+def quad_block(P9, UV9, layer, n, triangle, solid=True):
     """A Quad from 9 slot positions/uvs (CTR space), wound so its front faces n."""
     P9 = [np.asarray(p) for p in P9]
     front = np.cross(P9[2] - P9[0], P9[1] - P9[0])
@@ -186,7 +294,7 @@ def quad_block(P9, UV9, layer, n, triangle):
         return None
     faces = [layout(np.array([UV9[c] for c in fc]), layer, origin) for fc in FACE_CORNERS]
     low = layout(np.array([UV9[c] for c in (0, 1, 2, 3)]), layer, origin)
-    flags, terrain = surface_flags(n)
+    flags, terrain = surface_flags(n, solid)
     pos = [tuple(int(round(v)) for v in p) for p in P9]
     return Quad(pos=pos, faces=faces, low=low, flags=flags, terrain=terrain, triangle=triangle,
                 double_sided=DOUBLE_SIDED)
@@ -197,7 +305,7 @@ def bilinear(c, s, t):
     return (1 - s) * (1 - t) * c[0] + s * (1 - t) * c[1] + (1 - s) * t * c[2] + s * t * c[3]
 
 
-def emit_quad(pts, uvs, layer, n, out, depth=0):
+def emit_quad(pts, uvs, layer, n, out, depth=0, solid=True):
     """pts/uvs in cyclic order A, B, C, D (CCW about n). Tessellates into quadblocks."""
     A, B, C, D = pts
     uA, uB, uC, uD = uvs
@@ -222,7 +330,7 @@ def emit_quad(pts, uvs, layer, n, out, depth=0):
                     2: (s0, t1), 8: (sm, t1), 3: (s1, t1)}
             P9 = [bilinear(corners, *grid[k]) for k in range(9)]
             U9 = [bilinear(ucorners, *grid[k]) for k in range(9)]
-            q = quad_block(P9, U9, layer, n, False)
+            q = quad_block(P9, U9, layer, n, False, solid)
             if q is None:
                 if depth > 3:
                     print('warning: dropped a quad whose texture spans too much')
@@ -238,12 +346,12 @@ def emit_quad(pts, uvs, layer, n, out, depth=0):
                     if np.dot(np.cross(pp[1] - pp[0], pp[3] - pp[0]), n) < 0:
                         pp = pp[[0, 3, 2, 1]]
                         uu = [uu[0], uu[3], uu[2], uu[1]]
-                    emit_quad(pp, np.array(uu), layer, n, out, depth + 1)
+                    emit_quad(pp, np.array(uu), layer, n, out, depth + 1, solid)
                 continue
             out.append(q)
 
 
-def emit_triangle(p, uv, layer, n, out):
+def emit_triangle(p, uv, layer, n, out, solid=True):
     """Subdivides a triangle into a k x k grid: parallelogram cells become quadblocks, the
     diagonal row triangle quadblocks."""
     a, b, c = p
@@ -266,7 +374,7 @@ def emit_triangle(p, uv, layer, n, out):
                 if np.dot(np.cross(pts[1] - pts[0], pts[3] - pts[0]), n) < 0:
                     pts = pts[[0, 3, 2, 1]]
                     uvs = uvs[[0, 3, 2, 1]]
-                emit_quad(pts, uvs, layer, n, out)
+                emit_quad(pts, uvs, layer, n, out, solid=solid)
             else:
                 t = [P(i, j), P(i + 1, j), P(i, j + 1)]
                 tu = [U(i, j), U(i + 1, j), U(i, j + 1)]
@@ -278,7 +386,7 @@ def emit_triangle(p, uv, layer, n, out):
                 uA, uB, uC = tu
                 P9 = [A, B, Cc, Cc, (A + B) / 2, (A + Cc) / 2, (B + Cc) / 2, (B + Cc) / 2, Cc]
                 U9 = [uA, uB, uC, uC, (uA + uB) / 2, (uA + uC) / 2, (uB + uC) / 2, (uB + uC) / 2, uC]
-                q = quad_block(P9, U9, layer, n, True)
+                q = quad_block(P9, U9, layer, n, True, solid)
                 if q is None:
                     print('warning: dropped a triangle whose texture spans too much')
                     continue
@@ -307,49 +415,215 @@ def floor_height(tris, x, z, above):
     return best
 
 
+# Places on the map (Hammer x, y, facing in degrees: 0 = north, 90 = east)
+LANDMARKS = {
+    # the race loop, in order: round the block between T ramp and mid -- outside long ->
+    # long doors -> long A -> CT ramp -> CT spawn -> mid doors -> mid -> back south of the block
+    'race_start': (-280, -500, 90),
+    'ring_bottom_e': (150, -500, 90),
+    'start': (-1500, -700, 90),
+    'ring_bottom': (100, -720, 90),
+    'ring_east': (640, -100, 0),
+    'long_doors': (640, 480, 0),
+    'long_corner': (800, 950, 90),
+    'long_bottom': (1430, 1100, 0),
+    'long_top': (1430, 2300, 0),
+    'a_site': (1150, 2700, 270),
+    'a_west': (600, 2550, 270),
+    'ct_spawn': (0, 2250, 180),
+    'mid_doors': (-380, 1780, 180),
+    'ct_south': (390, 2000, 180),
+    'a_short_bottom': (320, 1560, 270),
+    'catwalk_west': (0, 1520, 270),
+    'mid_top': (-420, 1450, 180),
+    'mid_bottom': (-420, 420, 180),
+    'mid_exit': (-440, -250, 180),
+    'ring_west': (-470, -100, 180),
+    't_return': (-700, -720, 270),
+    # elsewhere
+    't_spawn': (-560, -774, 0),
+    'b_site': (-1800, 2300, 0),
+    'b_halls': (-800, 2300, 270),
+    'upper_tunnels': (-1850, 1200, 0),
+    'lower_tunnels': (-900, 1400, 90),
+    't_to_tunnels': (-1700, 300, 0),
+    'pit': (1430, 150, 0),
+}
+
+
+def heading(deg):
+    """CTR yaw (4096 = full turn) for a compass heading: north is CTR -z (2048), east +x (1024)."""
+    return int(round((2048 - deg * 4096 / 360) % 4096))
+
+
+def landmark_positions(tris):
+    out = {}
+    for name, (hx, hy, deg) in LANDMARKS.items():
+        x, _, z = to_ctr([hx, hy, 0.0])
+        y = floor_height(tris, x, z, 4000)
+        out[name] = [int(x), None if y is None else int(y), int(z), heading(deg)]
+    return out
+
+
 def build_atlas(imgs, path):
-    n = len(imgs)
+    n = len(imgs) + 1  # cell 0 stays empty (see load)
     rows = math.ceil(n / ATLAS_COLS)
     atlas = Image.new('RGB', (ATLAS_COLS * LAYER_SIZE, rows * LAYER_SIZE))
     for i, data in enumerate(imgs):
         im = Image.open(io.BytesIO(data)).convert('RGB')
         assert im.size == (LAYER_SIZE, LAYER_SIZE), im.size
-        atlas.paste(im, ((i % ATLAS_COLS) * LAYER_SIZE, (i // ATLAS_COLS) * LAYER_SIZE))
+        cell = i + 1
+        atlas.paste(im, ((cell % ATLAS_COLS) * LAYER_SIZE, (cell // ATLAS_COLS) * LAYER_SIZE))
     atlas.save(path, quality=95)
     return atlas.size
+
+
+def emit_ramp(ramp_h, out):
+    """An invisible collision ramp over a staircase (4 Hammer points: foot l/r, head r/l)."""
+    pts = to_ctr(np.array(ramp_h))
+    n = np.cross(pts[1] - pts[0], pts[3] - pts[0])
+    n /= np.linalg.norm(n)
+    if n[1] < 0:
+        pts = pts[[0, 3, 2, 1]]
+        n = -n
+    A, B, C, D = pts
+    corners = [A, D, B, C]
+    if np.dot(np.cross(corners[2] - corners[0], corners[1] - corners[0]), n) < 0:
+        corners = [A, B, D, C]
+    len_s = max(np.linalg.norm(corners[1] - corners[0]), np.linalg.norm(corners[3] - corners[2]))
+    len_t = max(np.linalg.norm(corners[2] - corners[0]), np.linalg.norm(corners[3] - corners[1]))
+    ns, nt = max(1, math.ceil(len_s / MAX_EDGE)), max(1, math.ceil(len_t / MAX_EDGE))
+    for i in range(ns):
+        for j in range(nt):
+            s0, s1, t0, t1 = i / ns, (i + 1) / ns, j / nt, (j + 1) / nt
+            sm, tm = (s0 + s1) / 2, (t0 + t1) / 2
+            grid = {0: (s0, t0), 4: (sm, t0), 1: (s1, t0), 5: (s0, tm), 6: (sm, tm), 7: (s1, tm),
+                    2: (s0, t1), 8: (sm, t1), 3: (s1, t1)}
+            out.append(invisible_quad([bilinear(corners, *grid[k]) for k in range(9)], n))
+
+
+def add_stair_ramps(tris, out):
+    from stairs import drivable_stairs, ramp_for
+    stairs = drivable_stairs([(t.ph, t.nh) for t in tris])
+    for st in stairs:
+        for r in st:
+            for i in r.tris:
+                tris[i].solid = False
+        emit_ramp(ramp_for(st), out)
+    print(f'{len(stairs)} staircases and steps get ramps ({sum(len(s) for s in stairs)} risers)')
+
+
+RACE_ROUTE = ['race_start', 'ring_bottom_e', 'ring_east', 'long_doors', 'long_corner', 'long_bottom', 'long_top',
+              'ct_spawn', 'mid_doors', 'mid_top', 'mid_bottom', 'mid_exit', 'race_start']
+NODE_SPACING = 800.0     # checkpoint nodes along the route, CTR units
+ROUTE_RADIUS = 14        # grid cells (64 units) around the route that count as on the track
+FLAG_KILL_PLANE = 0x0200
+
+
+def plan_route(out, landmarks):
+    """Plans the race loop on a nav grid of the level: dense CTR points from start back to start."""
+    from navgrid import NavGrid
+    g = NavGrid([(q.flags, q.pos, q.triangle) for q in out])
+    nodes = []
+    for a, b in zip(RACE_ROUTE, RACE_ROUTE[1:]):
+        la, lb = landmarks[a], landmarks[b]
+        na = g.nearest(la[0], la[1] or 0, la[2])
+        nb = g.nearest(lb[0], lb[1] or 0, lb[2])
+        p = g.path(na, nb)
+        if p is None:
+            raise SystemExit(f'no route {a} -> {b}')
+        nodes.extend(p if not nodes else p[1:])
+    return g, nodes
+
+
+def race_setup(out, landmarks):
+    """Checkpoint nodes along the race loop, each floor quadblock's checkpoint, and the start grid."""
+    from navgrid import route_cells
+    g, path_nodes = plan_route(out, landmarks)
+    pts = np.array([g.pos[n] for n in path_nodes], dtype=float)
+    seg = np.linalg.norm(np.diff(pts[:, [0, 2]], axis=0), axis=1)
+    arc = np.concatenate([[0.0], np.cumsum(seg)])
+    L = float(arc[-1])
+    count = max(8, int(round(L / NODE_SPACING)))
+    step = L / count
+
+    def at(sv):
+        i = min(int(np.searchsorted(arc, sv, side='right')) - 1, len(pts) - 2)
+        f = (sv - arc[i]) / max(arc[i + 1] - arc[i], 1e-9)
+        return pts[i] + (pts[i + 1] - pts[i]) * f
+
+    nodes = []
+    for i in range(count):
+        p = at(i * step)
+        nodes.append(Node((int(p[0]), int(p[1]), int(p[2])), int(round((L - i * step) / 8)),
+                          (i + 1) % count, (i - 1) % count))
+    # quadblocks near the route (through drivable cells) take the node behind them
+    near = route_cells(g, path_nodes, ROUTE_RADIUS)
+    tagged = 0
+    for q in out:
+        if not (q.flags & FLAG_GROUND):
+            continue
+        c = np.mean(np.array(q.pos, dtype=float), axis=0)
+        nid = g.nearest(c[0], c[1], c[2])
+        if nid is None or nid not in near:
+            continue
+        pi, _ = near[nid]
+        q.checkpoint = min(int(arc[pi] // step), count - 1)
+        tagged += 1
+    # start grid: two columns of four, the front row just behind node 0
+    p0 = pts[0]
+    ahead = at(3 * NODE_SPACING / 4)
+    fwd = np.array([ahead[0] - p0[0], ahead[2] - p0[2]])
+    fwd /= np.linalg.norm(fwd)
+    side = np.array([-fwd[1], fwd[0]])
+    yaw = int(round(math.atan2(fwd[0], fwd[1]) / (2 * math.pi) * 4096)) % 4096
+    spawns = []
+    for row in range(4):
+        for col in range(2):
+            xz = np.array([p0[0], p0[2]]) - fwd * (160 + row * 220) + side * ((col - 0.5) * 260)
+            y = g.pos[g.nearest(xz[0], p0[1], xz[1])][1]
+            spawns.append(((int(xz[0]), int(y) + 32, int(xz[1])), (0, (yaw - 0x400) % 4096, 0)))
+    print(f'race loop {L:.0f} units, {count} checkpoints, {tagged} floor quadblocks on the track')
+    route = dict(length=L, path=pts.tolist(), nodes=[n.pos for n in nodes])
+    return nodes, spawns, route
+
+
+def kill_plane(out, y=-1600, size=4096):
+    """Invisible, under the whole map: falling onto it sends the kart back to the track."""
+    allp = np.array([p for q in out for p in q.pos], dtype=float)
+    x0, z0 = allp[:, 0].min() - size, allp[:, 2].min() - size
+    x1, z1 = allp[:, 0].max() + size, allp[:, 2].max() + size
+    n = np.array([0.0, 1.0, 0.0])
+    for x in np.arange(x0, x1, size):
+        for z in np.arange(z0, z1, size):
+            A = np.array([x, y, z])
+            B = np.array([x + size, y, z])
+            C = np.array([x, y, z + size])
+            D = np.array([x + size, y, z + size])
+            corners = [A, B, C, D]
+            if np.dot(np.cross(corners[2] - corners[0], corners[1] - corners[0]), n) < 0:
+                corners = [A, C, B, D]
+            grid = [(0, 0), (1, 0), (0, 1), (1, 1), (0.5, 0), (0, 0.5), (0.5, 0.5), (1, 0.5), (0.5, 1)]
+            q = invisible_quad([bilinear(corners, s_, t_) for s_, t_ in grid], n)
+            q.flags = FLAG_COLLISION_SURFACE | FLAG_KILL_PLANE
+            out.append(q)
 
 
 def main(glb, outdir):
     os.makedirs(outdir, exist_ok=True)
     tris, imgs = load(glb)
-    quads, singles = pair_quads(tris)
     out = []
-    for pts, uvs, layer, n in quads:
-        emit_quad(pts, uvs, layer, n, out)
+    add_stair_ramps(tris, out)
+    quads, singles = pair_quads(tris)
+    for pts, uvs, layer, n, solid in quads:
+        emit_quad(pts, uvs, layer, n, out, solid=solid)
     for t in singles:
-        emit_triangle(t.p, t.uv, t.layer, t.n, out)
+        emit_triangle(t.p, t.uv, t.layer, t.n, out, solid=t.solid)
     print(f'{len(out)} quadblocks')
 
-    # T spawn, facing north (CTR -z): heading 2048; the game adds 0x400 to spawn yaw
-    spawn_h = np.array([-560.0, -774.0])
-    sx, _, sz = to_ctr([spawn_h[0], spawn_h[1], 0.0])
-    spawns = []
-    for row in range(4):
-        for col in range(2):
-            x = sx + (col - 0.5) * 300
-            z = sz + row * 300
-            y = floor_height(tris, x, z, 4000)
-            if y is None:
-                y = 0
-            spawns.append(((int(x), int(y) + 32, int(z)), (0, 2048 - 0x400, 0)))
-    print('spawns', spawns[:2])
-
-    # a placeholder loop of checkpoint nodes around the spawn (no quadblock uses them yet)
-    nodes = []
-    for i in range(4):
-        ang = i * math.pi / 2
-        nodes.append(Node((int(sx + 1000 * math.sin(ang)), int(spawns[0][0][1]), int(sz + 1000 * math.cos(ang))),
-                          (4 - i) * 1000 // 8, (i + 1) % 4, (i - 1) % 4))
+    landmarks = landmark_positions(tris)
+    nodes, spawns, route = race_setup(out, landmarks)
+    kill_plane(out)
 
     lv = Level(quads=out, nodes=nodes, spawns=spawns,
                clear_colors=[(170, 190, 220, 1), (230, 200, 160, 1), (200, 210, 230, 1)],
@@ -360,7 +634,9 @@ def main(glb, outdir):
         f.write(data)
     size = build_atlas(imgs, os.path.join(outdir, 'dust2_atlas.jpg'))
     meta = dict(scale=SCALE, center=CENTER, atlas=dict(image='dust2_atlas.jpg', width=size[0], height=size[1]),
-                spawn=spawns[0], info=info, bytes=len(data))
+                spawn=spawns[0], info=info, bytes=len(data), landmarks=landmarks)
+    with open(os.path.join(outdir, 'dust2_route.json'), 'w') as f:
+        json.dump(route, f)
     with open(os.path.join(outdir, 'dust2.json'), 'w') as f:
         json.dump(meta, f, indent=1)
     print(info, 'bytes', len(data))

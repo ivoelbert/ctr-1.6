@@ -2,6 +2,14 @@
 
 int MainDB_GetClipSize(u32 levelID, int numPlyrCurrGame)
 {
+#if defined(CTR_NATIVE)
+	// NOTE(ctr-dust2): see LOAD_IsCustomLevel.
+	if (LOAD_IsCustomLevel(levelID))
+	{
+		return 64000;
+	}
+#endif
+
 	switch (levelID)
 	{
 	case ADVENTURE_GARAGE:

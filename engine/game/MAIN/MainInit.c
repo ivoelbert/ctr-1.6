@@ -88,8 +88,7 @@ static int MainInit_GetPrimMemSize(struct GameTracker *gGT)
 	// NOTE(ctr-dust2): A custom level (an overridden LEV) sees everything from
 	// everywhere instead of retail's precomputed visibility: give it room for
 	// many more primitives per frame.
-	if (((gGT->gameMode1 & MAIN_MENU) == 0) && (gGT->levelID < NITRO_COURT) &&
-	    NativeCD_IsBigfileEntryOverridden(LOAD_GetBigfileIndex(gGT->levelID, sdata->levelLOD, LVI_LEV)))
+	if (((gGT->gameMode1 & MAIN_MENU) == 0) && LOAD_IsCustomLevel(gGT->levelID))
 	{
 		return CTR_CUSTOM_LEVEL_PRIM_MEM_SIZE;
 	}

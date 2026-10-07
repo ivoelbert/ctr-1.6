@@ -10,6 +10,7 @@ const script = process.env.SCRIPT ?? '0:cross;300:cross,left;360:cross;600:cross
 const turbo = process.env.TURBO !== '0';
 
 const { browser, page } = await launch({ query: `?level=${level}&mode=0${extra}`, log: !!process.env.LOG });
+// (the teleport target is set right after the script is installed, before the race starts)
 await page.waitForFunction(() => window.ctr && Module._NativeWeb_GetState, { timeout: 120000 });
 await page.evaluate((script, length, turbo) => {
   const steps = script.split(';').map((s) => { const [t, b] = s.split(':'); return [Number(t), b ? b.split(',') : []]; });
@@ -23,6 +24,7 @@ await page.evaluate((script, length, turbo) => {
     // the race starts when the event clock runs
     if (start === null) { if (s.eventTime > 0) start = n; else { ctr.hold('cross'); return; } }
     const t = n - start;
+    if (t === 0 && window.__teleport) ctr.teleport(...window.__teleport);
     let held = [];
     for (const [at, b] of steps) if (t >= at) held = b;
     ctr.hold(...held);
@@ -30,6 +32,17 @@ await page.evaluate((script, length, turbo) => {
     if (t >= length) { window.__done = true; ctr.turbo(false); Module.ctrOnVBlank = null; ctr.release(); }
   };
 }, script, length, turbo);
+if (process.env.AT) {
+  // AT=landmark name (build/lev/dust2.json) or "x,y,z,angle" in CTR units
+  const fs = await import('node:fs');
+  let at = process.env.AT.split(',').map(Number);
+  if (at.length < 4) {
+    const meta = JSON.parse(fs.readFileSync('build/lev/dust2.json', 'utf8'));
+    const [x, y, z, a] = meta.landmarks[process.env.AT];
+    at = [x, (y ?? 0) + 80, z, process.env.ANGLE ? Number(process.env.ANGLE) : a];
+  }
+  await page.evaluate((at) => { window.__teleport = at; }, at);
+}
 await page.waitForFunction(() => window.__done, { timeout: 600000, polling: 500 });
 const trace = await page.evaluate(() => window.__trace);
 if (process.env.SHOT) await page.screenshot({ path: process.env.SHOT });

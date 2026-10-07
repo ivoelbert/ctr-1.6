@@ -293,3 +293,18 @@ int LOAD_GetBigfileIndex(u32 levelID, int lod, int fileIndexInGroup)
 
 	return (levelID - GEM_STONE_VALLEY) * LOAD_CUTSCENE_FILES_PER_LEVEL + fileIndexInGroup + BI_ADVENTUREHUB;
 }
+
+#if defined(CTR_NATIVE)
+// NOTE(ctr-dust2): A level whose LEV comes from assets/override is a custom
+// level (Dust 2): it is drawn without precomputed visibility, so its per-frame
+// render buffers are sized up (MainInit_GetPrimMemSize, MainDB_GetClipSize).
+int LOAD_IsCustomLevel(u32 levelID)
+{
+	if (levelID >= NITRO_COURT + LOAD_BATTLE_TRACK_COUNT)
+	{
+		return 0;
+	}
+
+	return NativeCD_IsBigfileEntryOverridden(LOAD_GetBigfileIndex(levelID, sdata->levelLOD, LVI_LEV));
+}
+#endif

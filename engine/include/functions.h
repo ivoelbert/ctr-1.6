@@ -1374,4 +1374,5 @@ void NativeWeb_ApplyBootOverride(struct GameTracker *gGT);
 // platform/native_cd.c
 int NativeCD_ApplyBigfileOverrides(struct BigHeader *bigfile);
 int NativeCD_IsBigfileEntryOverridden(int index);
+int LOAD_IsCustomLevel(u32 levelID);
 #endif
