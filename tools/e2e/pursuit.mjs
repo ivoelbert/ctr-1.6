@@ -12,6 +12,8 @@ const route = JSON.parse(fs.readFileSync(routeFile, 'utf8'));
 const laps = Number(process.env.LAPS ?? 1);
 let path = [];
 for (let l = 0; l < laps; l++) path = path.concat(route.path.map(([x, y, z]) => [x, y, z]));
+// and on past the line, so the last lap counts
+if (process.env.LAPS) path = path.concat(route.path.slice(1, 40));
 const noTeleport = process.env.NO_TELEPORT === '1';
 
 const mode = Number(process.env.MODE ?? 0);
@@ -55,6 +57,10 @@ await page.evaluate((path, maxFrames, lookahead, noTeleport) => {
       window.__item = s.kart.item; window.__wumpa = s.kart.wumpa;
     }
     if (s.kart.lap !== window.__lap) { window.__events.push(`t=${n - start} lap ${s.kart.lap} (race time ${s.eventTime})`); window.__lap = s.kart.lap; }
+    if ((s.kart.actions & 0x2000000) && !window.__finished) {
+      window.__finished = true;
+      window.__events.push(`t=${n - start} race finished, rank ${s.kart.rank + 1} (END_OF_RACE ${(s.gameMode1 & 0x200000) !== 0})`);
+    }
     const t = n - start;
     const k = s.kart;
     // advance along the path: nearest point a little ahead of where we were

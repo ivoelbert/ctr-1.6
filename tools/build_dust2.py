@@ -523,6 +523,7 @@ RACE_ROUTE = ['long_start', 'long_top', 'ct_spawn', 'mid_doors', 'mid_top', 'mid
               'ring_bottom_e', 'ring_east', 'long_doors', 'long_corner', 'long_bottom', 'long_start']
 NODE_SPACING = 800.0     # checkpoint nodes along the route, CTR units
 ROUTE_RADIUS = 14        # grid cells (64 units) around the route that count as on the track
+ROUTE_REACH = 720.0      # and floors this close to it (xz distance + height difference), CTR units
 FLAG_KILL_PLANE = 0x0200
 
 
@@ -576,6 +577,17 @@ def race_setup(out, landmarks):
         pi, _ = near[nid]
         q.checkpoint = min(int(arc[pi] // step), count - 1)
         tagged += 1
+    # floors right by the route the grid didn't reach (curbs, ledges, crate tops) take the
+    # node behind the nearest route point, so no part of the track is without a checkpoint
+    for q in out:
+        if not (q.flags & FLAG_GROUND) or q.checkpoint != 0xFF:
+            continue
+        c = np.mean(np.array(q.pos, dtype=float), axis=0)
+        d = np.hypot(pts[:, 0] - c[0], pts[:, 2] - c[2]) + np.abs(pts[:, 1] - c[1])
+        pi = int(np.argmin(d))
+        if d[pi] < ROUTE_REACH:
+            q.checkpoint = min(int(arc[pi] // step), count - 1)
+            tagged += 1
     # start grid: two columns of four, the front row just behind node 0
     p0 = pts[0]
     ahead = at(3 * NODE_SPACING / 4)
@@ -789,9 +801,16 @@ def place_pickups(route, g, by_model):
         d = np.array([d[0], d[2]]) / (np.hypot(d[0], d[2]) + 1e-9)
         return p, d, np.array([-d[1], d[0]])
 
-    def floor_point(x, y, z):
-        hit = drivable_at(g, x, y, z, min_clear=1)
-        return None if hit is None else (int(x), int(hit[1]), int(z))
+    def floor_point(x, y, z, reach=192):
+        """The drivable floor at (x, z), or the nearest one within reach (rings of grid cells)."""
+        for r in range(0, reach + 1, 32):
+            ring = [(0.0, 0.0)] if r == 0 else [(r * math.cos(a), r * math.sin(a))
+                                                 for a in np.linspace(0, 2 * math.pi, 8 + r // 8, endpoint=False)]
+            for dx, dz in ring:
+                hit = drivable_at(g, x + dx, y, z + dz, min_clear=1)
+                if hit is not None and abs(hit[1] - y) < 160:
+                    return (int(x + dx), int(hit[1]), int(z + dz))
+        return None
 
     out = []
     crates = list(by_model.get('crate_question', []))
@@ -800,11 +819,15 @@ def place_pickups(route, g, by_model):
         yaw = int(round(math.atan2(d[0], d[1]) / (2 * math.pi) * 4096)) % 4096
         for k in range(4):
             for spread in (220, 160, 110):
-                q = floor_point(*(p + np.array([lat[0], 0, lat[1]]) * (k - 1.5) * spread))
+                q = floor_point(*(p + np.array([lat[0], 0, lat[1]]) * (k - 1.5) * spread), reach=0)
                 if q:
                     break
+            else:
+                q = floor_point(*(p + np.array([lat[0], 0, lat[1]]) * (k - 1.5) * 110))
             if q and crates:
                 out.append(dict(src=crates.pop(0), pos=q, rot=(0, yaw, 0)))
+            elif crates:
+                print(f'  no floor for a weapon crate at {p.astype(int).tolist()}')
     fruit = list(by_model.get('fruit', []))
     for f in (0.07, 0.29, 0.51, 0.74):
         p, d, lat = frame(f)
@@ -812,6 +835,8 @@ def place_pickups(route, g, by_model):
             q = floor_point(*(p + np.array([d[0], 0, d[1]]) * k * 160 + np.array([lat[0], 0, lat[1]]) * 90))
             if q and fruit:
                 out.append(dict(src=fruit.pop(0), pos=q, rot=(0, 0, 0)))
+            elif fruit:
+                print(f'  no floor for wumpa fruit at {p.astype(int).tolist()}')
     boxes = list(by_model.get('crate_fruit', []))
     for f, sidev in ((0.47, 1), (0.93, -1)):
         p, d, lat = frame(f)
