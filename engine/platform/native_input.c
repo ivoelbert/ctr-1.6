@@ -521,6 +521,13 @@ internal u16 NativeInput_ReadKeyboard(void)
 	{
 		buttons &= ~0x200;
 	}
+#if defined(__EMSCRIPTEN__)
+	// NOTE(web): Mac keyboards have no right Ctrl: A is R2 (look back) too.
+	if (s_keyboardState[SDL_SCANCODE_A])
+	{
+		buttons &= ~0x200;
+	}
+#endif
 	if (s_keyboardState[mapping->kc_r3])
 	{
 		buttons &= ~0x4;

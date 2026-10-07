@@ -46,12 +46,14 @@
   #go:disabled { opacity: .6; cursor: progress; }
   table { width: 100%; border-collapse: collapse; font-size: 14px; }
   td { padding: 5px 0; border-bottom: 1px solid var(--line); }
-  td:first-child { color: var(--muted); }
+  td:first-child { color: var(--muted); padding-right: 14px; white-space: nowrap; }
   kbd { background: var(--panel-2); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; padding: 1px 6px; font: 12px ui-monospace, monospace; color: var(--text); }
   .note { color: var(--muted); font-size: 12.5px; margin-top: 12px; }
   .note a { color: var(--accent-2); }
   #discpick { margin-top: 12px; display: none; }
   #discpick.show { display: block; }
+  #nojspi { margin: 0 0 16px; padding: 12px 14px; border-radius: 10px; background: #4a1a10; border: 1px solid #a2412a; }
+  #nojspi[hidden] { display: none; }
 </style>
 </head>
 <body>
@@ -63,6 +65,8 @@
     <h1>Crash Team Racing <span class="x">×</span> de_dust2</h1>
     <p class="sub">CTR's own driving, AI and weapons (the decompiled game, running in your browser) on
       Counter-Strike's Dust 2: outside long, long doors, long A, CT, mid doors and mid.</p>
+    <p id="nojspi" hidden>This browser can't run the game: it needs WebAssembly JSPI, which Chrome and
+      Edge have had since version 137. Open this page in one of those.</p>
     <div class="grid">
       <div class="panel">
         <h2>Mode</h2>
@@ -103,13 +107,15 @@
           <tr><td>Hop, power slide</td><td><kbd>Right Shift</kbd> (hold while turning)</td></tr>
           <tr><td>Slide boost</td><td><kbd>Left Shift</kbd> (the other shoulder)</td></tr>
           <tr><td>Use item</td><td><kbd>V</kbd></td></tr>
-          <tr><td>Look back</td><td><kbd>Z</kbd></td></tr>
+          <tr><td>Look back</td><td><kbd>A</kbd> or <kbd>Right Ctrl</kbd> (hold)</td></tr>
+          <tr><td>Camera distance</td><td><kbd>Left Ctrl</kbd></td></tr>
+          <tr><td>Skip the intro</td><td><kbd>Z</kbd></td></tr>
           <tr><td>Pause</td><td><kbd>Enter</kbd></td></tr>
-          <tr><td>Full screen</td><td><kbd>F11</kbd></td></tr>
+          <tr><td>Full screen</td><td><kbd>F11</kbd> or the browser's (<kbd>⌃⌘F</kbd> on a Mac)</td></tr>
         </table>
-        <p class="note">A gamepad works too (R1 / L1 for the slide and its boost). Power slide: hold
-          Right Shift through a turn and tap Left Shift as the exhaust turns black; three boosts
-          in a row make a turbo.</p>
+        <p class="note">A gamepad works too, with CTR's own buttons. Power slide: hold Right Shift
+          through a turn and tap Left Shift when the exhaust turns black (either Shift starts the
+          slide, the other one boosts); three boosts in a row and you're flying.</p>
         <p class="note">Map: "De_Dust 2 with real light" by
           <a href="https://sketchfab.com/neominigan" target="_blank" rel="noopener">Neo_minigan</a>,
           <a href="http://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC-BY-4.0</a>.
@@ -244,9 +250,16 @@
     Module.callMain([]);
   }
 
+  // The engine suspends its game loop at each VBlank wait through JSPI.
+  const hasJspi = typeof WebAssembly.Suspending === 'function' && typeof WebAssembly.promising === 'function';
+
   // ?level=N&mode=0|1|2&character=N&laps=N[&dust2[=free]] boots straight away (tests, links);
   // with no parameters the launcher asks.
-  if (params.has('level') || params.has('dust2') || params.has('auto')) {
+  if (!hasJspi) {
+    launcher.hidden = false;
+    document.getElementById('nojspi').hidden = false;
+    document.getElementById('go').disabled = true;
+  } else if (params.has('level') || params.has('dust2') || params.has('auto')) {
     const boot = params.has('level') ? {
       level: Number(params.get('level')), mode: Number(params.get('mode') ?? 0),
       character: Number(params.get('character') ?? 0), laps: Number(params.get('laps') ?? 3),

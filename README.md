@@ -4,40 +4,69 @@ Crash Team Racing's kart, with the game's own driving code, on Counter-Strike 1.
 
 - `engine/` is [ctr-native](https://github.com/CTR-tools/ctr-native) (the CTR decompilation as a
   native port, GPL-3.0) with a WebAssembly platform layer: the race, the kart physics, the
-  collision and the renderer are the decompiled game code, unchanged.
-- `tools/` builds the Dust 2 track (a CTR level file) from a model of the map.
+  collision, the AI and the renderer are the decompiled game code.
+- `tools/` turns a model of Dust 2 into a CTR track (a level file the game loads in place of
+  Dingo Canyon's).
 - `web/` is the page that runs it.
 
-## Building
+## Playing
 
 ```sh
-./build-web.sh                 # engine -> build/web (Emscripten 6.0.10)
-node tools/serve.mjs           # http://localhost:8642/
+./play.sh
 ```
 
-The game needs your own NTSC-U CTR disc image (SCUS-94426, a raw MODE2/2352 `.bin`). The server
-hands it to the page from `$CTR_DISC` (default:
-`~/Documents/CTRDUST2/CTR - Crash Team Racing/CTR - Crash Team Racing.bin`). Nothing from the
-disc is in this repository.
+builds whatever is missing (the track from your disc and the model, then the game), serves it
+on http://localhost:8642/ and opens it in Chrome. It needs:
 
-`?level=N&mode=0` boots straight into a Time Trial on track `N` (`enum LevelID` in
-`engine/include/namespace_Level.h`); `mode=1` is an Arcade race.
+- your own NTSC-U CTR disc image (SCUS-94426, a raw MODE2/2352 `.bin`), by default at
+  `~/Documents/CTRDUST2/CTR - Crash Team Racing/CTR - Crash Team Racing.bin` (`CTR_DISC=...`);
+- the "De_Dust 2 with real light" download from Sketchfab, by default at
+  `~/Documents/CTRDUST2/dust-2-cs-16.zip` (`DUST2_ZIP=...`, or `DUST2_MODEL=...` for its `.glb`);
+- Python 3 with numpy and Pillow, Node.js, and a browser with WebAssembly JSPI (Chrome or
+  Edge 137+). The first build fetches Emscripten 6.0.10 unless `$EMSDK` points at one.
+
+Nothing from the disc is in this repository. The track `play.sh` writes (`build/lev/`) holds
+data from your disc (Dust 2 is grafted onto Dingo Canyon's level, keeping its weapon crates,
+fruit, start banner and skybox), so keep it to yourself.
+
+The launcher has four modes:
+
+- **Race**: an Arcade race against seven CTR racers, with weapon crates and wumpa fruit, round
+  a loop: outside long, long doors, long A, CT ramp, CT spawn, mid doors, mid.
+- **Time Trial**: the same loop alone against the clock.
+- **Free drive**: the whole map without laps (A site, B, the tunnels, T spawn).
+- **CTR menus**: the whole game from its title screen, with Dust 2 in Dingo Canyon's place.
 
 ## Controls (keyboard)
 
-| PS1 | key |
-|---|---|
-| Cross (gas) | C |
-| Square (brake) | X |
-| Circle (item) | V |
-| Triangle | Z |
-| L1 / R1 (hop, power slide) | Shift |
-| L2 | Ctrl |
-| D-pad | arrows |
-| Start | Enter |
-| Select | Space |
+| | key | PS1 |
+|---|---|---|
+| Steer | arrows | D-pad |
+| Gas | C | Cross |
+| Brake / reverse | X | Square |
+| Hop, power slide | Right Shift (hold through a turn) | R1 |
+| Slide boost | Left Shift (the other shoulder) | L1 |
+| Use item | V | Circle |
+| Look back | A or Right Ctrl (hold) | R2 |
+| Camera distance | Left Ctrl | L2 |
+| Skip the intro | Z | Triangle |
+| Pause | Enter | Start |
+| Full screen | F11 | |
 
-A gamepad works too.
+A gamepad works too, with CTR's own buttons.
+
+## Building by hand
+
+```sh
+python3 -I tools/build_dust2.py MODEL.glb DISC.bin build/lev   # the track
+./build-web.sh                                                  # the game -> build/web
+node tools/serve.mjs                                            # http://localhost:8642/
+```
+
+`?dust2&level=0&mode=1` boots straight into a race on Dust 2 (`mode=0` Time Trial,
+`dust2=free` free drive, `character=N`, `laps=N`); without `dust2`, `level=N` is any CTR track
+(`enum LevelID` in `engine/include/namespace_Level.h`). `tools/e2e/` drives the game headless
+(see its scripts' headers) and `NOTES.md` has what was learned on the way.
 
 ## Credits
 
