@@ -1,8 +1,9 @@
 /*
  * Web (Emscripten) glue: what the page asks of the game.
  *
- * Module.ctrBoot = { level, mode, character } boots straight into a race:
- * mode 0 = Time Trial, 1 = Arcade (single race), 2 = VS (no AI).
+ * Module.ctrBoot = { level, mode, character, laps, players } boots straight into a race:
+ * mode 0 = Time Trial, 1 = Arcade (single race), 2 = VS (no AI); players 1-4 split the
+ * screen (Arcade takes 1 or 2, VS 2 to 4).
  */
 #if defined(__EMSCRIPTEN__)
 #include <emscripten.h>
@@ -10,7 +11,7 @@
 EM_JS(int, NativeWeb_BootValue, (int index, int fallback), {
 	const boot = Module.ctrBoot;
 	if (!boot) return fallback;
-	const v = [boot.level, boot.mode, boot.character, boot.laps][index];
+	const v = [boot.level, boot.mode, boot.character, boot.laps, boot.players][index];
 	return (v === undefined || v === null || Number.isNaN(Number(v))) ? fallback : (Number(v) | 0);
 });
 
@@ -25,10 +26,19 @@ void NativeWeb_ApplyBootOverride(struct GameTracker *gGT)
 	const int mode = NativeWeb_BootValue(1, 0);
 	const int character = NativeWeb_BootValue(2, 0);
 	const int laps = NativeWeb_BootValue(3, 3);
+	int players = NativeWeb_BootValue(4, mode == 2 ? 2 : 1);
+	if (players < 1)
+	{
+		players = 1;
+	}
+	if (players > ((mode == 0) ? 1 : (mode == 1) ? 2 : 4))
+	{
+		players = (mode == 0) ? 1 : (mode == 1) ? 2 : 4;
+	}
 
 	gGT->levelID = level;
-	gGT->numPlyrNextGame = 1;
-	gGT->numPlyrCurrGame = 1;
+	gGT->numPlyrNextGame = (u8)players;
+	gGT->numPlyrCurrGame = (u8)players;
 	gGT->numLaps = (u8)laps;
 	gGT->gameMode1 &= ~(BATTLE_MODE | ADVENTURE_MODE | TIME_TRIAL | ADVENTURE_ARENA | ARCADE_MODE | ADVENTURE_CUP);
 	gGT->gameMode2 &= ~(CUP_ANY_KIND);
@@ -41,8 +51,13 @@ void NativeWeb_ApplyBootOverride(struct GameTracker *gGT)
 		gGT->gameMode1 |= ARCADE_MODE;
 	}
 	GAME_CHARACTER_IDS[0] = (s16)character;
+	for (int i = 1; i < players; i++)
+	{
+		// the other players: the next racers along, skipping player 1's
+		GAME_CHARACTER_IDS[i] = (s16)((character + i) % 8);
+	}
 
-	printf("[CTR Web] Boot override: level %d, mode %d, character %d, laps %d\n", level, mode, character, laps);
+	printf("[CTR Web] Boot override: level %d, mode %d, character %d, laps %d, players %d\n", level, mode, character, laps, players);
 }
 #endif
 
@@ -121,6 +136,33 @@ EMSCRIPTEN_KEEPALIVE int NativeWeb_GetState(int *out)
 }
 
 // Puts player 1's kart at (x, y, z) in level units, heading `angle` (4096 = full turn).
+// Prints the level's instances: what each InstDef became and how it's flagged.
+EMSCRIPTEN_KEEPALIVE void NativeWeb_DumpInstances(void)
+{
+	struct GameTracker *gGT = sdata->gGT;
+	struct Level *lev = gGT->level1;
+	if (lev == NULL)
+	{
+		return;
+	}
+	printf("[CTR Web] %d instances, %d players, LOD mask %d\n", lev->numInstances, gGT->numPlyrCurrGame,
+	       sdata->LOD[gGT->numPlyrCurrGame - 1]);
+	for (int i = 0; i < lev->numInstances; i++)
+	{
+		struct InstDef *def = &lev->ptrInstDefs[i];
+		struct Instance *inst = def->ptrInstance;
+		if (inst == NULL)
+		{
+			printf("[CTR Web]  %2d %-16.16s no instance\n", i, def->name);
+			continue;
+		}
+		struct Model *m = inst->model;
+		printf("[CTR Web]  %2d %-16.16s flags %08x thread %p headers %d lod0 %d pos %d %d %d\n", i, def->name, inst->flags,
+		       (void *)inst->thread, m ? m->numHeaders : -1, (m && m->numHeaders > 0) ? m->headers[0].maxDistanceLOD : -1,
+		       inst->matrix.t[0], inst->matrix.t[1], inst->matrix.t[2]);
+	}
+}
+
 EMSCRIPTEN_KEEPALIVE void NativeWeb_Teleport(int x, int y, int z, int angle)
 {
 	struct GameTracker *gGT = sdata->gGT;

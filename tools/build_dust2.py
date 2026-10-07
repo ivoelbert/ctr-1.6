@@ -10,6 +10,7 @@ Writes
   OUTDIR/dust2.lev        a race round long A and mid (a CTR LEV file, see levwriter.py)
   OUTDIR/dust2_b.lev      a race the long way round, through B site and the tunnels
   OUTDIR/dust2_free.lev   the map with no laps, checkpoints everywhere
+                          (each also as *_2p.lev, *_4p.lev and *_tt.lev: see MODES)
   OUTDIR/*_route.json     each race loop as a dense path, its checkpoints and AI lines (tests)
   OUTDIR/dust2_atlas.jpg  the model's textures in one image, sampled through tpage mode 3
   OUTDIR/dust2.json       numbers the page and the tests use (scale, spawn, atlas size, tracks)
@@ -754,10 +755,13 @@ def kill_plane(out, y=-1600, size=4096):
             out.append(q)
 
 
-BASE_LEVEL_ENTRY = 1   # Dingo Canyon, 1P races (BIGFILE entry 8 * level + 1)
+# Dingo Canyon's level files, one per mode (BIGFILE entry 8 * level + 1, 3, 5, 7). Each mode
+# loads its own texture file (the entry before) with its own VRAM layout, so Dust 2 is grafted
+# onto each mode's level in turn: the file suffix and the base entry.
+MODES = [('', 1), ('_2p', 3), ('_4p', 5), ('_tt', 7)]
 
 
-def base_level(disc):
+def base_levels(disc):
     from psxiso import Disc
     from bigfile import Bigfile
     from ctrlev import Lev
@@ -768,7 +772,7 @@ def base_level(disc):
             big = Bigfile(d.read(lba, size))
     if big is None:
         raise SystemExit('no BIGFILE.BIG on the disc')
-    return Lev(big.get(BASE_LEVEL_ENTRY)), big
+    return {entry: Lev(big.get(entry)) for _, entry in MODES}
 
 
 def base_flyin(lev):
@@ -821,31 +825,69 @@ def place_pickups(route, g, by_model):
                     return (int(x + dx), int(hit[1]), int(z + dz))
         return None
 
+    def floor_y(q, y):
+        hit = drivable_at(g, q[0], y, q[2], min_clear=1)
+        return None if hit is None or abs(hit[1] - y) >= 80 else hit[1]
+
+    def across(p, lat, half=640, step=16):
+        """The drivable stretch across the track at p, as lateral offsets (lo, hi): the run of
+        floor through the middle, or the one nearest it."""
+        runs, start, prev = [], None, None
+        for o in range(-half, half + 1, step):
+            good = floor_y(p + np.array([lat[0], 0, lat[1]]) * o, p[1]) is not None
+            if good and start is None:
+                start = o
+            if not good and start is not None:
+                runs.append((start, prev))
+                start = None
+            prev = o
+        if start is not None:
+            runs.append((start, prev))
+        if not runs:
+            return None
+        return min(runs, key=lambda r: 0 if r[0] <= 0 <= r[1] else min(abs(r[0]), abs(r[1])))
+
+    NUDGES = (0, 0.006, -0.006, 0.012, -0.012, 0.018, -0.018, 0.024, -0.024, 0.03, -0.03)
     out = []
+    # weapon crates: rows of four across the track, evenly spread over its drivable width
+    # (nudged along the track where it's too narrow)
     crates = list(by_model.get('crate_question', []))
     for f in (0.17, 0.40, 0.63, 0.86):
-        p, d, lat = frame(f)
-        yaw = int(round(math.atan2(d[0], d[1]) / (2 * math.pi) * 4096)) % 4096
-        for k in range(4):
-            for spread in (220, 160, 110):
-                q = floor_point(*(p + np.array([lat[0], 0, lat[1]]) * (k - 1.5) * spread), reach=0)
-                if q:
-                    break
-            else:
-                q = floor_point(*(p + np.array([lat[0], 0, lat[1]]) * (k - 1.5) * 110))
-            if q and crates:
-                out.append(dict(src=crates.pop(0), pos=q, rot=(0, yaw, 0)))
-            elif crates:
-                print(f'  no floor for a weapon crate at {p.astype(int).tolist()}')
+        for df in NUDGES:
+            p, d, lat = frame(f + df)
+            run = across(p, lat)
+            if run is None or (run[1] - run[0]) - 2 * 70 < 3 * 110:
+                continue
+            lo, hi = run[0] + 70, run[1] - 70
+            gap = min(220.0, (hi - lo) / 3)
+            yaw = int(round(math.atan2(d[0], d[1]) / (2 * math.pi) * 4096)) % 4096
+            for k in range(4):
+                q = p + np.array([lat[0], 0, lat[1]]) * ((lo + hi) / 2 + (k - 1.5) * gap)
+                y = floor_y(q, p[1])
+                if crates and y is not None:
+                    out.append(dict(src=crates.pop(0), pos=(int(q[0]), int(y), int(q[2])), rot=(0, yaw, 0)))
+            break
+        else:
+            print(f'  no room for a row of weapon crates at {f:.2f} of the loop')
+    # wumpa fruit: lines of four along the track, a little off the middle
     fruit = list(by_model.get('fruit', []))
     for f in (0.07, 0.29, 0.51, 0.74):
-        p, d, lat = frame(f)
-        for k in range(4):
-            q = floor_point(*(p + np.array([d[0], 0, d[1]]) * k * 160 + np.array([lat[0], 0, lat[1]]) * 90))
-            if q and fruit:
-                out.append(dict(src=fruit.pop(0), pos=q, rot=(0, 0, 0)))
-            elif fruit:
-                print(f'  no floor for wumpa fruit at {p.astype(int).tolist()}')
+        done = False
+        for df in NUDGES:
+            p, d, lat = frame(f + df)
+            for side in (90, 0, -90, 180, -180):
+                line = [p + np.array([d[0], 0, d[1]]) * k * 160 + np.array([lat[0], 0, lat[1]]) * side for k in range(4)]
+                ys = [floor_y(q, p[1]) for q in line]
+                if all(y is not None for y in ys):
+                    for q, y in zip(line, ys):
+                        if fruit:
+                            out.append(dict(src=fruit.pop(0), pos=(int(q[0]), int(y), int(q[2])), rot=(0, 0, 0)))
+                    done = True
+                    break
+            if done:
+                break
+        if not done:
+            print(f'  no room for a line of wumpa fruit at {f:.2f} of the loop')
     boxes = list(by_model.get('crate_fruit', []))
     for f, sidev in ((0.47, 1), (0.93, -1)):
         p, d, lat = frame(f)
@@ -857,6 +899,35 @@ def place_pickups(route, g, by_model):
         yaw = int(round(math.atan2(d[0], d[1]) / (2 * math.pi) * 4096)) % 4096
         out.append(dict(src=i, pos=(int(p[0]), int(p[1]) + 959, int(p[2])), rot=(0, (yaw - 2048) % 4096, 0)))
     return out
+
+
+def write_modes(outdir, name, out, nodes, spawns, nav, route, g, bases):
+    """The track as one LEV per mode, each grafted onto that mode's Dingo Canyon level."""
+    hitbox_of = {'crate_question': (76, 48), 'crate_fruit': (76, 48), 'fruit': (64, 64)}
+    info = None
+    for suffix, entry in MODES:
+        base = bases[entry]
+        by_model = base_instances(base)
+        names = {i: n for n, ids in by_model.items() for i in ids}
+        pickups = place_pickups(route, g, by_model)
+        hitboxes = []
+        for k, pk in enumerate(pickups):
+            kind = names.get(pk['src'])
+            if kind in hitbox_of:
+                r, lift = hitbox_of[kind]
+                hitboxes.append(dict(inst=k, radius=r, lift=lift, flags=0x4C0))
+        lv = Level(quads=out, nodes=nodes, spawns=spawns,
+                   clear_colors=[(170, 190, 220, 1), (230, 200, 160, 1), (200, 210, 230, 1)],
+                   build_name='de_dust2', nav_paths=nav, base=base, instances=pickups, hitboxes=hitboxes,
+                   flyin=base_flyin(base))
+        data, mode_info = write_level(lv)
+        data += b'\0' * ((-len(data)) % 2048)
+        with open(os.path.join(outdir, f'{name}{suffix}.lev'), 'wb') as f:
+            f.write(data)
+        print(f'  {name}{suffix}.lev: {len(pickups)} pickups, {len(data)} bytes')
+        if info is None:
+            info = dict(mode_info, bytes=len(data))
+    return info
 
 
 def main(glb, disc, outdir):
@@ -875,52 +946,32 @@ def main(glb, disc, outdir):
     landmarks = landmark_positions(tris)
     g = NavGrid([(q.flags, q.pos, q.triangle) for q in out])
     kill_plane(out)
-    base, big = base_level(disc)
-    by_model = base_instances(base)
-    names = {i: n for n, ids in by_model.items() for i in ids}
-    hitbox_of = {'crate_question': (76, 48), 'crate_fruit': (76, 48), 'fruit': (64, 64)}
+    bases = base_levels(disc)
     tracks = {}
     first = None
     for name, stops in LOOPS.items():
         print(f'{name}:')
         nodes, spawns, route, nav = race_setup(out, g, landmarks, stops)
-        pickups = place_pickups(route, g, by_model)
-        print(f'{len(pickups)} pickups placed')
-        hitboxes = []
-        for k, pk in enumerate(pickups):
-            kind = names.get(pk['src'])
-            if kind in hitbox_of:
-                r, lift = hitbox_of[kind]
-                hitboxes.append(dict(inst=k, radius=r, lift=lift, flags=0x4C0))
-        lv = Level(quads=out, nodes=nodes, spawns=spawns,
-                   clear_colors=[(170, 190, 220, 1), (230, 200, 160, 1), (200, 210, 230, 1)],
-                   build_name='de_dust2', nav_paths=nav, base=base, instances=pickups, hitboxes=hitboxes,
-                   flyin=base_flyin(base))
-        data, info = write_level(lv)
-        data += b'\0' * ((-len(data)) % 2048)
-        with open(os.path.join(outdir, f'{name}.lev'), 'wb') as f:
-            f.write(data)
+        info = write_modes(outdir, name, out, nodes, spawns, nav, route, g, bases)
         with open(os.path.join(outdir, f'{name}_route.json'), 'w') as f:
             json.dump(route, f)
         tracks[name] = dict(lev=f'{name}.lev', route=f'{name}_route.json', length=route['length'],
                             spawn=spawns[0], stops=stops)
-        print(info, 'bytes', len(data))
+        print(info)
         if first is None:
-            first = (lv, spawns, info, len(data))
+            first = (spawns, nav, route, info)
 
-    # free drive: the first loop's level with checkpoints everywhere and no laps
-    lv, spawns, info, size_bytes = first
+    # free drive: the first loop's start, pickups and AI lines, checkpoints everywhere, no laps
+    spawns, nav, route, info = first
+    print('dust2_free:')
     free_nodes, free_cp = free_setup(out, g)
     for qi, q in enumerate(out):
         q.checkpoint = free_cp.get(qi, 0xFF)
-    lv.nodes = free_nodes
-    free, _ = write_level(lv)
-    free += b'\0' * ((-len(free)) % 2048)
-    with open(os.path.join(outdir, 'dust2_free.lev'), 'wb') as f:
-        f.write(free)
+    write_modes(outdir, 'dust2_free', out, free_nodes, spawns, nav, route, g, bases)
     size = build_atlas(imgs, os.path.join(outdir, 'dust2_atlas.jpg'))
     meta = dict(scale=SCALE, center=CENTER, atlas=dict(image='dust2_atlas.jpg', width=size[0], height=size[1]),
-                spawn=spawns[0], info=info, bytes=size_bytes, landmarks=landmarks, tracks=tracks)
+                spawn=spawns[0], info=info, landmarks=landmarks, tracks=tracks,
+                modes=[suffix for suffix, _ in MODES])
     with open(os.path.join(outdir, 'dust2.json'), 'w') as f:
         json.dump(meta, f, indent=1)
 

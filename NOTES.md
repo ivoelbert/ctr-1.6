@@ -33,7 +33,14 @@ the map.
   keep CLUTs >= 1024 (atlas cells start at 1).
 - Must-haves: an AnimTex list that points to itself; SpawnType1 with 7 null slots after it
   (GhostReplay reads slots 4 and 5 regardless of count).
-- Time Trial and Relic load entry 8 * level + 7; 1P races + 1, 2P + 3, 4P + 5.
+- Time Trial and Relic load entry 8 * level + 7; 1P races + 1, 2P + 3, 4P + 5. Each mode
+  also loads its own texture file (the VRM, the entry before), with its own VRAM layout and
+  some of the mode's HUD textures: a LEV's model texture layouts only match its own mode's
+  VRM. So Dust 2 is grafted onto each of Dingo Canyon's four LEVs (`MODES`), and the page
+  loads all four. (One 1P LEV in every mode gave pink, then vanishing, crates in split screen;
+  loading the 1P VRM everywhere fixed those but broke the 2P HUD's fruit.)
+- Instances draw only if their flags have the bit for the player count (`sdata->LOD`: 1P 1,
+  2P 2, 3-4P 4, relic 8).
 - Laps: distToFinish (x8) must exceed 32000 at the line; a lap counts when it jumps from
   < 1200 to > 32000. Checkpoint indices are u8 (255 = none). Mask grab fires on GROUND
   quadblocks that jump more than a quarter lap ahead of the last valid one.
@@ -69,4 +76,5 @@ the map.
 
 - Minimap; the tunnels loop in the CTR menus too (another slot, with Dingo Canyon's VRM).
 - Black (unbaked) faces; kart lighting from the baked light; wall snags.
-- 2P/4P check.
+- 2P/4P: work (tested with fake gamepads, `tools/e2e/lib.mjs`). With one gamepad, the gamepad
+  is player 1 and the keyboard player 2.

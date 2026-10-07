@@ -189,16 +189,20 @@
     };
   }
 
-  // Dust 2 takes Dingo Canyon's slot (level 0): its LEV replaces the 1P, 2P, 4P and
-  // Time Trial/Relic files (BIGFILE entries 1, 3, 5, 7), and its textures go in the atlas
-  // the renderer samples for tpage mode 3 ("CTRA", width, height, RGBA).
+  // Dust 2 takes Dingo Canyon's slot (level 0): its LEVs replace the 1P, 2P, 4P and
+  // Time Trial/Relic files (BIGFILE entries 1, 3, 5, 7; each is grafted onto the one it
+  // replaces, to match that mode's textures), and the model's textures go in the atlas the
+  // renderer samples for tpage mode 3 ("CTRA", width, height, RGBA).
   const TRACK_NAMES = { dust2: 'DUST 2', dust2_b: 'DUST 2 TUNNELS', dust2_free: 'DUST 2' };
   async function loadDust2(levName) {
     const base = params.get('dust2dir') || 'lev/';
     const meta = await (await fetch(base + 'dust2.json', { cache: 'no-store' })).json();
-    const lev = await fetchWithProgress(base + levName, 'Dust 2');
+    const name = levName.replace(/\.lev$/, '');
     Module.FS.mkdirTree('/assets/override');
-    for (const entry of ['001', '003', '005', '007']) Module.FS.writeFile(`/assets/override/${entry}.bin`, lev);
+    for (const [suffix, entry] of [['', '001'], ['_2p', '003'], ['_4p', '005'], ['_tt', '007']]) {
+      const lev = await fetchWithProgress(`${base}${name}${suffix}.lev`, 'Dust 2');
+      Module.FS.writeFile(`/assets/override/${entry}.bin`, lev);
+    }
     const jpg = await fetchWithProgress(base + meta.atlas.image, 'Textures');
     const bitmap = await createImageBitmap(new Blob([jpg], { type: 'image/jpeg' }));
     const { width, height } = bitmap;
@@ -213,7 +217,7 @@
     file.set(pixels, 12);
     Module.FS.mkdirTree('/assets/dust2');
     Module.FS.writeFile('/assets/dust2/atlas.rgba', file);
-    Module.ctrRename = { 0: TRACK_NAMES[levName.replace(/\.lev$/, '')] || 'DUST 2' };
+    Module.ctrRename = { 0: TRACK_NAMES[name] || 'DUST 2' };
     window.ctrDust2 = meta;
   }
 
@@ -261,7 +265,7 @@
   // The engine suspends its game loop at each VBlank wait through JSPI.
   const hasJspi = typeof WebAssembly.Suspending === 'function' && typeof WebAssembly.promising === 'function';
 
-  // ?level=N&mode=0|1|2&character=N&laps=N[&dust2[=b|free]] boots straight away (tests, links);
+  // ?level=N&mode=0|1|2&character=N&laps=N&players=N[&dust2[=b|free]] boots straight away (tests, links);
   // with no parameters the launcher asks.
   if (!hasJspi) {
     launcher.hidden = false;
@@ -271,6 +275,7 @@
     const boot = params.has('level') ? {
       level: Number(params.get('level')), mode: Number(params.get('mode') ?? 0),
       character: Number(params.get('character') ?? 0), laps: Number(params.get('laps') ?? 3),
+      players: params.has('players') ? Number(params.get('players')) : undefined,
     } : null;
     const which = params.get('dust2');
     const dust2 = params.has('dust2') ? ({ free: 'dust2_free.lev', b: 'dust2_b.lev' }[which] || 'dust2.lev') : null;
