@@ -884,7 +884,9 @@ const char *gte_shader_32_rgba = "	uniform sampler2D s_texture;\n"
 // NOTE(ctr-dust2): Virtual atlas sampling. The standard PSX vertex shader packs
 // the CLUT into v_page_clut.zw; undo that, then
 //   layer = clut >> 10, origin = layer cell (4 per row, 1024 texels) + 32 * (clut & 31, (clut >> 5) & 31)
-// and sample the RGBA atlas at origin + the primitive's texel UV (mipmapped).
+// and sample the RGBA atlas at origin + the primitive's texel UV (mipmapped). The atlas
+// textures carry their own baked light: vertex colours are left out (a custom level's floor
+// colours only light the karts, COLL_FIXED_PlayerSearch_UpdateLighting).
 const char *gte_shader_virtual_atlas = "	uniform sampler2D s_texture;\n"
                                        "	uniform int psxDrawMaskSet;\n"
                                        "	uniform vec2 atlasSize;\n"
@@ -897,7 +899,7 @@ const char *gte_shader_virtual_atlas = "	uniform sampler2D s_texture;\n"
                                        "		vec2 origin = vec2(mod(layer, 4.0) * 1024.0 + mod(cell, 32.0) * 32.0,\n"
                                        "		                   floor(layer / 4.0) * 1024.0 + floor(cell / 32.0) * 32.0);\n"
                                        "		vec4 color = texture2D(s_texture, (origin + v_texcoord.xy) / atlasSize);\n"
-                                       "		fragColor = dither(vec4(color.rgb, 1.0) * v_color);\n"
+                                       "		fragColor = dither(vec4(color.rgb, v_color.a));\n"
                                        "		fragColor.a = float(psxDrawMaskSet);\n"
                                        "	}\n";
 

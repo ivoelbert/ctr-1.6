@@ -44,6 +44,14 @@ MAX_UV_SPAN = 255 - PAGE_ALIGN
 TPAGE_ATLAS = 3 << 7    # color mode 3
 DOUBLE_SIDED = os.environ.get('DOUBLE_SIDED') == '1'
 
+# Kart lighting: the game shades a kart by the vertex colours of the floor under it (brightness
+# 0x60 and up is full light, less fades it toward black: COLL_FIXED_PlayerSearch_UpdateLighting).
+# Floors get the model's baked light there, sunlit sand (SUNLIT) at 0x60; the renderer draws
+# atlas textures without vertex colours, so the level looks the same.
+SUNLIT = 190.0          # luminance of sunlit sand in the model's light maps
+SHADE_MIN = 20          # the darkest floor colour: a kart is never quite black
+light_maps = None       # per atlas layer: blurred luminance, set by main()
+
 
 def to_ctr(p):
     p = np.asarray(p, dtype=np.float64)
@@ -304,8 +312,47 @@ def quad_block(P9, UV9, layer, n, triangle, solid=True):
     low = layout(np.array([UV9[c] for c in (0, 1, 2, 3)]), layer, origin)
     flags, terrain = surface_flags(n, solid)
     pos = [tuple(int(round(v)) for v in p) for p in P9]
+    color = None
+    if flags & FLAG_GROUND and light_maps is not None:
+        color = [floor_shade(layer, uv) for uv in UV9]
     return Quad(pos=pos, faces=faces, low=low, flags=flags, terrain=terrain, triangle=triangle,
-                double_sided=DOUBLE_SIDED)
+                double_sided=DOUBLE_SIDED, color=color)
+
+
+def floor_shade(layer, uv):
+    """A floor vertex colour from the baked light at its texel (see SUNLIT)."""
+    lum = light_maps[layer]
+    x = int(np.clip(uv[0], 0, lum.shape[1] - 1))
+    y = int(np.clip(uv[1], 0, lum.shape[0] - 1))
+    v = int(round(np.clip(0x60 * lum[y, x] / SUNLIT, SHADE_MIN, 0xFF)))
+    return (v, v, v)
+
+
+def shade_ramps(out):
+    """Invisible floors (stair ramps) take the shade of the nearest drawn floor vertex."""
+    lit = [(p, c) for q in out if q.flags & FLAG_GROUND and q.color for p, c in zip(q.pos, q.color)]
+    if not lit:
+        return
+    P = np.array([p for p, _ in lit], dtype=np.float64)
+    C = [c for _, c in lit]
+    for q in out:
+        if q.flags & FLAG_GROUND and q.faces[0] is None and q.color is None:
+            colors = []
+            for p in q.pos:
+                d = np.abs(P - np.array(p, dtype=np.float64)).sum(axis=1)
+                colors.append(C[int(np.argmin(d))])
+            q.color = colors
+
+
+def load_light_maps(imgs):
+    """Blurred luminance of each model texture, by atlas layer (cell 0 is empty)."""
+    from PIL import ImageFilter
+    maps = {}
+    for i, data in enumerate(imgs):
+        im = Image.open(io.BytesIO(data)).convert('RGB').filter(ImageFilter.BoxBlur(4))
+        a = np.asarray(im, dtype=np.float32)
+        maps[i + 1] = 0.299 * a[..., 0] + 0.587 * a[..., 1] + 0.114 * a[..., 2]
+    return maps
 
 
 def bilinear(c, s, t):
@@ -931,9 +978,11 @@ def write_modes(outdir, name, out, nodes, spawns, nav, route, g, bases):
 
 
 def main(glb, disc, outdir):
+    global light_maps
     from navgrid import NavGrid
     os.makedirs(outdir, exist_ok=True)
     tris, imgs = load(glb)
+    light_maps = load_light_maps(imgs)
     out = []
     add_stair_ramps(tris, out)
     quads, singles = pair_quads(tris)
@@ -941,6 +990,7 @@ def main(glb, disc, outdir):
         emit_quad(pts, uvs, layer, n, out, solid=solid)
     for t in singles:
         emit_triangle(t.p, t.uv, t.layer, t.n, out, solid=t.solid)
+    shade_ramps(out)
     print(f'{len(out)} quadblocks')
 
     landmarks = landmark_positions(tris)
