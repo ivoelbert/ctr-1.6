@@ -912,7 +912,10 @@ const char *gte_shader_virtual_atlas = "	uniform sampler2D s_texture;\n"
                                        "		fragColor.a = float(psxDrawMaskSet);\n"
                                        "	}\n";
 
-#define GTE_PERSPECTIVE_CORRECTION "	gl_Position = Projection * vec4(a_position.xy, 0.0, 1.0);\n"
+// NOTE(ctr-dust2): a_extra.zw is an outward nudge (1/32 pixel units) that native_gpu.c gives
+// custom-level atlas polygons so neighbours overlap instead of leaving pixel cracks; only the
+// atlas program sets u_extraOffsetScale (the others leave it 0).
+#define GTE_PERSPECTIVE_CORRECTION "	gl_Position = Projection * vec4(a_position.xy + a_extra.zw * u_extraOffsetScale, 0.0, 1.0);\n"
 
 #define GTE_VERTEX_SHADER                                                                                          \
 	"	attribute vec4 a_position;\n"                                                                                \
@@ -920,6 +923,7 @@ const char *gte_shader_virtual_atlas = "	uniform sampler2D s_texture;\n"
 	"	attribute vec4 a_color;\n"                                                                                   \
 	"	attribute vec4 a_extra; // texcoord.xy ofs, unused.xy\n"                                                     \
 	"	uniform mat4 Projection;\n"                                                                                  \
+	"	uniform float u_extraOffsetScale;\n"                                                                         \
 	"	const vec2 c_UVFudge = vec2(0.00025, 0.00025);\n"                                                            \
 	"	void main() {\n"                                                                                             \
 	"		v_ditherCoord = a_position.xy;\n"                                                                           \
@@ -1133,6 +1137,15 @@ internal void NativeRenderer_InitialisePSXShaders(void)
 	NativeRenderer_CompilePSXShader(&s_gteShader32Rgba, gte_shader_32_rgba);
 	NativeRenderer_CompilePSXShader(&s_gteShaderVirtualAtlas, gte_shader_virtual_atlas);
 	s_virtualAtlasSizeLoc = glGetUniformLocation(s_gteShaderVirtualAtlas.shader, "atlasSize");
+	{
+		GLint offsetLoc = glGetUniformLocation(s_gteShaderVirtualAtlas.shader, "u_extraOffsetScale");
+		if (offsetLoc >= 0)
+		{
+			glUseProgram(s_gteShaderVirtualAtlas.shader);
+			glUniform1f(offsetLoc, 1.0f / 32.0f);
+			glUseProgram(0);
+		}
+	}
 }
 
 // NOTE(ctr-dust2): Loads a custom level's texture atlas: "CTRA", u32 width,

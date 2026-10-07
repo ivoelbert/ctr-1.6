@@ -26,6 +26,7 @@ import json
 import math
 import os
 import struct
+import subprocess
 import sys
 
 import numpy as np
@@ -634,8 +635,14 @@ def bilinear(c, s, t):
     return (1 - s) * (1 - t) * c[0] + s * (1 - t) * c[1] + (1 - s) * t * c[2] + s * t * c[3]
 
 
-def emit_quad(pts, uvs, layer, n, out, depth=0, solid=True):
-    """pts/uvs in cyclic order A, B, C, D (CCW about n). Tessellates into quadblocks."""
+def hlen(a, b):
+    """Horizontal (xz) length of a - b."""
+    return math.hypot(a[0] - b[0], a[2] - b[2])
+
+
+def emit_quad(pts, uvs, layer, n, out, depth=0, solid=True, cut=None):
+    """pts/uvs in cyclic order A, B, C, D (CCW about n). Tessellates into quadblocks, and into
+    pieces at most `cut` long horizontally when given (see painter_cuts)."""
     A, B, C, D = pts
     uA, uB, uC, uD = uvs
     # slots 0, 1, 2, 3 = A, D, B, C makes (p2 - p0) x (p1 - p0) = (B - A) x (D - A) face n
@@ -650,6 +657,11 @@ def emit_quad(pts, uvs, layer, n, out, depth=0, solid=True):
     uv_t = max(np.abs(ucorners[2] - ucorners[0]).max(), np.abs(ucorners[3] - ucorners[1]).max())
     ns = max(1, math.ceil(len_s / max_edge(n)), math.ceil(uv_s / MAX_UV_SPAN * 1.0001))
     nt = max(1, math.ceil(len_t / max_edge(n)), math.ceil(uv_t / MAX_UV_SPAN * 1.0001))
+    if cut:
+        hs = max(hlen(corners[1], corners[0]), hlen(corners[3], corners[2]))
+        ht = max(hlen(corners[2], corners[0]), hlen(corners[3], corners[1]))
+        ns = max(ns, math.ceil(hs / cut - 1e-6))
+        nt = max(nt, math.ceil(ht / cut - 1e-6))
     for i in range(ns):
         for j in range(nt):
             s0, s1 = i / ns, (i + 1) / ns
@@ -675,19 +687,21 @@ def emit_quad(pts, uvs, layer, n, out, depth=0, solid=True):
                     if np.dot(np.cross(pp[1] - pp[0], pp[3] - pp[0]), n) < 0:
                         pp = pp[[0, 3, 2, 1]]
                         uu = [uu[0], uu[3], uu[2], uu[1]]
-                    emit_quad(pp, np.array(uu), layer, n, out, depth + 1, solid)
+                    emit_quad(pp, np.array(uu), layer, n, out, depth + 1, solid, cut)
                 continue
             out.append(q)
 
 
-def emit_triangle(p, uv, layer, n, out, solid=True):
+def emit_triangle(p, uv, layer, n, out, solid=True, cut=None):
     """Subdivides a triangle into a k x k grid: parallelogram cells become quadblocks, the
-    diagonal row triangle quadblocks."""
+    diagonal row triangle quadblocks. cut: as for emit_quad."""
     a, b, c = p
     ua, ub, uc = uv
     longest = max(np.linalg.norm(b - a), np.linalg.norm(c - a), np.linalg.norm(c - b))
     uvlong = max(np.abs(ub - ua).max(), np.abs(uc - ua).max(), np.abs(uc - ub).max())
     k = max(1, math.ceil(longest / max_edge(n)), math.ceil(uvlong / MAX_UV_SPAN * 1.0001))
+    if cut:
+        k = max(k, math.ceil(max(hlen(b, a), hlen(c, a), hlen(c, b)) / cut - 1e-6))
 
     def P(i, j):
         return a + (b - a) * (i / k) + (c - a) * (j / k)
@@ -703,7 +717,7 @@ def emit_triangle(p, uv, layer, n, out, solid=True):
                 if np.dot(np.cross(pts[1] - pts[0], pts[3] - pts[0]), n) < 0:
                     pts = pts[[0, 3, 2, 1]]
                     uvs = uvs[[0, 3, 2, 1]]
-                emit_quad(pts, uvs, layer, n, out, solid=solid)
+                emit_quad(pts, uvs, layer, n, out, solid=solid, cut=cut)
             else:
                 t = [P(i, j), P(i + 1, j), P(i, j + 1)]
                 tu = [U(i, j), U(i + 1, j), U(i, j + 1)]
@@ -1545,16 +1559,91 @@ def fix_t_junctions(tris, eps=0.6, cell=32.0, which=is_floor):
     return out
 
 
-def emit_level(tris, ramps):
-    """Quadblocks for the model's triangles, after the stair ramps."""
+def emit_level(tris, ramps, cuts=None):
+    """Quadblocks for the model's triangles, after the stair ramps. Each gets .src, the polygon
+    it comes from (('q', i): a merged pair, ('t', i): a lone triangle; None: a ramp), and
+    cuts {src: length} cuts some shorter (see painter_cuts)."""
+    cuts = cuts or {}
     out = list(ramps)
+    for q in out:
+        q.src = None
     tris = fix_t_junctions(grid_cut_floors(tris))
     quads, singles = pair_quads(tris)
-    for pts, uvs, layer, n, solid in quads:
-        emit_quad(pts, uvs, layer, n, out, solid=solid)
-    for t in singles:
-        emit_triangle(t.p, t.uv, t.layer, t.n, out, solid=t.solid)
+    for i, (pts, uvs, layer, n, solid) in enumerate(quads):
+        first = len(out)
+        emit_quad(pts, uvs, layer, n, out, solid=solid, cut=cuts.get(('q', i)))
+        for q in out[first:]:
+            q.src = ('q', i)
+    for i, t in enumerate(singles):
+        first = len(out)
+        emit_triangle(t.p, t.uv, t.layer, t.n, out, solid=t.solid, cut=cuts.get(('t', i)))
+        for q in out[first:]:
+            q.src = ('t', i)
     shade_ramps(out)
+    return out
+
+
+# The painter's order (tools/painter.py): CTR sorts each level face by its farthest corner, so
+# a long wall seen along its length sorts as far as its far end and what stands just behind its
+# near part gets painted over it (the A-site crates over the wall of long A). The audit renders
+# the level from chase-camera views all over the drivable floor; the polygons whose quadblocks
+# have something painted over them are cut into shorter pieces, which sort by nearer far
+# corners, a round per length. The cuts cost vertices, which the format caps at 65536.
+PAINTER_CUTS = (256.0, 128.0)
+PAINTER_MIN_PIXELS = 40     # summed over the audit's views (at half the game's resolution)
+VERTEX_BUDGET = 64000
+
+
+def vertex_count(quads):
+    """The level's vertices as write_level counts them: one per position and colour."""
+    keys = set()
+    for q in quads:
+        colors = q.color or [(0x80, 0x80, 0x80)] * 9
+        for p, c in zip(q.pos, colors):
+            keys.add((tuple(p), tuple(c[:3])))
+    return len(keys)
+
+
+def face_drawn(q, fi):
+    f = q.faces[fi]
+    return not q.hidden and f is not None and (f.clut >> 10) != 15
+
+
+def painter_cuts(tris, ramps, out, g, start):
+    """`out` again, with the polygons the painter's audit flags cut shorter (see above)."""
+    import tempfile
+    import time
+    import painter
+    t0 = time.time()
+    views = painter.chase_views(g, start)
+    cuts = {}
+    with tempfile.TemporaryDirectory() as tmp:
+        try:
+            painter.painter_binary(tmp)
+        except (OSError, subprocess.CalledProcessError) as e:
+            print(f'painter audit skipped (no C compiler? {e})')
+            return out
+        for length in PAINTER_CUTS:
+            per_quad, per_view = painter.audit(out, views, tmp, face_drawn, near_first=True)
+            score = per_quad[:, 0] + per_quad[:, 1]
+            more = dict(cuts)
+            for qi in np.nonzero(score >= PAINTER_MIN_PIXELS)[0]:
+                src = out[qi].src
+                if src is not None and more.get(src, math.inf) > length:
+                    more[src] = length
+            seen = [v for v in per_view if v is not None]
+            changed = sum(1 for k, v in more.items() if cuts.get(k) != v)
+            print(f'painter audit: {sum(e for e, _ in seen)} + {sum(t for _, t in seen)} pixels painted out of order '
+                  f'in {len(seen)} views; cutting {changed} polygons to {length:.0f}')
+            cut_out = emit_level(tris, ramps, more)
+            if vertex_count(cut_out) > VERTEX_BUDGET:
+                print(f'  that makes {vertex_count(cut_out)} vertices, over {VERTEX_BUDGET}: stopping')
+                break
+            cuts, out = more, cut_out
+        per_quad, per_view = painter.audit(out, views, tmp, face_drawn, near_first=True)
+    seen = [v for v in per_view if v is not None]
+    print(f'painter audit: {sum(e for e, _ in seen)} + {sum(t for _, t in seen)} pixels left out of order, '
+          f'{vertex_count(out)} vertices ({time.time() - t0:.0f} s)')
     return out
 
 
@@ -1611,6 +1700,7 @@ def main(glb, disc, outdir):
     print(f'{len(twins)} triangles seen from behind get a reversed twin ({time.time() - t0:.0f} s)')
     if twins:
         out = emit_level(tris + twins, ramps)
+    out = painter_cuts(tris + twins, ramps, out, g, g.nearest(s[0], s[1] or 0, s[2]))
     print(f'{len(out)} quadblocks')
     kill_plane(out)
     bases, vrms = base_levels(disc)

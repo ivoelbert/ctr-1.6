@@ -10,6 +10,7 @@
 #include <platform.h>
 
 #include <SDL3/SDL.h>
+#include <math.h>
 
 #include "platform/native_log.h"
 #include "platform/native_perf.h"
@@ -724,6 +725,82 @@ void MakeColourQuad(GrVertex *vertex, bool shadeTexOn, u8 *col0, u8 *col1, u8 *c
 	vertex[3].a = 255;
 }
 
+// NOTE(ctr-dust2): neighbouring atlas polygons (custom levels) don't always share their edges
+// exactly: T-junctions in the model, neighbours the level renderer subdivided differently. With
+// the PS1's whole-pixel vertices that leaves 1-pixel cracks. Each atlas polygon is pushed out by
+// a fraction of a pixel (every edge moves out by NATIVE_GPU_ATLAS_DILATE pixels: a per-vertex
+// offset in the spare bytes, applied by the atlas program's vertex shader) so neighbours overlap.
+#define NATIVE_GPU_ATLAS_DILATE   0.6f
+#define NATIVE_GPU_ATLAS_DILATE_MAX 1.5f
+
+internal bool NativeGpu_IsAtlasTPage(int tpage)
+{
+	return (((tpage >> 7) & 0x3) == 3) && (NativeRenderer_GetVirtualAtlasTexture() != 0);
+}
+
+internal void NativeGpu_DilateAtlasPolygon(GrVertex *v, int n)
+{
+	float area2 = 0.0f;
+	for (int i = 0; i < n; i++)
+	{
+		const GrVertex *a = &v[i];
+		const GrVertex *b = &v[(i + 1) % n];
+		area2 += (float)a->x * (float)b->y - (float)b->x * (float)a->y;
+	}
+	if (area2 == 0.0f)
+	{
+		return;
+	}
+	const float side = (area2 > 0.0f) ? 1.0f : -1.0f;
+
+	for (int i = 0; i < n; i++)
+	{
+		const GrVertex *p = &v[(i + n - 1) % n];
+		GrVertex *c = &v[i];
+		const GrVertex *q = &v[(i + 1) % n];
+		float e1x = (float)(c->x - p->x), e1y = (float)(c->y - p->y);
+		float e2x = (float)(q->x - c->x), e2y = (float)(q->y - c->y);
+		float l1 = sqrtf(e1x * e1x + e1y * e1y);
+		float l2 = sqrtf(e2x * e2x + e2y * e2y);
+		if ((l1 < 0.5f) && (l2 < 0.5f))
+		{
+			continue;
+		}
+		if (l1 < 0.5f)
+		{
+			e1x = e2x, e1y = e2y, l1 = l2;
+		}
+		if (l2 < 0.5f)
+		{
+			e2x = e1x, e2y = e1y, l2 = l1;
+		}
+		// outward normals of the two edges at this corner
+		float n1x = side * e1y / l1, n1y = -side * e1x / l1;
+		float n2x = side * e2y / l2, n2y = -side * e2x / l2;
+		float d = 1.0f + n1x * n2x + n1y * n2y;
+		float ox, oy;
+		if (d > 0.1f)
+		{
+			// moves both edges out by exactly the dilation
+			ox = NATIVE_GPU_ATLAS_DILATE * (n1x + n2x) / d;
+			oy = NATIVE_GPU_ATLAS_DILATE * (n1y + n2y) / d;
+		}
+		else
+		{
+			ox = NATIVE_GPU_ATLAS_DILATE * (n1x + n2x);
+			oy = NATIVE_GPU_ATLAS_DILATE * (n1y + n2y);
+		}
+		float len = sqrtf(ox * ox + oy * oy);
+		if (len > NATIVE_GPU_ATLAS_DILATE_MAX)
+		{
+			ox *= NATIVE_GPU_ATLAS_DILATE_MAX / len;
+			oy *= NATIVE_GPU_ATLAS_DILATE_MAX / len;
+		}
+		c->_p0 = (s8)lroundf(ox * 32.0f);
+		c->_p1 = (s8)lroundf(oy * 32.0f);
+	}
+}
+
 void TriangulateQuad()
 {
 	/*
@@ -1419,6 +1496,10 @@ internal int ProcessFlatPoly(P_TAG *polyTag)
 			MakeTexcoordTriangle(firstVertex, &poly->u0, &poly->u1, &poly->u2, poly->tpage, poly->clut,
 			                     GET_TPAGE_DITHER(activeDrawEnv.tpage) || activeDrawEnv.dtd);
 			MakeColourTriangle(firstVertex, shadeTexOn, &poly->r0, &poly->r0, &poly->r0);
+			if (NativeGpu_IsAtlasTPage(poly->tpage))
+			{
+				NativeGpu_DilateAtlasPolygon(firstVertex, 3);
+			}
 
 			s_gpu.vertexIndex += 3;
 		}
@@ -1452,6 +1533,10 @@ internal int ProcessFlatPoly(P_TAG *polyTag)
 		MakeTexcoordQuad(firstVertex, &poly->u0, &poly->u1, &poly->u3, &poly->u2, poly->tpage, poly->clut,
 		                 GET_TPAGE_DITHER(activeDrawEnv.tpage) || activeDrawEnv.dtd);
 		MakeColourQuad(firstVertex, shadeTexOn, &poly->r0, &poly->r0, &poly->r0, &poly->r0);
+		if (NativeGpu_IsAtlasTPage(poly->tpage))
+		{
+			NativeGpu_DilateAtlasPolygon(firstVertex, 4);
+		}
 
 		TriangulateQuad();
 
@@ -1497,6 +1582,10 @@ internal int ProcessGouraudPoly(P_TAG *polyTag)
 		MakeVertexTriangle(firstVertex, &poly->x0, &poly->x1, &poly->x2);
 		MakeTexcoordTriangle(firstVertex, &poly->u0, &poly->u1, &poly->u2, poly->tpage, poly->clut, GET_TPAGE_DITHER(activeDrawEnv.tpage) || activeDrawEnv.dtd);
 		MakeColourTriangle(firstVertex, shadeTexOn, &poly->r0, &poly->r1, &poly->r2);
+		if (NativeGpu_IsAtlasTPage(poly->tpage))
+		{
+			NativeGpu_DilateAtlasPolygon(firstVertex, 3);
+		}
 
 		s_gpu.vertexIndex += 3;
 
@@ -1531,6 +1620,10 @@ internal int ProcessGouraudPoly(P_TAG *polyTag)
 		MakeTexcoordQuad(firstVertex, &poly->u0, &poly->u1, &poly->u3, &poly->u2, poly->tpage, poly->clut,
 		                 GET_TPAGE_DITHER(activeDrawEnv.tpage) || activeDrawEnv.dtd);
 		MakeColourQuad(firstVertex, shadeTexOn, &poly->r0, &poly->r1, &poly->r3, &poly->r2);
+		if (NativeGpu_IsAtlasTPage(poly->tpage))
+		{
+			NativeGpu_DilateAtlasPolygon(firstVertex, 4);
+		}
 
 		TriangulateQuad();
 
@@ -1830,9 +1923,24 @@ internal int ProcessPsyXPrims(P_TAG *polyTag)
 
 // Processes primitive
 // returns processed primitive primLength in longs
+// NOTE(ctr-dust2): the handlers below append a primitive's vertices to s_gpu.vertexBuffer
+// without checking its end, and past it lie the draw splits and other globals. A heavy frame
+// (Dust 2 at the long doors: its walls cut short near the camera, each face subdivided) went
+// past MAX_VERTEX_BUFFER_SIZE and garbled the HUD, the kart and then everything. Before a
+// primitive, if the batch is nearly full, what's batched is drawn (as before a VRAM move), so
+// the painting order stays the same and nothing is dropped.
+#define NATIVE_GPU_VERTEX_HEADROOM 1024
+
 int ParsePrimitive(P_TAG *polyTag)
 {
 	const int primType = polyTag->code & 0xF0;
+
+	if (s_gpu.vertexIndex > (int)MAX_VERTEX_BUFFER_SIZE - NATIVE_GPU_VERTEX_HEADROOM)
+	{
+		GPUDrawSplit *lastSplit = &s_gpu.splits[s_gpu.splitIndex];
+		lastSplit->numVerts = s_gpu.vertexIndex - lastSplit->startVertex;
+		DrawAllSplits();
+	}
 
 	int primLength = 0;
 	bool handledZeroLength = false;

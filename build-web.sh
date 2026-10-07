@@ -3,6 +3,7 @@
 #
 #   ./build-web.sh            optimized build
 #   DEBUG=1 ./build-web.sh    assertions and debug info (DEBUG=2: no optimization)
+#   OUT=dir ./build-web.sh    build somewhere else (an experiment beside the playable build)
 #
 # Uses $EMSDK if set, otherwise vab's pinned emsdk, otherwise .cache/emsdk.
 set -euo pipefail
@@ -23,7 +24,7 @@ fi
 # shellcheck disable=SC1091
 source "$EMSDK/emsdk_env.sh" >/dev/null 2>&1
 
-OUT="$ROOT/build/web"
+OUT="${OUT:-$ROOT/build/web}"
 mkdir -p "$OUT"
 
 VERSION="0.1.0-web"

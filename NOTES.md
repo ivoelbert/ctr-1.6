@@ -11,12 +11,32 @@ the map.
 - Our changes are marked `NOTE(web)` / `NOTE(ctr-dust2)`:
   - `platform/native_web.c`: boot override (`?level=&mode=`), test hooks (`window.ctr`).
   - `platform/native_cd.c`: `assets/override/NNN.bin` replaces BIGFILE entry NNN.
-  - `platform/native_memory.c`: 16 MiB heap (`CTR_DUST2_EXPANDED_MEMPACK`).
+  - `platform/native_memory.c`: 32 MiB heap (`CTR_DUST2_EXPANDED_MEMPACK`).
   - `platform/native_renderer.c` + `native_gpu.c`: `TF_VIRTUAL_ATLAS`, tpage colour mode 3
     samples `/assets/dust2/atlas.rgba`; CLUT = layer << 10 | (y / 32) << 5 | (x / 32).
   - `LOAD_IsCustomLevel`: overridden levels get 2.5 MB of primitive memory and a 64000-word
     clip buffer (everything is visible from everywhere, unlike retail's PVS).
 
+- The level has no depth buffer (painter's algorithm). Each face goes into an ordering-table
+  slot by its farthest corner's depth >> 6 (plus its draw-order byte); a face subdivided near
+  the camera passes its slot to its sub-faces (`inheritedOtIndex`), so subdivision doesn't
+  sharpen the sort. The slots are painted far to near, and inside a slot the faces of the
+  quadblock drawn first end up on top (each is linked in at the head). Quadblocks are drawn
+  leaf by leaf in render-list order, and `RenderLists.c` lists the leaves in reverse walk
+  order: retail's fixed walk lets child 0's side win every tie. Branches our levwriter marks
+  (`BSP_NEAR_FIRST` in childID[2]; retail has 0 there) are walked near side first, so ties go
+  to the nearer side. Long faces seen along their length still sort by their far end: see
+  `tools/painter.py` for how the track builder cuts the walls where that shows.
+- `native_gpu.c` batches a frame's vertices in a 65536-vertex array and the primitive handlers
+  write without checking its end: a heavy Dust 2 frame (the long doors, after the painter cuts)
+  went past it into the globals behind it (garbled HUD, kart, minimap, then a black screen).
+  `ParsePrimitive` now draws the batch when it's nearly full (as before a VRAM move).
+- The quadblocks the renderer defers to its near pass are listed 64 per player in
+  `sdata_static.quadBlocksRendered`, unchecked too; a Dust 2 view lists up to ~60. Each player
+  now gets a host list as long as the level's quadblocks (`CTR_RenderLists.c`).
+- 1-pixel cracks between neighbouring faces (T-junctions, neighbours subdivided differently,
+  whole-pixel vertices): `native_gpu.c` pushes every atlas polygon's edges out by 0.6 pixels
+  (a per-vertex offset the atlas vertex shader applies), so neighbours overlap.
 - The canvas has no alpha channel (`SDL_GL_ALPHA_SIZE` 0): the frame reaches the screen with
   VRAM's mask bit as alpha, and in a real Chrome window on macOS every pixel without the bit
   (the level, the HUD) showed the black page instead. Headless screenshots go through Chrome's
@@ -87,6 +107,14 @@ the map.
 - Floors near a loop that the nav grid doesn't reach take the nearest route point's checkpoint
   (`ROUTE_REACH`); pickups without floor at their spot take the nearest drivable one.
 - Grafted onto Dingo Canyon (entry 1): its models, skybox, textures; 16 crates, 16 fruit.
+- The painter's audit (`tools/painter.py`, `tools/painter.c`, compiled with `cc` during the
+  build): the level is rendered at half resolution from the chase camera at every 4th drivable
+  grid cell in 8 directions (~12,000 views), once with a depth buffer and once checking the
+  game's slots, and the polygons whose quadblocks have things behind them painted over them
+  (40 pixels or more in all) are cut to 256 units, then the ones still at it to 128. Out of
+  order pixels: 326,000 before (the fixed walk, uncut walls), 48,000 after; ~800 more
+  quadblocks, 61,600 of the 65,536 vertices. The A-site crates no longer show through the
+  wall of long A.
 
 ## Tools
 
@@ -103,11 +131,13 @@ the map.
   black, with texture page 0).
 - Floors are cut along a world grid of 256 units, and floor T-junctions closed: the renderer
   gave up on big floor quads right under the camera (holes to the void), and floor pieces split
-  their own way left dotted cracks. 1-pixel cracks remain where neighbouring quadblocks are
-  subdivided differently by distance (DYNAMIC_SUBDIV leaves; the PS1 snaps the split points to
-  whole pixels); they show where something dark is under the floor (A site). Leaf render flags
-  4X1/4X2/4X4 didn't help (4X1 adds sparkles). Walls aren't T-junction-fixed: past 65536
-  vertices (u16 indices).
+  their own way left dotted cracks. The 1-pixel cracks where neighbouring quadblocks are
+  subdivided differently by distance (the PS1 snaps split points to whole pixels) are covered
+  by the atlas polygons' 0.6-pixel dilation. Leaf render flags 4X1/4X2/4X4 didn't help (4X1
+  adds sparkles). Walls aren't T-junction-fixed: past 65536 vertices (u16 indices).
+- Painter's sort: what the audit still finds is mostly same-slot ties inside one BSP leaf or
+  between leaves the split planes don't separate (splitting at wall planes might help), and
+  faces under 64 units apart (one slot). More cuts cost vertices: 4000 left.
 - Door leaves are taken out (swung open, they z-fought with the frames). The frames had faces
   only the leaves hid from behind: every triangle around a doorway gets a reversed twin, as
   does any triangle a ray from a reachable spot hits from behind (tools/visibility.py). The

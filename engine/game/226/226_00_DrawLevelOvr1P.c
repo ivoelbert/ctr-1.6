@@ -7356,7 +7356,8 @@ static struct QuadBlock **DrawLevelOvr1P_GetRenderedOverflowBase(void)
 		return sDrawLevelOvr1P_RenderedOverflowBase;
 	}
 
-	return sdata_static.quadBlocksRendered;
+	// NOTE(ctr-dust2): retail sdata_static.quadBlocksRendered; see CTR_RenderLists_EnsureRenderedRoom
+	return (struct QuadBlock **)data.ptrRenderedQuadblockDestination_forEachPlayer[0];
 }
 
 static struct QuadBlock **DrawLevelOvr1P_GetRenderedListCursor(void)
@@ -9772,7 +9773,7 @@ void DrawLevelOvr1P(void *LevRenderList, struct PushBuffer *pb, struct BSP *bspL
 	}
 
 	DrawLevelOvr1P_SetClipRecordStart(data.PtrClipBuffer[0]);
-	DrawLevelOvr1P_SetRenderedOverflowBase(sdata_static.quadBlocksRendered);
+	DrawLevelOvr1P_SetRenderedOverflowBase((struct QuadBlock **)data.ptrRenderedQuadblockDestination_forEachPlayer[0]);
 	DrawLevelOvr1P_SetPrimReserveBias(0);
 	DrawLevelOvr1P_SetListHandlersSeedRenderedCursor(1);
 	Ovr226_800a0d20_SeedEntryScratchPointers(renderList, pb);

@@ -22,8 +22,13 @@ on http://localhost:8642/ and opens it in Chrome. It needs:
   `~/Documents/CTRDUST2/CTR - Crash Team Racing/CTR - Crash Team Racing.bin` (`CTR_DISC=...`);
 - the "De_Dust 2 with real light" download from Sketchfab, by default at
   `~/Documents/CTRDUST2/dust-2-cs-16.zip` (`DUST2_ZIP=...`, or `DUST2_MODEL=...` for its `.glb`);
-- Python 3 with numpy and Pillow, Node.js, and a browser with WebAssembly JSPI (Chrome or
-  Edge 137+). The first build fetches Emscripten 6.0.10 unless `$EMSDK` points at one.
+- Python 3 with numpy and Pillow, a C compiler (`cc`: on a Mac, Xcode's command line tools),
+  Node.js, and a browser with WebAssembly JSPI (Chrome or Edge 137+). The first build fetches
+  Emscripten 6.0.10 unless `$EMSDK` points at one.
+
+The track takes a few minutes to build: besides turning the model into quadblocks, it renders
+the level from ~12,000 camera spots to find where CTR's depth sort (it has no depth buffer)
+would paint something behind a wall over it, and cuts those walls shorter (`tools/painter.py`).
 
 Nothing from the disc is in this repository. The track `play.sh` writes (`build/lev/`) holds
 data from your disc (Dust 2 is grafted onto Dingo Canyon's level, keeping its weapon crates,

@@ -232,6 +232,38 @@ static void RenderLists_PushChild(struct BSP *bspRoot, const int *visLeafList, s
 	*stack = record + 1;
 }
 
+// NOTE(ctr-dust2): the level draws without a depth buffer: a face goes into an ordering-table
+// slot by its farthest corner, and inside a slot the faces of the quadblock drawn first end up
+// on top (each is linked in at the head). Quadblocks are drawn in render-list order, and the
+// lists hold the leaves in reverse walk order, so retail's fixed walk (child 1's side first)
+// always lets child 0's side win a tie, whichever side the camera is on. Levels made by
+// tools/levwriter.py mark their branches with RENDER_LISTS_NEAR_FIRST in childID[2] (retail
+// branches hold 0 there) and keep the split in axis: a unit axis (0x1000 on x, y or z) and the
+// split coordinate in axis[3]. Those are walked near side last, so the near side is drawn first
+// and wins its ties: back-to-front, like a BSP is meant to be.
+#define RENDER_LISTS_NEAR_FIRST 0x0d02
+
+static void RenderLists_PushChildren(struct BSP *bspRoot, const int *visLeafList, struct PushBuffer *pb, const struct BSP *branch,
+                                     struct RenderListsScratchRecord **stack, struct RenderListsScratchRecord *stackEnd)
+{
+	int first = 0;
+
+	if (branch->data.branch.childID[2] == RENDER_LISTS_NEAR_FIRST)
+	{
+		const s16 *axis = branch->data.branch.axis;
+		s32 camera = (axis[0] != 0) ? pb->pos.x : ((axis[1] != 0) ? pb->pos.y : pb->pos.z);
+
+		// pushed first, walked last, listed first: drawn first
+		if (camera >= axis[3])
+		{
+			first = 1;
+		}
+	}
+
+	RenderLists_PushChild(bspRoot, visLeafList, pb, branch->data.branch.childID[first], stack, stackEnd);
+	RenderLists_PushChild(bspRoot, visLeafList, pb, branch->data.branch.childID[1 - first], stack, stackEnd);
+}
+
 static int RenderLists_Walk1P2P(struct BSP *bspRoot, const int *visLeafList, struct PushBuffer *pb, void *LevRenderList, struct VisMemBspListNode *bspList,
                                 u8 numPlyr)
 {
@@ -257,8 +289,7 @@ static int RenderLists_Walk1P2P(struct BSP *bspRoot, const int *visLeafList, str
 
 	for (;;)
 	{
-		RenderLists_PushChild(bspRoot, visLeafList, pb, branch->data.branch.childID[0], &stack, stackEnd);
-		RenderLists_PushChild(bspRoot, visLeafList, pb, branch->data.branch.childID[1], &stack, stackEnd);
+		RenderLists_PushChildren(bspRoot, visLeafList, pb, branch, &stack, stackEnd);
 
 		while (stack != stackBase)
 		{
@@ -312,8 +343,7 @@ static int RenderLists_Walk3P4P(struct BSP *bspRoot, const int *visLeafList, str
 
 	for (;;)
 	{
-		RenderLists_PushChild(bspRoot, visLeafList, pb, branch->data.branch.childID[0], &stack, stackEnd);
-		RenderLists_PushChild(bspRoot, visLeafList, pb, branch->data.branch.childID[1], &stack, stackEnd);
+		RenderLists_PushChildren(bspRoot, visLeafList, pb, branch, &stack, stackEnd);
 
 		while (stack != stackBase)
 		{

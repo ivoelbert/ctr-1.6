@@ -19,6 +19,9 @@ from dataclasses import dataclass, field
 QUAD_SIZE = 0x5C
 VERT_SIZE = 0x10
 BSP_SIZE = 0x20
+# branches with this in childID[2] (retail: 0) are walked near side first by the renderer, so a
+# tie in its ordering table goes to the nearer quadblock (engine/game/RenderLevel/RenderLists.c)
+BSP_NEAR_FIRST = 0x0D02
 LEVEL_SIZE = 0x1F4
 
 FLAG_GROUND = 0x1000
@@ -432,7 +435,7 @@ def write_level(lv: Level):
             b.put(o + 4, '6h', *bx)
             b.put(o + 0x10, '4h', *n['axis'])
             ids = [0xFFFF if c is None else (c | (0x4000 if nodes[c]['leaf'] else 0)) for c in n['children']]
-            b.put(o + 0x18, '4H', ids[0], ids[1], 0, 0)
+            b.put(o + 0x18, '4H', ids[0], ids[1], BSP_NEAR_FIRST, 0)
 
     # mesh_info
     b.put(mesh, 'III', nq, len(verts), 0)

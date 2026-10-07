@@ -12,10 +12,11 @@ const HOST = process.env.HOST || '127.0.0.1';
 const DISC = process.env.CTR_DISC ||
   path.join(process.env.HOME, 'Documents/CTRDUST2/CTR - Crash Team Racing/CTR - Crash Team Racing.bin');
 
+// WEB_DIR / LEV_DIR serve another build (an experiment) beside the playable one
 const MOUNTS = [
   ['/game-data/ctr-u.bin', DISC],
-  ['/lev/', path.join(ROOT, 'build/lev')],
-  ['/', path.join(ROOT, 'build/web')],
+  ['/lev/', path.resolve(process.env.LEV_DIR || path.join(ROOT, 'build/lev'))],
+  ['/', path.resolve(process.env.WEB_DIR || path.join(ROOT, 'build/web'))],
 ];
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript',
   '.wasm': 'application/wasm', '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg' };

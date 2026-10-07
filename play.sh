@@ -43,7 +43,7 @@ fi
 # The track, when it's missing or older than the tools that write it.
 LEV="$ROOT/build/lev/dust2.lev"
 if [ ! -f "$LEV" ] || [ -n "$(find tools -maxdepth 1 -name '*.py' -newer "$LEV" | head -1)" ]; then
-  echo "Building the Dust 2 track (a minute or two)..."
+  echo "Building the Dust 2 track (a few minutes)..."
   python3 -I tools/build_dust2.py "$MODEL" "$DISC" "$ROOT/build/lev"
 fi
 
