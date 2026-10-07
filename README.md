@@ -39,7 +39,8 @@ The launcher has four modes:
     tunnels, T spawn, outside long, long doors.
 - **Time Trial**: either loop alone against the clock.
 - **Free drive**: the whole map without laps (A site, B, the tunnels, T spawn).
-- **CTR menus**: the whole game from its title screen, with Dust 2 in Dingo Canyon's place.
+- **CTR menus**: the whole game from its title screen, with Dust 2 in Dingo Canyon's place and
+  Dust 2 Tunnels in Dragon Mines'.
 
 ## Controls (keyboard)
 

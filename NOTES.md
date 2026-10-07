@@ -72,7 +72,8 @@ the map.
   ramp and mid (outside long, long doors, long A, CT ramp, CT spawn, mid doors, mid; 36034
   units), and the long way round (long A, CT spawn, B doors, B site, upper tunnels, T spawn,
   outside long; 52036 units). Each is its own LEV (dust2.lev, dust2_b.lev); the page loads
-  the chosen one into Dingo Canyon's slot and renames it.
+  the chosen one into Dingo Canyon's slot and renames it. A slot's eight BIGFILE entries can
+  take any of them: the CTR menus mode puts the tunnels loop in Dragon Mines' slot too.
 - Floors near a loop that the nav grid doesn't reach take the nearest route point's checkpoint
   (`ROUTE_REACH`); pickups without floor at their spot take the nearest drivable one.
 - Grafted onto Dingo Canyon (entry 1): its models, skybox, textures; 16 crates, 16 fruit.
@@ -86,7 +87,7 @@ the map.
 
 ## Left to do
 
-- The tunnels loop in the CTR menus too (another slot, with Dingo Canyon's VRMs).
+- Track select previews and menu maps still show Dingo Canyon's and Dragon Mines'.
 - Wall snags.
 - 2P/4P: work (tested with fake gamepads, `tools/e2e/lib.mjs`). With one gamepad, the gamepad
   is player 1 and the keyboard player 2.

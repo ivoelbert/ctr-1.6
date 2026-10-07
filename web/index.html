@@ -76,7 +76,7 @@
           <button class="mode" data-mode="race" aria-pressed="true"><b>Race</b><span>Seven CTR racers, weapon crates, wumpa fruit</span></button>
           <button class="mode" data-mode="tt" aria-pressed="false"><b>Time Trial</b><span>You, the clock and the loop</span></button>
           <button class="mode" data-mode="free" aria-pressed="false"><b>Free drive</b><span>All of Dust 2, no laps: A site, B, tunnels, T spawn</span></button>
-          <button class="mode" data-mode="menus" aria-pressed="false"><b>CTR menus</b><span>The whole game; Dust 2 replaces Dingo Canyon</span></button>
+          <button class="mode" data-mode="menus" aria-pressed="false"><b>CTR menus</b><span>The whole game: Dust 2 in Dingo Canyon's place, Dust 2 Tunnels in Dragon Mines'</span></button>
         </div>
         <div class="row">
           <label>Racer
@@ -204,17 +204,22 @@
   // minimap) entries 0, 2, 4, 6, and the model's textures go in the atlas the renderer
   // samples for tpage mode 3 ("CTRA", width, height, RGBA).
   const TRACK_NAMES = { dust2: 'DUST 2', dust2_b: 'DUST 2 TUNNELS', dust2_free: 'DUST 2' };
-  async function loadDust2(levName) {
+  // tracks: { slot (level ID): track file name }, e.g. { 0: 'dust2' }. A slot's eight BIGFILE
+  // entries (8 * slot + 0..7) take the track's four VRMs and four LEVs.
+  async function loadDust2(tracks) {
     const base = params.get('dust2dir') || 'lev/';
     const meta = await (await fetch(base + 'dust2.json', { cache: 'no-store' })).json();
-    const name = levName.replace(/\.lev$/, '');
     Module.FS.mkdirTree('/assets/override');
-    for (const [suffix, entry] of [['', 1], ['_2p', 3], ['_4p', 5], ['_tt', 7]]) {
-      // each mode's level, and its textures with the Dust 2 minimap drawn in (entry before)
-      const lev = await fetchWithProgress(`${base}${name}${suffix}.lev`, 'Dust 2');
-      Module.FS.writeFile(`/assets/override/${String(entry).padStart(3, '0')}.bin`, lev);
-      const vrm = await fetchWithProgress(`${base}${name}${suffix}.vrm`, 'Dust 2');
-      Module.FS.writeFile(`/assets/override/${String(entry - 1).padStart(3, '0')}.bin`, vrm);
+    const pad = (n) => String(n).padStart(3, '0');
+    Module.ctrRename = {};
+    for (const [slot, name] of Object.entries(tracks)) {
+      for (const [suffix, k] of [['', 1], ['_2p', 3], ['_4p', 5], ['_tt', 7]]) {
+        // each mode's level, and its textures with the Dust 2 minimap drawn in (entry before)
+        const entry = 8 * Number(slot) + k;
+        Module.FS.writeFile(`/assets/override/${pad(entry)}.bin`, await fetchWithProgress(`${base}${name}${suffix}.lev`, 'Dust 2'));
+        Module.FS.writeFile(`/assets/override/${pad(entry - 1)}.bin`, await fetchWithProgress(`${base}${name}${suffix}.vrm`, 'Dust 2'));
+      }
+      Module.ctrRename[slot] = TRACK_NAMES[name] || 'DUST 2';
     }
     const jpg = await fetchWithProgress(base + meta.atlas.image, 'Textures');
     const bitmap = await createImageBitmap(new Blob([jpg], { type: 'image/jpeg' }));
@@ -230,7 +235,6 @@
     file.set(pixels, 12);
     Module.FS.mkdirTree('/assets/dust2');
     Module.FS.writeFile('/assets/dust2/atlas.rgba', file);
-    Module.ctrRename = { 0: TRACK_NAMES[name] || 'DUST 2' };
     window.ctrDust2 = meta;
   }
 
@@ -253,13 +257,13 @@
     onRuntimeInitialized() { runtimeReady(); },
   };
 
-  // choice: { dust2: 'dust2.lev' | 'dust2_b.lev' | 'dust2_free.lev' | null, boot: {level, mode, character, laps} | null }
+  // choice: { tracks: { slot: 'dust2' | 'dust2_b' | 'dust2_free' } | null, boot: {level, mode, character, laps, players} | null }
   async function start(choice, discFile) {
     await runtimeReadyPromise;
     const disc = await loadDisc(discFile);
     Module.FS.mkdir('/assets');
     Module.FS.writeFile('/assets/ctr-u.bin', disc);
-    if (choice.dust2) await loadDust2(choice.dust2);
+    if (choice.tracks) await loadDust2(choice.tracks);
     for (const extra of (params.get('files') || '').split(',').filter(Boolean)) {
       // extra=SRC_URL:DEST_PATH, e.g. lev/dust2.lev:/assets/override/001.bin
       const [src, dst] = extra.split(':');
@@ -278,7 +282,8 @@
   // The engine suspends its game loop at each VBlank wait through JSPI.
   const hasJspi = typeof WebAssembly.Suspending === 'function' && typeof WebAssembly.promising === 'function';
 
-  // ?level=N&mode=0|1|2&character=N&laps=N&players=N[&dust2[=b|free]] boots straight away (tests, links);
+  // ?level=N&mode=0|1|2&character=N&laps=N&players=N[&dust2[=b|free|menus][&dust2slot=N]] boots
+  // straight away (tests, links);
   // with no parameters the launcher asks.
   if (!hasJspi) {
     launcher.hidden = false;
@@ -291,8 +296,11 @@
       players: params.has('players') ? Number(params.get('players')) : undefined,
     } : null;
     const which = params.get('dust2');
-    const dust2 = params.has('dust2') ? ({ free: 'dust2_free.lev', b: 'dust2_b.lev' }[which] || 'dust2.lev') : null;
-    start({ dust2, boot }).catch((e) => { say(String(e)); console.error(e); });
+    const slot = Number(params.get('dust2slot') ?? 0);  // the level ID it takes
+    const tracks = !params.has('dust2') ? null
+      : which === 'menus' ? { 0: 'dust2', 1: 'dust2_b' }   // as the launcher's CTR menus mode
+      : { [slot]: { free: 'dust2_free', b: 'dust2_b' }[which] || 'dust2' };
+    start({ tracks, boot }).catch((e) => { say(String(e)); console.error(e); });
   } else {
     launcher.hidden = false;
     let mode = 'race';
@@ -322,15 +330,16 @@
     document.getElementById('go').addEventListener('click', () => {
       const character = Number(document.getElementById('character').value);
       const laps = Number(document.getElementById('laps').value);
-      const track = document.getElementById('track').value + '.lev';
+      const track = document.getElementById('track').value;
       const players = Number(playersSel.value);
       const discFile = document.getElementById('discfile').files[0] || null;
       const boots = {
         // Arcade takes one or two players (with AI racers), VS two to four; Time Trial one
-        race: { dust2: track, boot: { level: 0, mode: players <= 2 ? 1 : 2, character, laps, players } },
-        tt: { dust2: track, boot: { level: 0, mode: 0, character, laps } },
-        free: { dust2: 'dust2_free.lev', boot: { level: 0, mode: players === 1 ? 0 : 2, character, laps: 99, players } },
-        menus: { dust2: 'dust2.lev', boot: null },
+        race: { tracks: { 0: track }, boot: { level: 0, mode: players <= 2 ? 1 : 2, character, laps, players } },
+        tt: { tracks: { 0: track }, boot: { level: 0, mode: 0, character, laps } },
+        free: { tracks: { 0: 'dust2_free' }, boot: { level: 0, mode: players === 1 ? 0 : 2, character, laps: 99, players } },
+        // the whole game: Dust 2 in Dingo Canyon's place, Dust 2 Tunnels in Dragon Mines'
+        menus: { tracks: { 0: 'dust2', 1: 'dust2_b' }, boot: null },
       };
       document.getElementById('go').disabled = true;
       start(boots[mode], discFile).catch((e) => { say(String(e)); console.error(e); document.getElementById('go').disabled = false; });
