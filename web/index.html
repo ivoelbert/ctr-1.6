@@ -54,6 +54,7 @@
   #discpick.show { display: block; }
   #nojspi { margin: 0 0 16px; padding: 12px 14px; border-radius: 10px; background: #4a1a10; border: 1px solid #a2412a; }
   #nojspi[hidden] { display: none; }
+  .off { display: none !important; }
 </style>
 </head>
 <body>
@@ -94,10 +95,16 @@
               <option value="dust2_b">The long way: B site and tunnels</option>
             </select>
           </label>
+          <label id="playersBox">Players
+            <select id="players"><option>1</option><option>2</option><option>3</option><option>4</option></select>
+          </label>
           <label id="lapsBox">Laps
             <select id="laps"><option>1</option><option selected>3</option><option>5</option><option>7</option></select>
           </label>
         </div>
+        <p class="note" id="playersNote" hidden>Split screen: every player past the first needs a gamepad
+          (with one gamepad, it drives player 1 and the keyboard player 2). Three or four players race
+          without the AI racers.</p>
         <div id="discpick">
           <label>Your NTSC-U CTR disc image (.bin, MODE2/2352)
             <input type="file" id="discfile" accept=".bin">
@@ -286,13 +293,21 @@
     const modes = document.getElementById('modes');
     const lapsBox = document.getElementById('lapsBox');
     const trackBox = document.getElementById('trackBox');
+    const playersBox = document.getElementById('playersBox');
+    const playersSel = document.getElementById('players');
+    const showPlayersNote = () => {
+      document.getElementById('playersNote').hidden = playersBox.classList.contains('off') || playersSel.value === '1';
+    };
+    playersSel.addEventListener('change', showPlayersNote);
     modes.addEventListener('click', (e) => {
       const b = e.target.closest('.mode');
       if (!b) return;
       mode = b.dataset.mode;
       for (const m of modes.children) m.setAttribute('aria-pressed', String(m === b));
-      lapsBox.style.visibility = (mode === 'race' || mode === 'tt') ? 'visible' : 'hidden';
-      trackBox.style.visibility = lapsBox.style.visibility;
+      lapsBox.classList.toggle('off', !(mode === 'race' || mode === 'tt'));
+      trackBox.classList.toggle('off', !(mode === 'race' || mode === 'tt'));
+      playersBox.classList.toggle('off', !(mode === 'race' || mode === 'free'));
+      showPlayersNote();
     });
     // the disc is served by tools/serve.mjs; if it isn't, ask for it
     fetch('game-data/ctr-u.bin', { method: 'HEAD' }).then((r) => {
@@ -302,11 +317,13 @@
       const character = Number(document.getElementById('character').value);
       const laps = Number(document.getElementById('laps').value);
       const track = document.getElementById('track').value + '.lev';
+      const players = Number(playersSel.value);
       const discFile = document.getElementById('discfile').files[0] || null;
       const boots = {
-        race: { dust2: track, boot: { level: 0, mode: 1, character, laps } },
+        // Arcade takes one or two players (with AI racers), VS two to four; Time Trial one
+        race: { dust2: track, boot: { level: 0, mode: players <= 2 ? 1 : 2, character, laps, players } },
         tt: { dust2: track, boot: { level: 0, mode: 0, character, laps } },
-        free: { dust2: 'dust2_free.lev', boot: { level: 0, mode: 0, character, laps: 99 } },
+        free: { dust2: 'dust2_free.lev', boot: { level: 0, mode: players === 1 ? 0 : 2, character, laps: 99, players } },
         menus: { dust2: 'dust2.lev', boot: null },
       };
       document.getElementById('go').disabled = true;
