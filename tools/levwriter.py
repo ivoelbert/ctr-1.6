@@ -98,6 +98,7 @@ class Level:
     # pickups the karts touch through BSP leaf hitbox lists: dicts inst (index in instances),
     # radius, lift (hitbox centre above the instance), flags
     hitboxes: list = field(default_factory=list)
+    flyin: int = None   # data offset (in the base) of a start-line fly-in camera path
     icons: list = field(default_factory=list)  # (name, global index, TexLayout)
     icon_groups: list = field(default_factory=list)  # (name, groupID, [icon indices])
 
@@ -431,7 +432,14 @@ def write_level(lv: Level):
     # SpawnType1: count 0 (no fly-in or end-of-race cameras, as battle maps), but seven
     # null slots after it: GhostReplay_Init1 reads the N. Tropy/Oxide ghost slots (4, 5)
     # without checking the count, and native treats a null tape as no ghost.
+    # With a fly-in (camera path data, relative to the start grid) the count is 7: slot 2 is
+    # the end-of-race cameras (none: a zero count), slot 3 the fly-in.
     st1 = b.alloc(4 + 4 * 7)
+    if lv.flyin is not None:
+        eor = b.alloc(4)
+        b.put(st1, 'I', 7)
+        b.ptr(st1 + 4 + 4 * 2, eor)
+        b.ptr(st1 + 4 + 4 * 3, lv.flyin)
 
     # animated textures: an empty list is one AnimTex whose first word points at itself
     # (CTR_CycleTex_LEV walks the list without a null check); a base keeps its own

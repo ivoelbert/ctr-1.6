@@ -140,3 +140,37 @@ EMSCRIPTEN_KEEPALIVE void NativeWeb_Teleport(int x, int y, int z, int angle)
 	d->speedApprox = 0;
 }
 #endif
+
+#if defined(__EMSCRIPTEN__)
+// Module.ctrRename = { levelID: "NAME" }: the names shown for levels (HUD, menus), set once
+// the language file is loaded. The game's font has capitals, digits and some punctuation.
+EM_JS(int, NativeWeb_RenameCount, (void), {
+	return Module.ctrRename ? Object.keys(Module.ctrRename).length : 0;
+});
+EM_JS(int, NativeWeb_RenameLevel, (int i), {
+	return Number(Object.keys(Module.ctrRename)[i]) | 0;
+});
+EM_JS(int, NativeWeb_RenameText, (int i, char *buf, int cap), {
+	const text = String(Object.values(Module.ctrRename)[i]).toUpperCase();
+	stringToUTF8(text, buf, cap);
+	return text.length;
+});
+
+void NativeWeb_ApplyRenames(void)
+{
+	static char names[8][32];
+	int count = NativeWeb_RenameCount();
+
+	for (int i = 0; (i < count) && (i < 8); i++)
+	{
+		int level = NativeWeb_RenameLevel(i);
+		if ((level < 0) || (level >= SCRAPBOOK))
+		{
+			continue;
+		}
+		NativeWeb_RenameText(i, names[i], sizeof(names[i]));
+		sdata->lngStrings[data.metaDataLEV[level].name_LNG] = names[i];
+		printf("[CTR Web] Level %d is called %s\n", level, names[i]);
+	}
+}
+#endif

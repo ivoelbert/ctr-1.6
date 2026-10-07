@@ -606,6 +606,9 @@ void StateZero()
 
 	// English=1
 	LOAD_LangFile((int)sdata->ptrBigfile1, 1);
+#if defined(__EMSCRIPTEN__)
+	NativeWeb_ApplyRenames();
+#endif
 	GAMEPROG_NewGame_OnBoot();
 	gGT->overlayIndex_null_notUsed = 0;
 

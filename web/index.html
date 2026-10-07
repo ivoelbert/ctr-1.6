@@ -5,19 +5,125 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>CTR on Dust 2</title>
 <style>
-  :root { color-scheme: dark; }
-  html, body { margin: 0; height: 100%; background: #000; color: #ddd; font: 14px/1.4 system-ui, sans-serif; }
-  #stage { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; }
+  :root {
+    color-scheme: dark;
+    --bg: #120d08;
+    --panel: #20160d;
+    --panel-2: #2b1e12;
+    --text: #f3e6d0;
+    --muted: #b9a385;
+    --accent: #ff8a1f;
+    --accent-2: #ffd34d;
+    --line: #4a3622;
+  }
+  html, body { margin: 0; height: 100%; background: #000; color: var(--text); font: 15px/1.45 system-ui, -apple-system, Segoe UI, sans-serif; }
+  #stage { position: fixed; inset: 0; }
   canvas { width: 100%; height: 100%; display: block; outline: none; }
-  #status { position: fixed; left: 12px; bottom: 10px; opacity: .8; white-space: pre; pointer-events: none; }
+  #status { position: fixed; left: 14px; bottom: 10px; color: var(--muted); white-space: pre; pointer-events: none; font-size: 13px; }
+
+  #launcher { position: fixed; inset: 0; overflow: auto; background:
+      radial-gradient(1200px 600px at 20% -10%, #5a3410 0%, transparent 60%),
+      radial-gradient(900px 500px at 110% 110%, #3b2610 0%, transparent 60%), var(--bg); }
+  #launcher[hidden] { display: none; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 32px 16px 48px; }
+  h1 { margin: 0; font-size: clamp(28px, 5vw, 46px); letter-spacing: .5px; line-height: 1.1; }
+  h1 .x { color: var(--accent); }
+  .sub { color: var(--muted); margin: 8px 0 24px; max-width: 64ch; }
+  .grid { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; }
+  @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  .panel h2 { margin: 0 0 12px; font-size: 13px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--muted); }
+  .modes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  @media (max-width: 480px) { .modes { grid-template-columns: 1fr; } }
+  .mode { text-align: left; background: var(--panel-2); color: var(--text); border: 2px solid transparent; border-radius: 10px; padding: 12px; cursor: pointer; font: inherit; }
+  .mode b { display: block; font-size: 16px; margin-bottom: 2px; }
+  .mode span { color: var(--muted); font-size: 13px; }
+  .mode[aria-pressed="true"] { border-color: var(--accent); background: #3a2510; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 14px; align-items: end; }
+  label { display: grid; gap: 4px; color: var(--muted); font-size: 13px; }
+  select { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: inherit; min-width: 160px; }
+  #go { margin-top: 18px; width: 100%; padding: 14px; font: 700 18px/1 system-ui, sans-serif; color: #1a0f04; background: linear-gradient(180deg, var(--accent-2), var(--accent)); border: 0; border-radius: 10px; cursor: pointer; }
+  #go:disabled { opacity: .6; cursor: progress; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  td { padding: 5px 0; border-bottom: 1px solid var(--line); }
+  td:first-child { color: var(--muted); }
+  kbd { background: var(--panel-2); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; padding: 1px 6px; font: 12px ui-monospace, monospace; color: var(--text); }
+  .note { color: var(--muted); font-size: 12.5px; margin-top: 12px; }
+  .note a { color: var(--accent-2); }
+  #discpick { margin-top: 12px; display: none; }
+  #discpick.show { display: block; }
 </style>
 </head>
 <body>
 <div id="stage"><canvas id="canvas" tabindex="0" oncontextmenu="event.preventDefault()"></canvas></div>
-<div id="status">Loading…</div>
+<div id="status"></div>
+
+<div id="launcher" hidden>
+  <div class="wrap">
+    <h1>Crash Team Racing <span class="x">×</span> de_dust2</h1>
+    <p class="sub">CTR's own driving, AI and weapons (the decompiled game, running in your browser) on
+      Counter-Strike's Dust 2: outside long, long doors, long A, CT, mid doors and mid.</p>
+    <div class="grid">
+      <div class="panel">
+        <h2>Mode</h2>
+        <div class="modes" id="modes">
+          <button class="mode" data-mode="race" aria-pressed="true"><b>Race</b><span>Seven CTR racers, weapon crates, wumpa fruit</span></button>
+          <button class="mode" data-mode="tt" aria-pressed="false"><b>Time Trial</b><span>You, the clock and the loop</span></button>
+          <button class="mode" data-mode="free" aria-pressed="false"><b>Free drive</b><span>All of Dust 2, no laps: A site, B, tunnels, T spawn</span></button>
+          <button class="mode" data-mode="menus" aria-pressed="false"><b>CTR menus</b><span>The whole game; Dust 2 replaces Dingo Canyon</span></button>
+        </div>
+        <div class="row">
+          <label>Racer
+            <select id="character">
+              <option value="0">Crash</option><option value="1">Cortex</option><option value="2">Tiny</option>
+              <option value="3">Coco</option><option value="4">N. Gin</option><option value="5">Dingodile</option>
+              <option value="6">Polar</option><option value="7">Pura</option><option value="8">Pinstripe</option>
+              <option value="9">Papu Papu</option><option value="10">Ripper Roo</option><option value="11">Komodo Joe</option>
+              <option value="12">N. Tropy</option><option value="13">Penta Penguin</option><option value="14">Fake Crash</option>
+              <option value="15">Nitros Oxide</option>
+            </select>
+          </label>
+          <label id="lapsBox">Laps
+            <select id="laps"><option>1</option><option selected>3</option><option>5</option><option>7</option></select>
+          </label>
+        </div>
+        <div id="discpick">
+          <label>Your NTSC-U CTR disc image (.bin, MODE2/2352)
+            <input type="file" id="discfile" accept=".bin">
+          </label>
+        </div>
+        <button id="go">Drive</button>
+      </div>
+      <div class="panel">
+        <h2>Controls</h2>
+        <table>
+          <tr><td>Steer</td><td><kbd>←</kbd> <kbd>→</kbd></td></tr>
+          <tr><td>Gas</td><td><kbd>C</kbd></td></tr>
+          <tr><td>Brake / reverse</td><td><kbd>X</kbd></td></tr>
+          <tr><td>Hop, power slide</td><td><kbd>Right Shift</kbd> (hold while turning)</td></tr>
+          <tr><td>Slide boost</td><td><kbd>Left Shift</kbd> (the other shoulder)</td></tr>
+          <tr><td>Use item</td><td><kbd>V</kbd></td></tr>
+          <tr><td>Look back</td><td><kbd>Z</kbd></td></tr>
+          <tr><td>Pause</td><td><kbd>Enter</kbd></td></tr>
+          <tr><td>Full screen</td><td><kbd>F11</kbd></td></tr>
+        </table>
+        <p class="note">A gamepad works too (R1 / L1 for the slide and its boost). Power slide: hold
+          Right Shift through a turn and tap Left Shift as the exhaust turns black; three boosts
+          in a row make a turbo.</p>
+        <p class="note">Map: "De_Dust 2 with real light" by
+          <a href="https://sketchfab.com/neominigan" target="_blank" rel="noopener">Neo_minigan</a>,
+          <a href="http://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC-BY-4.0</a>.
+          Crash Team Racing © 1999 Sony / Naughty Dog. Runs on
+          <a href="https://github.com/CTR-tools/ctr-native" target="_blank" rel="noopener">ctr-native</a>.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
   const statusEl = document.getElementById('status');
   const canvas = document.getElementById('canvas');
+  const launcher = document.getElementById('launcher');
   const params = new URLSearchParams(location.search);
   const say = (msg) => { statusEl.textContent = msg; };
 
@@ -42,21 +148,6 @@
     for (const c of chunks) { all.set(c, o); o += c.length; }
     return all;
   }
-
-  // ?level=N&mode=0|1|2&character=N&laps=N boots straight into a race (see engine/platform/native_web.c).
-  const boot = params.has('level') ? {
-    level: Number(params.get('level')), mode: Number(params.get('mode') ?? 0),
-    character: Number(params.get('character') ?? 0), laps: Number(params.get('laps') ?? 3),
-  } : null;
-
-  var Module = {
-    canvas,
-    ctrBoot: boot,
-    noInitialRun: true,
-    print: (t) => console.log(t),
-    printErr: (t) => console.warn(t),
-    onRuntimeInitialized() { start().catch((e) => { say(String(e)); console.error(e); }); },
-  };
 
   // Test hooks: what the game is doing, and a pad held down by code (engine/platform/native_web.c).
   const BUTTONS = { select: 0x1, start: 0x8, up: 0x10, right: 0x20, down: 0x40, left: 0x80,
@@ -88,10 +179,10 @@
   // Dust 2 takes Dingo Canyon's slot (level 0): its LEV replaces the 1P, 2P, 4P and
   // Time Trial/Relic files (BIGFILE entries 1, 3, 5, 7), and its textures go in the atlas
   // the renderer samples for tpage mode 3 ("CTRA", width, height, RGBA).
-  async function loadDust2() {
+  async function loadDust2(levName) {
     const base = params.get('dust2dir') || 'lev/';
     const meta = await (await fetch(base + 'dust2.json', { cache: 'no-store' })).json();
-    const lev = await fetchWithProgress(base + 'dust2.lev', 'Dust 2');
+    const lev = await fetchWithProgress(base + levName, 'Dust 2');
     Module.FS.mkdirTree('/assets/override');
     for (const entry of ['001', '003', '005', '007']) Module.FS.writeFile(`/assets/override/${entry}.bin`, lev);
     const jpg = await fetchWithProgress(base + meta.atlas.image, 'Textures');
@@ -108,26 +199,89 @@
     file.set(pixels, 12);
     Module.FS.mkdirTree('/assets/dust2');
     Module.FS.writeFile('/assets/dust2/atlas.rgba', file);
+    Module.ctrRename = { 0: 'DUST 2' };
     window.ctrDust2 = meta;
   }
 
-  async function start() {
-    const disc = await fetchWithProgress(params.get('disc') || 'game-data/ctr-u.bin', 'Disc');
+  async function loadDisc(file) {
+    if (file) {
+      say('Disc…');
+      return new Uint8Array(await file.arrayBuffer());
+    }
+    return fetchWithProgress(params.get('disc') || 'game-data/ctr-u.bin', 'Disc');
+  }
+
+  let runtimeReady;
+  const runtimeReadyPromise = new Promise((r) => { runtimeReady = r; });
+
+  var Module = {
+    canvas,
+    noInitialRun: true,
+    print: (t) => console.log(t),
+    printErr: (t) => console.warn(t),
+    onRuntimeInitialized() { runtimeReady(); },
+  };
+
+  // choice: { dust2: 'dust2.lev' | 'dust2_free.lev' | null, boot: {level, mode, character, laps} | null }
+  async function start(choice, discFile) {
+    await runtimeReadyPromise;
+    const disc = await loadDisc(discFile);
     Module.FS.mkdir('/assets');
     Module.FS.writeFile('/assets/ctr-u.bin', disc);
-    if (params.has('dust2')) await loadDust2();
+    if (choice.dust2) await loadDust2(choice.dust2);
     for (const extra of (params.get('files') || '').split(',').filter(Boolean)) {
-      // extra=SRC_URL:DEST_PATH, e.g. lev/dust2.lev:/assets/mods/dust2.lev
+      // extra=SRC_URL:DEST_PATH, e.g. lev/dust2.lev:/assets/override/001.bin
       const [src, dst] = extra.split(':');
       const bytes = await fetchWithProgress(src, src);
-      const dir = dst.slice(0, dst.lastIndexOf('/'));
-      Module.FS.mkdirTree(dir);
+      Module.FS.mkdirTree(dst.slice(0, dst.lastIndexOf('/')));
       Module.FS.writeFile(dst, bytes);
     }
+    Module.ctrBoot = choice.boot;
     say('');
+    launcher.hidden = true;
     canvas.focus();
     installHooks();
     Module.callMain([]);
+  }
+
+  // ?level=N&mode=0|1|2&character=N&laps=N[&dust2[=free]] boots straight away (tests, links);
+  // with no parameters the launcher asks.
+  if (params.has('level') || params.has('dust2') || params.has('auto')) {
+    const boot = params.has('level') ? {
+      level: Number(params.get('level')), mode: Number(params.get('mode') ?? 0),
+      character: Number(params.get('character') ?? 0), laps: Number(params.get('laps') ?? 3),
+    } : null;
+    const dust2 = params.has('dust2') ? (params.get('dust2') === 'free' ? 'dust2_free.lev' : 'dust2.lev') : null;
+    start({ dust2, boot }).catch((e) => { say(String(e)); console.error(e); });
+  } else {
+    launcher.hidden = false;
+    let mode = 'race';
+    const modes = document.getElementById('modes');
+    const lapsBox = document.getElementById('lapsBox');
+    modes.addEventListener('click', (e) => {
+      const b = e.target.closest('.mode');
+      if (!b) return;
+      mode = b.dataset.mode;
+      for (const m of modes.children) m.setAttribute('aria-pressed', String(m === b));
+      lapsBox.style.visibility = (mode === 'race' || mode === 'tt') ? 'visible' : 'hidden';
+    });
+    // the disc is served by tools/serve.mjs; if it isn't, ask for it
+    fetch('game-data/ctr-u.bin', { method: 'HEAD' }).then((r) => {
+      if (!r.ok) document.getElementById('discpick').classList.add('show');
+    }).catch(() => document.getElementById('discpick').classList.add('show'));
+    document.getElementById('go').addEventListener('click', () => {
+      const character = Number(document.getElementById('character').value);
+      const laps = Number(document.getElementById('laps').value);
+      const discFile = document.getElementById('discfile').files[0] || null;
+      const boots = {
+        race: { dust2: 'dust2.lev', boot: { level: 0, mode: 1, character, laps } },
+        tt: { dust2: 'dust2.lev', boot: { level: 0, mode: 0, character, laps } },
+        free: { dust2: 'dust2_free.lev', boot: { level: 0, mode: 0, character, laps: 99 } },
+        menus: { dust2: 'dust2.lev', boot: null },
+      };
+      document.getElementById('go').disabled = true;
+      start(boots[mode], discFile).catch((e) => { say(String(e)); console.error(e); document.getElementById('go').disabled = false; });
+    });
   }
 </script>
 <script src="ctr.js"></script>

@@ -1368,6 +1368,7 @@ void CS_LoadBoss(const struct BossCutsceneData *bcd);
 #if defined(__EMSCRIPTEN__)
 // platform/native_web.c
 void NativeWeb_ApplyBootOverride(struct GameTracker *gGT);
+void NativeWeb_ApplyRenames(void);
 #endif
 
 #if defined(CTR_NATIVE)

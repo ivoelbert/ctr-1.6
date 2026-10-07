@@ -431,6 +431,7 @@ LANDMARKS = {
     'long_doors': (640, 480, 0),
     'long_corner': (800, 950, 90),
     'long_bottom': (1430, 1100, 0),
+    'long_start': (1430, 1330, 0),
     'long_top': (1430, 2300, 0),
     'a_site': (1150, 2700, 270),
     'a_west': (600, 2550, 270),
@@ -517,8 +518,9 @@ def add_stair_ramps(tris, out):
     print(f'{len(stairs)} staircases and steps get ramps ({sum(len(s) for s in stairs)} risers)')
 
 
-RACE_ROUTE = ['race_start', 'ring_bottom_e', 'ring_east', 'long_doors', 'long_corner', 'long_bottom', 'long_top',
-              'ct_spawn', 'mid_doors', 'mid_top', 'mid_bottom', 'mid_exit', 'race_start']
+# Starts on long A (the widest straight), heading north
+RACE_ROUTE = ['long_start', 'long_top', 'ct_spawn', 'mid_doors', 'mid_top', 'mid_bottom', 'mid_exit', 'race_start',
+              'ring_bottom_e', 'ring_east', 'long_doors', 'long_corner', 'long_bottom', 'long_start']
 NODE_SPACING = 800.0     # checkpoint nodes along the route, CTR units
 ROUTE_RADIUS = 14        # grid cells (64 units) around the route that count as on the track
 FLAG_KILL_PLANE = 0x0200
@@ -680,6 +682,36 @@ def nav_paths(g, pts, arc, step, count):
     return paths
 
 
+FREE_NODE_CELLS = 16   # free drive: a respawn node every 16 grid cells (1024 units)
+
+
+def free_setup(out, g):
+    """Checkpoints for free driving: nodes spread over everything drivable, all the same distance
+    from the finish, so no lap ever counts and no mask grab ever calls a shortcut, while a kart
+    that falls still comes back near where it was (the node of its last floor)."""
+    picks = []
+    for (cx, cz, k), nid in g.node.items():
+        if cx % FREE_NODE_CELLS == 0 and cz % FREE_NODE_CELLS == 0 and g.wall_dist[nid] >= 3:
+            picks.append(nid)
+    picks = picks[:254]
+    pos = np.array([g.pos[n] for n in picks], dtype=float)
+    nodes = []
+    for i, p in enumerate(pos):
+        d = np.linalg.norm(pos[:, [0, 2]] - p[[0, 2]], axis=1)
+        d[i] = 1e18
+        j = int(np.argmin(d))
+        nodes.append(Node((int(p[0]), int(p[1]), int(p[2])), 4000, j, j))
+    checkpoints = {}
+    for qi, q in enumerate(out):
+        if not (q.flags & FLAG_GROUND) or q.faces[0] is None and q.flags & FLAG_KILL_PLANE:
+            continue
+        c = np.mean(np.array(q.pos, dtype=float), axis=0)
+        d = np.linalg.norm(pos[:, [0, 2]] - c[[0, 2]], axis=1) + np.abs(pos[:, 1] - c[1]) * 3
+        checkpoints[qi] = int(np.argmin(d))
+    print(f'free drive: {len(nodes)} respawn nodes')
+    return nodes, checkpoints
+
+
 def kill_plane(out, y=-1600, size=4096):
     """Invisible, under the whole map: falling onto it sends the kart back to the track."""
     allp = np.array([p for q in out for p in q.pos], dtype=float)
@@ -716,6 +748,16 @@ def base_level(disc):
     if big is None:
         raise SystemExit('no BIGFILE.BIG on the disc')
     return Lev(big.get(BASE_LEVEL_ENTRY)), big
+
+
+def base_flyin(lev):
+    """Dingo Canyon's start-line fly-in: camera and look-at points relative to the start grid,
+    so it works on any start with room around it."""
+    h = lev.header()
+    st1 = h['ptrSpawnType1']
+    if lev.u32(st1) < 4:
+        return None
+    return lev.u32(st1 + 4 + 4 * 3)
 
 
 def base_instances(lev):
@@ -812,11 +854,25 @@ def main(glb, disc, outdir):
 
     lv = Level(quads=out, nodes=nodes, spawns=spawns,
                clear_colors=[(170, 190, 220, 1), (230, 200, 160, 1), (200, 210, 230, 1)],
-               build_name='de_dust2', nav_paths=nav, base=base, instances=pickups, hitboxes=hitboxes)
+               build_name='de_dust2', nav_paths=nav, base=base, instances=pickups, hitboxes=hitboxes,
+               flyin=base_flyin(base))
     data, info = write_level(lv)
     data += b'\0' * ((-len(data)) % 2048)
     with open(os.path.join(outdir, 'dust2.lev'), 'wb') as f:
         f.write(data)
+
+    # free drive: the same level with checkpoints everywhere and no laps
+    race_checkpoints = [q.checkpoint for q in out]
+    free_nodes, free_cp = free_setup(out, g)
+    for qi, q in enumerate(out):
+        q.checkpoint = free_cp.get(qi, 0xFF)
+    lv.nodes = free_nodes
+    free, _ = write_level(lv)
+    free += b'\0' * ((-len(free)) % 2048)
+    with open(os.path.join(outdir, 'dust2_free.lev'), 'wb') as f:
+        f.write(free)
+    for q, c in zip(out, race_checkpoints):
+        q.checkpoint = c
     size = build_atlas(imgs, os.path.join(outdir, 'dust2_atlas.jpg'))
     meta = dict(scale=SCALE, center=CENTER, atlas=dict(image='dust2_atlas.jpg', width=size[0], height=size[1]),
                 spawn=spawns[0], info=info, bytes=len(data), landmarks=landmarks)
