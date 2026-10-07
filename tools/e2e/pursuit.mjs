@@ -120,6 +120,18 @@ await page.evaluate((path, maxFrames, lookahead, noTeleport) => {
     else if (diff < -48) held.push('right');
     ctr.hold(...held);
     if (t % 15 === 0) window.__trace.push([t, k.x | 0, k.y | 0, k.z | 0, k.speed, k.angle, k.quad, idx, k.checkpoint, k.distToFinish, k.lap]);
+    // the AI racers: any that stops getting anywhere for 5 s
+    if (t % 60 === 0) {
+      const ds = ctr.drivers();
+      window.__ai = window.__ai || {};
+      ds.forEach((d, i) => {
+        if (i === 0 || d.actions & 0x2000000) return;
+        const a = (window.__ai[i] = window.__ai[i] || { x: d.x, z: d.z, since: t, reported: false });
+        if (Math.hypot(d.x - a.x, d.z - a.z) > 300) { a.x = d.x; a.z = d.z; a.since = t; a.reported = false; }
+        else if (t - a.since > 300 && !a.reported) { a.reported = true; window.__events.push(`t=${t} AI ${i} STUCK at ${d.x},${d.y},${d.z} (lap ${d.lap})`); }
+        a.lap = d.lap;
+      });
+    }
     if (Math.abs(k.speed) < 1500 && t > 60) {
       if (stuckSince === null) stuckSince = t;
       else if (t - stuckSince > 240) finish(`t=${t} STUCK at ${k.x | 0},${k.y | 0},${k.z | 0} (path ${idx}/${path.length}, off by ${bestD | 0})`);
@@ -138,6 +150,8 @@ if (process.env.SHOTS_DIR) {
 }
 await page.waitForFunction(() => window.__done, { timeout: 900000, polling: 500 });
 const { trace, events } = await page.evaluate(() => ({ trace: window.__trace, events: window.__events }));
+const ai = await page.evaluate(() => ctr.drivers().map((d, i) => `${i}: lap ${d.lap} rank ${d.rank + 1}${d.actions & 0x2000000 ? ' finished' : ''}`));
+events.push('drivers at the end: ' + ai.join(', '));
 if (process.env.SHOT) await page.screenshot({ path: process.env.SHOT });
 await browser.close();
 for (const e of events) console.log(e);

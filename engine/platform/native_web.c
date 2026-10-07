@@ -150,6 +150,39 @@ EMSCRIPTEN_KEEPALIVE int NativeWeb_GetState(int *out)
 	return 40;
 }
 
+// Every driver, 8 values each: x, y, z (level units), speed, lap, distance to finish, rank,
+// actions. Returns the number of drivers.
+EMSCRIPTEN_KEEPALIVE int NativeWeb_GetDrivers(int *out)
+{
+	struct GameTracker *gGT = sdata->gGT;
+	int count = 0;
+
+	memset(out, 0, 8 * 8 * sizeof(int));
+	if (((gGT->gameMode1 & LOADING) != 0) || (gGT->level1 == NULL))
+	{
+		return 0;
+	}
+	for (int i = 0; i < 8; i++)
+	{
+		struct Driver *d = gGT->drivers[i];
+		if (d == NULL)
+		{
+			continue;
+		}
+		int *o = &out[8 * i];
+		o[0] = d->posCurr.x >> 8;
+		o[1] = d->posCurr.y >> 8;
+		o[2] = d->posCurr.z >> 8;
+		o[3] = d->speedApprox;
+		o[4] = d->lapIndex;
+		o[5] = (int)d->distanceToFinish_curr;
+		o[6] = d->driverRank;
+		o[7] = (int)d->actionsFlagSet;
+		count = i + 1;
+	}
+	return count;
+}
+
 // Prints the level's instances: what each InstDef became and how it's flagged.
 EMSCRIPTEN_KEEPALIVE void NativeWeb_DumpInstances(void)
 {

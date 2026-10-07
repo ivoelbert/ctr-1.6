@@ -191,6 +191,18 @@
         }
         return s;
       },
+      drivers() {
+        const b = Module._malloc(64 * 4);
+        const n = Module._NativeWeb_GetDrivers(b);
+        const v = Module.HEAP32.subarray(b >> 2, (b >> 2) + 64);
+        const out = [];
+        for (let i = 0; i < n; i++) {
+          const o = v.subarray(8 * i, 8 * i + 8);
+          out.push({ x: o[0], y: o[1], z: o[2], speed: o[3], lap: o[4], distToFinish: o[5], rank: o[6], actions: o[7] >>> 0 });
+        }
+        Module._free(b);
+        return out;
+      },
       hold(...names) { Module._NativeWeb_SetButtons(names.reduce((m, n) => m | (BUTTONS[n] ?? n), 0)); },
       release() { Module._NativeWeb_SetButtons(0); },
       teleport(x, y, z, angle = 0) { Module._NativeWeb_Teleport(x | 0, y | 0, z | 0, angle | 0); },
