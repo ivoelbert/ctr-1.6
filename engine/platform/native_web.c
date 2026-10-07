@@ -114,6 +114,9 @@ EMSCRIPTEN_KEEPALIVE int NativeWeb_GetState(int *out)
 	out[24] = d->jumpHeightCurr;
 	out[25] = d->reserves;
 	out[26] = (d->underDriver != NULL) ? d->underDriver->checkpointIndex : -1;
+	out[29] = (int)d->heldItemID;
+	out[30] = d->numWumpas;
+	out[31] = d->driverRank;
 	return 32;
 }
 

@@ -91,6 +91,13 @@ class Level:
     max_leaf_quads: int = 6
     bsp: tuple = None  # (nodes, order) to use instead of building one (tests)
     nav_paths: list = field(default_factory=list)  # up to 3 lists of NavFrame dicts (AI racing lines)
+    # Graft onto a retail level: its data stays (models, skybox, textures, animated textures)
+    # and the header is repointed at this level's mesh, checkpoints, AI paths and instances.
+    base: object = None          # a ctrlev.Lev
+    instances: list = field(default_factory=list)  # dicts: src (index in base InstDefs), pos, rot
+    # pickups the karts touch through BSP leaf hitbox lists: dicts inst (index in instances),
+    # radius, lift (hitbox centre above the instance), flags
+    hitboxes: list = field(default_factory=list)
     icons: list = field(default_factory=list)  # (name, global index, TexLayout)
     icon_groups: list = field(default_factory=list)  # (name, groupID, [icon indices])
 
@@ -111,9 +118,10 @@ class Blob:
         struct.pack_into('<' + fmt, self.buf, off, *vals)
 
     def ptr(self, slot, target):
-        """A pointer at `slot` to data offset `target` (None = null)."""
+        """A pointer at `slot` to data offset `target` (None = null, and out of the map)."""
         if target is None:
             self.put(slot, 'I', 0)
+            self.ptr_slots = [s for s in self.ptr_slots if s != slot]
             return
         self.put(slot, 'I', target)
         self.ptr_slots.append(slot)
@@ -230,7 +238,12 @@ def tree_depth(nodes, i=0):
 
 def write_level(lv: Level):
     b = Blob()
-    hdr = b.alloc(LEVEL_SIZE)
+    if lv.base is not None:
+        b.buf = bytearray(lv.base.data)
+        b.ptr_slots = list(lv.base.ptr_slots)
+        hdr = 0
+    else:
+        hdr = b.alloc(LEVEL_SIZE)
 
     # BSP first: it fixes the quadblock order
     nodes, order = lv.bsp if lv.bsp else build_bsp(lv.quads, lv.max_leaf_quads)
@@ -273,6 +286,30 @@ def write_level(lv: Level):
     pvs = b.alloc(0x10)
     b.ptr(pvs + 0, vis_leaf)
     b.ptr(pvs + 4, vis_face)
+    # Level instances (grafted): new InstDefs copied from the base, at their new places
+    inst_defs = None
+    inst_list = None
+    if lv.base is not None and lv.instances:
+        base_defs = lv.base.u32(0x10)
+        inst_defs = b.alloc(0x40 * len(lv.instances))
+        for i, inst in enumerate(lv.instances):
+            src = base_defs + 0x40 * inst['src']
+            o = inst_defs + 0x40 * i
+            b.buf[o:o + 0x40] = lv.base.data[src:src + 0x40]
+            b.ptr(o + 0x10, lv.base.u32(src + 0x10))   # its model, in the base data
+            b.put(o + 0x2C, 'I', 0)                     # ptrInstance: filled in at load
+            b.put(o + 0x30, 'hhh', *inst['pos'])
+            b.put(o + 0x36, 'hhh', *inst['rot'])
+        # everything is visible from everywhere: one list, which LevInstDef_UnPack turns
+        # from InstDef into Instance pointers once per quadblock that references it
+        inst_list = b.alloc(4 * (len(lv.instances) + 1))
+        for i in range(len(lv.instances)):
+            b.ptr(inst_list + 4 * i, inst_defs + 0x40 * i)
+        b.ptr(pvs + 8, inst_list)
+    # a second PVS without instances, so the list above is toggled an odd number of times
+    pvs_plain = b.alloc(0x10)
+    b.ptr(pvs_plain + 0, vis_leaf)
+    b.ptr(pvs_plain + 4, vis_face)
 
     # VisMem: per-player destination lists the game copies the PVS into, and BSP render lists
     vismem = b.alloc(0x90)
@@ -324,10 +361,25 @@ def write_level(lv: Level):
             b.ptr(o + 0x40, tl)
         else:
             b.ptr(o + 0x40, None)
-        b.ptr(o + 0x44, pvs)
+        # the last quadblock takes the plain PVS when the count would leave the list as InstDefs
+        odd_fix = inst_list is not None and nq % 2 == 0 and qi == nq - 1
+        b.ptr(o + 0x44, pvs_plain if odd_fix else pvs)
         shift, divs = normal_dividends(q.pos, q.triangle)
         b.put(o + 0x3F, 'b', shift)
         b.put(o + 0x48, '10h', *divs)
+
+    # pickup hitboxes, listed in every leaf they overlap (the list ends with a zero flag)
+    boxes = []
+    for hb in lv.hitboxes:
+        if inst_defs is None:
+            break
+        px, py, pz = lv.instances[hb['inst']]['pos']
+        r = hb['radius']
+        c = (px, py + hb['lift'], pz)
+        boxes.append((hb, c, (c[0] - r, c[1] - r, c[2] - r, c[0] + r, c[1] + r, c[2] + r)))
+
+    def overlaps(a, bb):
+        return a[0] <= bb[3] and bb[0] <= a[3] and a[1] <= bb[4] and bb[1] <= a[4] and a[2] <= bb[5] and bb[2] <= a[5]
 
     # BSP nodes (node id = array index; children flagged 0x4000 when leaves)
     for ni, n in enumerate(nodes):
@@ -337,7 +389,19 @@ def write_level(lv: Level):
             b.put(o, 'Hh', 1, ni)
             b.put(o + 4, '6h', *bx)
             b.put(o + 0x10, 'I', 0)
-            b.ptr(o + 0x14, None)
+            mine = [x for x in boxes if overlaps(bx, x[2])]
+            if mine:
+                arr = b.alloc(BSP_SIZE * (len(mine) + 1))
+                for k, (hb, c, hbox) in enumerate(mine):
+                    e = arr + BSP_SIZE * k
+                    r = hb['radius']
+                    b.put(e, 'Hh', hb['flags'], 0)
+                    b.put(e + 4, '6h', *hbox)
+                    b.put(e + 0x10, 'hhhhhh', c[0], c[1], c[2], r, r * r, 0)
+                    b.ptr(e + 0x1C, inst_defs + 0x40 * hb['inst'])
+                b.ptr(o + 0x14, arr)
+            else:
+                b.ptr(o + 0x14, None)
             b.put(o + 0x18, 'I', n['count'])
             b.ptr(o + 0x1C, quad_off + QUAD_SIZE * n['first'])
         else:
@@ -370,13 +434,15 @@ def write_level(lv: Level):
     st1 = b.alloc(4 + 4 * 7)
 
     # animated textures: an empty list is one AnimTex whose first word points at itself
-    # (CTR_CycleTex_LEV walks the list without a null check)
-    anim = b.alloc(0x10)
-    b.ptr(anim, anim)
+    # (CTR_CycleTex_LEV walks the list without a null check); a base keeps its own
+    anim = None
+    if lv.base is None:
+        anim = b.alloc(0x10)
+        b.ptr(anim, anim)
 
     # texture lookup: named icons the game finds by name (minimap pieces, effects)
-    ltl = b.alloc(0x10)
-    if lv.icons:
+    ltl = None if lv.base is not None else b.alloc(0x10)
+    if lv.icons and ltl is not None:
         icons_off = b.alloc(0x20 * len(lv.icons))
         for i, (name, gidx, tl) in enumerate(lv.icons):
             o = icons_off + 0x20 * i
@@ -421,23 +487,45 @@ def write_level(lv: Level):
 
     # Level header
     b.ptr(hdr + 0x00, mesh)
-    b.ptr(hdr + 0x08, anim)
-    b.ptr(hdr + 0x3C, ltl)
-    glow = lv.glow or [(0, 0, 0, 0)] * 3
-    for i, (pf, pt, cf, ct) in enumerate(glow):
-        b.put(hdr + 0x48 + 12 * i, 'hhII', pf, pt, cf, ct)
+    if lv.base is None:
+        b.ptr(hdr + 0x08, anim)
+        b.ptr(hdr + 0x3C, ltl)
+        glow = lv.glow or [(0, 0, 0, 0)] * 3
+        for i, (pf, pt, cf, ct) in enumerate(glow):
+            b.put(hdr + 0x48 + 12 * i, 'hhII', pf, pt, cf, ct)
+        b.put(hdr + 0xD8, 'II', 0, lv.config_flags)
+        for i, (r, g, bb, en) in enumerate(lv.clear_colors):
+            b.buf[hdr + 0x160 + 4 * i:hdr + 0x164 + 4 * i] = bytes([r, g, bb, en])
+    else:
+        # the base's instances, water and extra spawn data belong to the old track
+        b.put(hdr + 0x0C, 'I', len(lv.instances))
+        b.ptr(hdr + 0x10, inst_defs)
+        all_defs = None
+        if inst_defs is not None:
+            all_defs = b.alloc(4 * (len(lv.instances) + 1))
+            for i in range(len(lv.instances)):
+                b.ptr(all_defs + 4 * i, inst_defs + 0x40 * i)
+        b.ptr(hdr + 0x24, all_defs)
+        b.ptr(hdr + 0x28, None)          # visOVertSrc
+        b.put(hdr + 0x34, 'I', 0)        # numWaterVertices
+        b.ptr(hdr + 0x38, None)          # ptr_water
+        b.put(hdr + 0x138, 'I', 0)       # numSpawnType2
+        b.ptr(hdr + 0x13C, None)
+        b.put(hdr + 0x140, 'I', 0)       # numSpawnType2_PosRot
+        b.ptr(hdr + 0x144, None)
+        b.put(hdr + 0x170, 'I', 0)       # visSCVertSrc
+        b.ptr(hdr + 0x170, None)
+        b.put(hdr + 0x174, 'I', 0)       # numSCVert
+        b.ptr(hdr + 0x178, None)
     spawns = (lv.spawns + [((0, 0, 0), (0, 0, 0))] * 8)[:8]
     for i, (p, r) in enumerate(spawns):
         b.put(hdr + 0x6C + 12 * i, '6h', p[0], p[1], p[2], r[0], r[1], r[2])
-    b.put(hdr + 0xD8, 'II', 0, lv.config_flags)
     b.ptr(hdr + 0xE0, strs['start'])
     b.ptr(hdr + 0xE4, strs['end'])
     b.ptr(hdr + 0xE8, strs['type'])
     b.ptr(hdr + 0x134, st1)
     b.put(hdr + 0x148, 'I', len(lv.nodes))
     b.ptr(hdr + 0x14C, nodes_off)
-    for i, (r, g, bb, en) in enumerate(lv.clear_colors):
-        b.buf[hdr + 0x160 + 4 * i:hdr + 0x164 + 4 * i] = bytes([r, g, bb, en])
     b.ptr(hdr + 0x188, nav_table)
     b.ptr(hdr + 0x190, vismem)
 

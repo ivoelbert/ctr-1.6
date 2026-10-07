@@ -1,6 +1,10 @@
 """Builds the Dust 2 track for CTR from the "De_Dust 2 with real light" model (Neo_minigan, CC-BY-4.0).
 
-  python3 -I tools/build_dust2.py MODEL.glb OUTDIR
+  python3 -I tools/build_dust2.py MODEL.glb DISC.bin OUTDIR
+
+DISC.bin is your NTSC-U CTR disc image: Dust 2 is grafted onto Dingo Canyon's level (it
+keeps that track's models -- weapon crates, wumpa fruit, the start banner -- its skybox and
+its textures), so the output contains data from your disc. Never share it.
 
 Writes
   OUTDIR/dust2.lev        the level (a CTR LEV file, see levwriter.py)
@@ -588,7 +592,7 @@ def race_setup(out, landmarks):
           f'{len(nav)} AI paths of {len(nav[0])} frames')
     route = dict(length=L, path=pts.tolist(), nodes=[n.pos for n in nodes],
                  ai=[[f['pos'] for f in path] for path in nav])
-    return nodes, spawns, route, nav
+    return nodes, spawns, route, nav, g
 
 
 NAV_SPACING = 400.0   # AI path frames, CTR units (retail tracks: ~150-700)
@@ -697,7 +701,89 @@ def kill_plane(out, y=-1600, size=4096):
             out.append(q)
 
 
-def main(glb, outdir):
+BASE_LEVEL_ENTRY = 1   # Dingo Canyon, 1P races (BIGFILE entry 8 * level + 1)
+
+
+def base_level(disc):
+    from psxiso import Disc
+    from bigfile import Bigfile
+    from ctrlev import Lev
+    d = Disc(disc)
+    big = None
+    for name, lba, size, isdir in d.walk():
+        if name.startswith('BIGFILE.BIG'):
+            big = Bigfile(d.read(lba, size))
+    if big is None:
+        raise SystemExit('no BIGFILE.BIG on the disc')
+    return Lev(big.get(BASE_LEVEL_ENTRY)), big
+
+
+def base_instances(lev):
+    """InstDef indices of the base level by model name."""
+    by = {}
+    h = lev.header()
+    for i in range(h['numInstances']):
+        o = h['ptrInstDefs'] + 0x40 * i
+        model = lev.u32(o + 0x10)
+        name = lev.data[model:model + 16].split(b'\0')[0].decode('latin1')
+        by.setdefault(name, []).append(i)
+    return by
+
+
+def place_pickups(route, g, by_model):
+    """Weapon crates in rows across the track, wumpa fruit in lines along it, two fruit crates,
+    and the start banner over the start line."""
+    pts = np.array(route['path'])
+    seg = np.linalg.norm(np.diff(pts[:, [0, 2]], axis=0), axis=1)
+    arc = np.concatenate([[0.0], np.cumsum(seg)])
+    L = arc[-1]
+
+    def frame(f):
+        sv = (f % 1.0) * L
+        i = min(int(np.searchsorted(arc, sv, side='right')) - 1, len(pts) - 2)
+        t = (sv - arc[i]) / max(arc[i + 1] - arc[i], 1e-9)
+        p = pts[i] + (pts[i + 1] - pts[i]) * t
+        d = pts[min(i + 6, len(pts) - 1)] - pts[max(i - 6, 0)]
+        d = np.array([d[0], d[2]]) / (np.hypot(d[0], d[2]) + 1e-9)
+        return p, d, np.array([-d[1], d[0]])
+
+    def floor_point(x, y, z):
+        hit = drivable_at(g, x, y, z, min_clear=1)
+        return None if hit is None else (int(x), int(hit[1]), int(z))
+
+    out = []
+    crates = list(by_model.get('crate_question', []))
+    for f in (0.17, 0.40, 0.63, 0.86):
+        p, d, lat = frame(f)
+        yaw = int(round(math.atan2(d[0], d[1]) / (2 * math.pi) * 4096)) % 4096
+        for k in range(4):
+            for spread in (220, 160, 110):
+                q = floor_point(*(p + np.array([lat[0], 0, lat[1]]) * (k - 1.5) * spread))
+                if q:
+                    break
+            if q and crates:
+                out.append(dict(src=crates.pop(0), pos=q, rot=(0, yaw, 0)))
+    fruit = list(by_model.get('fruit', []))
+    for f in (0.07, 0.29, 0.51, 0.74):
+        p, d, lat = frame(f)
+        for k in range(4):
+            q = floor_point(*(p + np.array([d[0], 0, d[1]]) * k * 160 + np.array([lat[0], 0, lat[1]]) * 90))
+            if q and fruit:
+                out.append(dict(src=fruit.pop(0), pos=q, rot=(0, 0, 0)))
+    boxes = list(by_model.get('crate_fruit', []))
+    for f, sidev in ((0.47, 1), (0.93, -1)):
+        p, d, lat = frame(f)
+        q = floor_point(*(p + np.array([lat[0], 0, lat[1]]) * 180 * sidev))
+        if q and boxes:
+            out.append(dict(src=boxes.pop(0), pos=q, rot=(0, 0, 0)))
+    for i in by_model.get('startbanner', [])[:1]:
+        p, d, lat = frame(0.0)
+        yaw = int(round(math.atan2(d[0], d[1]) / (2 * math.pi) * 4096)) % 4096
+        out.append(dict(src=i, pos=(int(p[0]), int(p[1]) + 959, int(p[2])), rot=(0, (yaw - 2048) % 4096, 0)))
+    return out
+
+
+def main(glb, disc, outdir):
     os.makedirs(outdir, exist_ok=True)
     tris, imgs = load(glb)
     out = []
@@ -710,12 +796,23 @@ def main(glb, outdir):
     print(f'{len(out)} quadblocks')
 
     landmarks = landmark_positions(tris)
-    nodes, spawns, route, nav = race_setup(out, landmarks)
+    nodes, spawns, route, nav, g = race_setup(out, landmarks)
     kill_plane(out)
+    base, big = base_level(disc)
+    pickups = place_pickups(route, g, base_instances(base))
+    print(f'{len(pickups)} pickups placed')
+    names = {i: n for n, ids in base_instances(base).items() for i in ids}
+    hitbox_of = {'crate_question': (76, 48), 'crate_fruit': (76, 48), 'fruit': (64, 64)}
+    hitboxes = []
+    for k, pk in enumerate(pickups):
+        kind = names.get(pk['src'])
+        if kind in hitbox_of:
+            r, lift = hitbox_of[kind]
+            hitboxes.append(dict(inst=k, radius=r, lift=lift, flags=0x4C0))
 
     lv = Level(quads=out, nodes=nodes, spawns=spawns,
                clear_colors=[(170, 190, 220, 1), (230, 200, 160, 1), (200, 210, 230, 1)],
-               build_name='de_dust2', nav_paths=nav)
+               build_name='de_dust2', nav_paths=nav, base=base, instances=pickups, hitboxes=hitboxes)
     data, info = write_level(lv)
     data += b'\0' * ((-len(data)) % 2048)
     with open(os.path.join(outdir, 'dust2.lev'), 'wb') as f:
@@ -731,4 +828,4 @@ def main(glb, outdir):
 
 
 if __name__ == '__main__':
-    main(sys.argv[1], sys.argv[2])
+    main(sys.argv[1], sys.argv[2], sys.argv[3])

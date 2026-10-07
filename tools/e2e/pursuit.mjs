@@ -50,6 +50,10 @@ await page.evaluate((path, maxFrames, lookahead, noTeleport) => {
       window.__lap = s.kart.lap;
       return;
     }
+    if (s.kart.item !== window.__item || s.kart.wumpa !== window.__wumpa) {
+      window.__events.push(`t=${n - start} item ${s.kart.item} wumpa ${s.kart.wumpa} rank ${s.kart.rank}`);
+      window.__item = s.kart.item; window.__wumpa = s.kart.wumpa;
+    }
     if (s.kart.lap !== window.__lap) { window.__events.push(`t=${n - start} lap ${s.kart.lap} (race time ${s.eventTime})`); window.__lap = s.kart.lap; }
     const t = n - start;
     const k = s.kart;
