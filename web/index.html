@@ -173,12 +173,12 @@
   const BUTTONS = { select: 0x1, start: 0x8, up: 0x10, right: 0x20, down: 0x40, left: 0x80,
     l2: 0x100, r2: 0x200, l1: 0x400, r1: 0x800, triangle: 0x1000, circle: 0x2000, cross: 0x4000, square: 0x8000 };
   function installHooks() {
-    const buf = Module._malloc(32 * 4);
+    const buf = Module._malloc(40 * 4);
     window.ctr = {
       BUTTONS,
       state() {
         Module._NativeWeb_GetState(buf);
-        const v = Module.HEAP32.subarray(buf >> 2, (buf >> 2) + 32);
+        const v = Module.HEAP32.subarray(buf >> 2, (buf >> 2) + 40);
         const s = { level: v[0], gameMode1: v[1] >>> 0, players: v[2], loadStage: v[3], vblank: v[21], eventTime: v[20],
           primUsed: v[27], primCapacity: v[28] };
         if (v[4]) {
@@ -186,6 +186,7 @@
             state: v[13], lap: v[14], quad: v[15], touching: v[16], lastValid: v[17], actions: v[18] >>> 0,
             distToFinish: v[19], terrain: v[22], angle: v[23], jump: v[24], reserves: v[25], checkpoint: v[26],
             item: v[29], wumpa: v[30], rank: v[31] };
+          s.camera = { x: v[32], y: v[33], z: v[34], quad: v[35] };
         }
         return s;
       },

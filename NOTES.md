@@ -56,6 +56,10 @@ the map.
 - Model: "De_Dust 2 with real light" (Neo_minigan, CC-BY-4.0): 9061 triangles in Hammer
   units, 11 baked 1024^2 atlases. Hammer (x, y, z) -> CTR 4 * (x + 320, z, -(y - 1120)).
 - Stairs get invisible ramps (tools/stairs.py); mid doors and long doors swing open.
+- The model's light baking left ~270 faces (mostly) black: they take a texel from around them
+  (`fill_black_faces`), as dim as their surroundings.
+- Free drive's checkpoint nodes each point at a twin straight above: the wrong-way test
+  compares the heading with the way between a node's next two nodes, which is then vertical.
 - Karts are shaded by the vertex colours of the floor under them, so floors carry the model's
   baked light as vertex colours (sunlit sand = 0x60, full light); the atlas shader leaves
   vertex colours out, so they only light the karts. Stair ramps take the nearest floor's.
@@ -78,6 +82,6 @@ the map.
 ## Left to do
 
 - Minimap; the tunnels loop in the CTR menus too (another slot, with Dingo Canyon's VRM).
-- Black (unbaked) faces; wall snags.
+- Wall snags.
 - 2P/4P: work (tested with fake gamepads, `tools/e2e/lib.mjs`). With one gamepad, the gamepad
   is player 1 and the keyboard player 2.

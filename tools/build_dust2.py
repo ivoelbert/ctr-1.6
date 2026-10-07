@@ -139,7 +139,54 @@ def load(glb):
     patches = door_floor_patches(glb, tris)
     tris.extend(patches)
     print(f'{len(tris)} triangles ({flipped} turned to face their normals, {len(patches)} floor patches under swung doors)')
+    fill_black_faces(tris, imgs)
     return tris, imgs
+
+
+def fill_black_faces(tris, imgs, radius=700.0):
+    """Faces the model's light baking left (mostly) black take one texel from around them: of
+    the lit faces within radius (facing the same way if there are any), the sample nearest
+    their median brightness, so a fill is no brighter than its surroundings. (The neighbour's
+    own colour was too bright in covered spots; these faces are mostly tucked away.)"""
+    lum = {}
+    for i, data in enumerate(imgs):
+        a = np.asarray(Image.open(io.BytesIO(data)).convert('RGB'), dtype=np.float32)
+        lum[i + 1] = 0.299 * a[..., 0] + 0.587 * a[..., 1] + 0.114 * a[..., 2]
+
+    def texel(layer, uv):
+        L = lum[layer]
+        return L[int(np.clip(uv[1], 0, LAYER_SIZE - 1)), int(np.clip(uv[0], 0, LAYER_SIZE - 1))]
+
+    # barycentric sample points: the middle, the corners pulled 20% in, the edge middles pulled in
+    weights = [(1 / 3, 1 / 3, 1 / 3)] + [tuple(0.8 * (k == j) + 0.1 for k in range(3)) for j in range(3)] + \
+              [tuple(0.4 * (k != j) + 0.2 * (k == j) for k in range(3)) for j in range(3)]
+
+    def samples(t):
+        """Points across the face: (luminance, uv)."""
+        return [(texel(t.layer, q), tuple(q)) for q in (np.dot(w, t.uv) for w in weights)]
+
+    def kind(t):
+        return 0 if t.n[1] > 0.7 else 2 if t.n[1] < -0.7 else 1
+
+    black = [i for i, t in enumerate(tris) if sum(sm[0] < 10 for sm in samples(t)) * 2 >= len(weights)]
+    blackset = set(black)
+    centres = np.array([t.p.mean(axis=0) for t in tris])
+    kinds = np.array([kind(t) for t in tris])
+    filled = 0
+    for i in black:
+        t = tris[i]
+        d = np.linalg.norm(centres - centres[i], axis=1)
+        near = [k for k in np.argsort(d) if d[k] < radius and k not in blackset]
+        same = [k for k in near if kinds[k] == kinds[i]]
+        pool = [(lv, tris[k].layer, uv) for k in (same or near) for lv, uv in samples(tris[k]) if lv >= 10]
+        if not pool:
+            continue
+        target = float(np.median([lv for lv, _, _ in pool]))
+        _, layer, uv = min(pool, key=lambda sm: abs(sm[0] - target))
+        t.layer = layer
+        t.uv = np.array([uv, uv, uv])
+        filled += 1
+    print(f'{filled} of {len(black)} black faces take the colour around them')
 
 
 def door_floor_patches(glb, tris):
@@ -762,14 +809,18 @@ def free_setup(out, g):
     for (cx, cz, k), nid in g.node.items():
         if cx % FREE_NODE_CELLS == 0 and cz % FREE_NODE_CELLS == 0 and g.wall_dist[nid] >= 3:
             picks.append(nid)
-    picks = picks[:254]
+    picks = picks[:127]
     pos = np.array([g.pos[n] for n in picks], dtype=float)
+    # Each node's next is a twin straight above it: the wrong-way test (VehLap_UpdateProgress)
+    # checks the kart's heading against the way from a node's next to that one's next, which is
+    # then vertical, so it never says "wrong way" on the ground. Floors only point at the real
+    # nodes, so respawns (which face the next node) never start at a twin.
     nodes = []
+    n = len(pos)
     for i, p in enumerate(pos):
-        d = np.linalg.norm(pos[:, [0, 2]] - p[[0, 2]], axis=1)
-        d[i] = 1e18
-        j = int(np.argmin(d))
-        nodes.append(Node((int(p[0]), int(p[1]), int(p[2])), 4000, j, j))
+        nodes.append(Node((int(p[0]), int(p[1]), int(p[2])), 4000, n + i, n + i))
+    for i, p in enumerate(pos):
+        nodes.append(Node((int(p[0]), int(p[1]) + 1000, int(p[2])), 4000, i, i))
     checkpoints = {}
     for qi, q in enumerate(out):
         if not (q.flags & FLAG_GROUND) or q.faces[0] is None and q.flags & FLAG_KILL_PLANE:

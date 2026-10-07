@@ -81,13 +81,13 @@ internal int NativeWeb_QuadIndex(const struct QuadBlock *quad)
 	return (int)(quad - gGT->level1->ptr_mesh_info->ptrQuadBlockArray);
 }
 
-// Fills out[0..31]; returns the number of values written.
+// Fills out[0..39]; returns the number of values written.
 EMSCRIPTEN_KEEPALIVE int NativeWeb_GetState(int *out)
 {
 	struct GameTracker *gGT = sdata->gGT;
 	struct Driver *d = gGT->drivers[0];
 
-	memset(out, 0, 32 * sizeof(int));
+	memset(out, 0, 40 * sizeof(int));
 	out[0] = gGT->levelID;
 	out[1] = (int)gGT->gameMode1;
 	out[2] = gGT->numPlyrCurrGame;
@@ -105,7 +105,7 @@ EMSCRIPTEN_KEEPALIVE int NativeWeb_GetState(int *out)
 	}
 	if ((d == NULL) || ((gGT->gameMode1 & LOADING) != 0) || (gGT->level1 == NULL))
 	{
-		return 32;
+		return 40;
 	}
 
 	out[4] = 1;
@@ -132,10 +132,14 @@ EMSCRIPTEN_KEEPALIVE int NativeWeb_GetState(int *out)
 	out[29] = (int)d->heldItemID;
 	out[30] = d->numWumpas;
 	out[31] = d->driverRank;
-	return 32;
+	// player 1's camera
+	out[32] = gGT->pushBuffer[0].pos.x;
+	out[33] = gGT->pushBuffer[0].pos.y;
+	out[34] = gGT->pushBuffer[0].pos.z;
+	out[35] = NativeWeb_QuadIndex(gGT->cameraDC[0].ptrQuadBlock);
+	return 40;
 }
 
-// Puts player 1's kart at (x, y, z) in level units, heading `angle` (4096 = full turn).
 // Prints the level's instances: what each InstDef became and how it's flagged.
 EMSCRIPTEN_KEEPALIVE void NativeWeb_DumpInstances(void)
 {
@@ -163,6 +167,7 @@ EMSCRIPTEN_KEEPALIVE void NativeWeb_DumpInstances(void)
 	}
 }
 
+// Puts player 1's kart at (x, y, z) in level units, heading `angle` (4096 = full turn).
 EMSCRIPTEN_KEEPALIVE void NativeWeb_Teleport(int x, int y, int z, int angle)
 {
 	struct GameTracker *gGT = sdata->gGT;

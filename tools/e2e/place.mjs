@@ -14,5 +14,5 @@ for (let i = 0; i < 3; i++) {
 }
 await sleep(Number(process.env.WAIT || 1500));
 await page.screenshot({ path: out });
-console.log(JSON.stringify((await page.evaluate(() => ctr.state())).kart));
+console.log(JSON.stringify((await page.evaluate(() => { const s = ctr.state(); return { kart: s.kart, camera: s.camera }; }))));
 await browser.close();
