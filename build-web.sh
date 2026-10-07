@@ -2,7 +2,7 @@
 # Builds the CTR engine (engine/, a ctr-native fork) to WebAssembly in build/web.
 #
 #   ./build-web.sh            optimized build
-#   DEBUG=1 ./build-web.sh    assertions and debug info
+#   DEBUG=1 ./build-web.sh    assertions and debug info (DEBUG=2: no optimization)
 #
 # Uses $EMSDK if set, otherwise vab's pinned emsdk, otherwise .cache/emsdk.
 set -euo pipefail
@@ -33,6 +33,7 @@ CFLAGS=(
   -std=c17
   -Iengine/include -Iengine
   -DCTR_NATIVE
+  -DCTR_DUST2_EXPANDED_MEMPACK
   "-DCTR_NATIVE_VERSION=\"$VERSION\""
   "-DCTR_NATIVE_BUILD_ID=\"$BUILD_ID\""
   -Wno-constant-conversion
@@ -46,12 +47,16 @@ LDFLAGS=(
   -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=128MB
   -sSTACK_SIZE=8MB
   -sFORCE_FILESYSTEM=1
-  "-sEXPORTED_RUNTIME_METHODS=['FS','callMain']"
+  "-sEXPORTED_RUNTIME_METHODS=['FS','callMain','HEAP32']"
+  "-sEXPORTED_FUNCTIONS=['_main','_malloc','_free']"
   -sINVOKE_RUN=0
   -sEXIT_RUNTIME=0
   --pre-js web/ctr-pre.js
 )
-if [ "${DEBUG:-0}" = "1" ]; then
+if [ "${DEBUG:-0}" = "2" ]; then
+  CFLAGS+=(-O0 -g)
+  LDFLAGS+=(-O0 -g -sASSERTIONS=2)
+elif [ "${DEBUG:-0}" = "1" ]; then
   CFLAGS+=(-O1 -g)
   LDFLAGS+=(-O1 -g -sASSERTIONS=2)
 else

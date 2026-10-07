@@ -465,10 +465,20 @@ internal void NativeInput_ApplyController(s32 slot)
 	snapshot->analog[3] = NativeInput_AxisToByte(leftY);
 }
 
+#if defined(__EMSCRIPTEN__)
+// NOTE(web): PS1 pad bits (active high here) held down by the page's test hooks
+// (platform/native_web.c), merged into the keyboard pad.
+int g_nativeWebHeldButtons;
+#endif
+
 internal u16 NativeInput_ReadKeyboard(void)
 {
 	const struct NativeInputKeyboardMapping *mapping = &s_keyboardMapping;
 	u16 buttons = 0xffff;
+
+#if defined(__EMSCRIPTEN__)
+	buttons &= (u16)~g_nativeWebHeldButtons;
+#endif
 
 	if (s_keyboardState == NULL)
 	{

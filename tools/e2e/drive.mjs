@@ -1,9 +1,12 @@
-// Boots into a Time Trial and holds the gas: node tools/e2e/drive.mjs [level] [seconds]
+// Boots into a Time Trial and holds the gas, screenshotting as it goes:
+//   node tools/e2e/drive.mjs [level] [seconds] [extra query]
+//   OUT=build/shots/x  where the screenshots go
 import { launch, sleep } from './lib.mjs';
 const level = Number(process.argv[2] ?? 3);
 const seconds = Number(process.argv[3] ?? 25);
+const extra = process.argv[4] ? `&${process.argv[4]}` : '';
 const outDir = process.env.OUT || 'build/shots';
-const { browser, page } = await launch({ query: `?level=${level}&mode=0` });
+const { browser, page } = await launch({ query: `?level=${level}&mode=0${extra}` });
 await sleep(4000);
 await page.click('canvas');
 await page.keyboard.down('KeyC'); // cross: gas

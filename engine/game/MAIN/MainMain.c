@@ -581,6 +581,9 @@ void StateZero()
 
 	// Get CD Position fo BIGFILE
 	sdata->ptrBigfile1 = LOAD_ReadDirectory(BIGPATH);
+#if defined(CTR_NATIVE)
+	NativeCD_ApplyBigfileOverrides(sdata->ptrBigfile1);
+#endif
 
 // Defrag to save heap space,
 // required because MEMPACK_Init moves heap

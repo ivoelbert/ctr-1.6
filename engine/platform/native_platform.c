@@ -14,11 +14,15 @@
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
+#if defined(__EMSCRIPTEN__)
+#include <emscripten.h>
+#endif
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 
 SDL_Window *g_window = NULL;
+int Platform_GetVBlankCount(void);
 int g_dbg_polygonSelected = 0;
 
 extern int g_cfg_bilinearFiltering;
@@ -516,9 +520,20 @@ void Platform_PollHostEvents(void)
 	}
 }
 
+#if defined(__EMSCRIPTEN__)
+// NOTE(web): Lets the page script inputs in step with the game: Module.ctrOnVBlank
+// runs once per VBlank, right before the pads are read.
+EM_JS(void, NativeWeb_OnVBlank, (int vblankCount), {
+	if (Module.ctrOnVBlank) Module.ctrOnVBlank(vblankCount);
+});
+#endif
+
 int Platform_PollInput(void)
 {
 	Platform_PollHostEvents();
+#if defined(__EMSCRIPTEN__)
+	NativeWeb_OnVBlank(Platform_GetVBlankCount());
+#endif
 	Platform_InputUpdate();
 	return 1;
 }

@@ -21,7 +21,11 @@ export async function launch({ query = '', width = 960, height = 720, log = true
   const page = await browser.newPage();
   const lines = [];
   page.on('console', (m) => { const t = m.text(); lines.push(t); if (log) console.log('[page]', t); });
-  page.on('pageerror', (e) => { lines.push('PAGEERROR ' + e.message); console.log('[pageerror]', e.message); });
+  page.on('pageerror', (e) => {
+    lines.push('PAGEERROR ' + e.message);
+    console.log('[pageerror]', e.stack || e.message);
+    if (process.env.KEEP_GOING !== '1') { browser.close().finally(() => process.exit(2)); }
+  });
   await page.goto(`${BASE_URL}/${query}`, { waitUntil: 'load' });
   return { browser, page, lines };
 }

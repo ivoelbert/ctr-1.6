@@ -5,14 +5,16 @@
 #include <platform/native_path.h>
 #include <psx/libcd.h>
 
+#include <dirent.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 // NOTE(aalhendi): Native exports the retail Cd* API. Extracted host files stay
 // as dev/modding overrides; missing files can fall back to assets/ctr-u.bin.
 
 #define NATIVE_CD_SECTOR_WORDS   512
-#define NATIVE_CD_MAX_OPEN_FILES 8
+#define NATIVE_CD_MAX_OPEN_FILES 64
 #define NATIVE_CD_SECTOR_SIZE    0x800
 
 enum NativeCDFileSource
@@ -138,6 +140,95 @@ internal s32 NativeCD_OpenFile(const char *filename, s32 *outSize)
 	s_nativeCdFiles[fileIndex].hostFile = file;
 	*outSize = (s32)fileSize;
 	return fileIndex;
+}
+
+// NOTE(ctr-dust2): Opens a host file by its full path as a CD file; returns its
+// file index (the high byte of a native CD position) or -1.
+internal s32 NativeCD_OpenHostPath(const char *path, s32 *outSize)
+{
+	if (s_nativeCdFileCount >= NATIVE_CD_MAX_OPEN_FILES)
+	{
+		return -1;
+	}
+
+	FILE *file = fopen(path, "rb");
+	if (file == NULL)
+	{
+		return -1;
+	}
+
+	if (fseek(file, 0, SEEK_END) != 0)
+	{
+		fclose(file);
+		return -1;
+	}
+
+	long fileSize = ftell(file);
+	if ((fileSize < 0) || (fseek(file, 0, SEEK_SET) != 0))
+	{
+		fclose(file);
+		return -1;
+	}
+
+	s32 fileIndex = s_nativeCdFileCount++;
+	memset(&s_nativeCdFiles[fileIndex], 0, sizeof(s_nativeCdFiles[fileIndex]));
+	s_nativeCdFiles[fileIndex].source = NATIVE_CD_FILE_HOST;
+	s_nativeCdFiles[fileIndex].hostFile = file;
+	*outSize = (s32)fileSize;
+	return fileIndex;
+}
+
+// NOTE(ctr-dust2): BIGFILE entry overrides. assets/override/NNN.bin (NNN = the
+// entry index, decimal) replaces BIGFILE entry NNN: the entry is pointed at the
+// host file, so the retail loaders read it as if it were on the disc.
+int NativeCD_ApplyBigfileOverrides(struct BigHeader *bigfile)
+{
+	char dirPath[512];
+	int applied = 0;
+
+	if (bigfile == NULL)
+	{
+		return 0;
+	}
+
+	snprintf(dirPath, sizeof(dirPath), "%s/override", NativeAssets_GetAssetDir());
+	DIR *dir = opendir(dirPath);
+	if (dir == NULL)
+	{
+		return 0;
+	}
+
+	struct dirent *entry;
+	struct BigEntry *entries = BIG_GETENTRY(bigfile);
+	while ((entry = readdir(dir)) != NULL)
+	{
+		char *end = NULL;
+		long index = strtol(entry->d_name, &end, 10);
+		char filePath[768];
+		s32 size = 0;
+
+		if ((end == entry->d_name) || (strcmp(end, ".bin") != 0) || (index < 0) || (index >= bigfile->numEntry))
+		{
+			continue;
+		}
+
+		snprintf(filePath, sizeof(filePath), "%s/%s", dirPath, entry->d_name);
+		s32 fileIndex = NativeCD_OpenHostPath(filePath, &size);
+		if (fileIndex < 0)
+		{
+			printf("[CTR Native] override %s: cannot open\n", filePath);
+			continue;
+		}
+
+		// cdpos + offset must land on sector 0 of the host file
+		entries[index].offset = (s32)((u32)fileIndex << 24) - bigfile->cdpos;
+		entries[index].size = size;
+		printf("[CTR Native] BIGFILE entry %ld <- %s (%d bytes)\n", index, filePath, size);
+		applied++;
+	}
+
+	closedir(dir);
+	return applied;
 }
 
 internal s32 NativeCD_SearchFile(CdlFILE *loc, const char *filename)

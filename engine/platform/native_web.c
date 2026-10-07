@@ -45,3 +45,86 @@ void NativeWeb_ApplyBootOverride(struct GameTracker *gGT)
 	printf("[CTR Web] Boot override: level %d, mode %d, character %d, laps %d\n", level, mode, character, laps);
 }
 #endif
+
+#if defined(__EMSCRIPTEN__)
+extern int g_nativeWebHeldButtons;
+
+// Test hooks for the page (window.ctr in web/index.html).
+
+EMSCRIPTEN_KEEPALIVE void NativeWeb_SetButtons(int mask)
+{
+	g_nativeWebHeldButtons = mask & 0xffff;
+}
+
+internal int NativeWeb_QuadIndex(const struct QuadBlock *quad)
+{
+	struct GameTracker *gGT = sdata->gGT;
+	if ((quad == NULL) || (gGT->level1 == NULL) || (gGT->level1->ptr_mesh_info == NULL))
+	{
+		return -1;
+	}
+	return (int)(quad - gGT->level1->ptr_mesh_info->ptrQuadBlockArray);
+}
+
+// Fills out[0..31]; returns the number of values written.
+EMSCRIPTEN_KEEPALIVE int NativeWeb_GetState(int *out)
+{
+	struct GameTracker *gGT = sdata->gGT;
+	struct Driver *d = gGT->drivers[0];
+
+	memset(out, 0, 32 * sizeof(int));
+	out[0] = gGT->levelID;
+	out[1] = (int)gGT->gameMode1;
+	out[2] = gGT->numPlyrCurrGame;
+	out[3] = sdata->Loading.stage;
+	out[21] = Platform_GetVBlankCount();
+	out[20] = gGT->elapsedEventTime;
+	if ((d == NULL) || ((gGT->gameMode1 & LOADING) != 0) || (gGT->level1 == NULL))
+	{
+		return 32;
+	}
+
+	out[4] = 1;
+	out[5] = d->posCurr.x;
+	out[6] = d->posCurr.y;
+	out[7] = d->posCurr.z;
+	out[8] = d->rotCurr.x;
+	out[9] = d->rotCurr.y;
+	out[10] = d->rotCurr.z;
+	out[11] = d->speed;
+	out[12] = d->speedApprox;
+	out[13] = d->kartState;
+	out[14] = d->lapIndex;
+	out[15] = NativeWeb_QuadIndex(d->underDriver);
+	out[16] = NativeWeb_QuadIndex(d->currBlockTouching);
+	out[17] = NativeWeb_QuadIndex(d->lastValid);
+	out[18] = (int)d->actionsFlagSet;
+	out[19] = (int)d->distanceToFinish_curr;
+	out[22] = (d->underDriver != NULL) ? d->underDriver->terrain_type : -1;
+	out[23] = d->angle;
+	out[24] = d->jumpHeightCurr;
+	out[25] = d->reserves;
+	out[26] = (d->underDriver != NULL) ? d->underDriver->checkpointIndex : -1;
+	return 32;
+}
+
+// Puts player 1's kart at (x, y, z) in level units, heading `angle` (4096 = full turn).
+EMSCRIPTEN_KEEPALIVE void NativeWeb_Teleport(int x, int y, int z, int angle)
+{
+	struct GameTracker *gGT = sdata->gGT;
+	struct Driver *d = gGT->drivers[0];
+	if (d == NULL)
+	{
+		return;
+	}
+
+	d->posCurr.x = x << 8;
+	d->posCurr.y = y << 8;
+	d->posCurr.z = z << 8;
+	d->posPrev = d->posCurr;
+	d->rotCurr.y = (s16)angle;
+	d->angle = (s16)angle;
+	d->speed = 0;
+	d->speedApprox = 0;
+}
+#endif

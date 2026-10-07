@@ -12,11 +12,19 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if defined(CTR_DUST2_EXPANDED_MEMPACK)
+// NOTE(ctr-dust2): Custom levels (Dust 2) are several megabytes; the heap keeps
+// the retail start offset but runs to the end of a 16 MiB buffer.
+#define CTR_NATIVE_MEMPACK_BUFFER_SIZE  0x1000000u
+#define CTR_NATIVE_MEMPACK_START_OFFSET 0xba9f0u
+#define CTR_NATIVE_MEMPACK_SIZE         (CTR_NATIVE_MEMPACK_BUFFER_SIZE - CTR_NATIVE_MEMPACK_START_OFFSET - MEMPACK_PS1_END_GUARD_SIZE)
+#else
 // Native uses the NTSC-U 926 mempack window inside the retail 2 MiB address
 // space so memory regressions fail here as they would on PSX.
 #define CTR_NATIVE_MEMPACK_BUFFER_SIZE  0x200000u
 #define CTR_NATIVE_MEMPACK_START_OFFSET 0xba9f0u
 #define CTR_NATIVE_MEMPACK_SIZE         0x144e10u
+#endif
 
 CTR_STATIC_ASSERT(CTR_NATIVE_MEMPACK_START_OFFSET + CTR_NATIVE_MEMPACK_SIZE + MEMPACK_PS1_END_GUARD_SIZE == CTR_NATIVE_MEMPACK_BUFFER_SIZE);
 
