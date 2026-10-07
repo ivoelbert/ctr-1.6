@@ -88,6 +88,9 @@ the map.
 ## Left to do
 
 - Track select previews and menu maps still show Dingo Canyon's and Dragon Mines'.
-- Wall snags.
+- A two-level edge at A site (CTR ~6300, -6700): its stair ramp covers the first 64 units of
+  128, so a kart can't climb it there (free drive only; the slope just east of it works).
+- Driving off-centre round both loops (`OFFSET`) and a tour of every landmark (`CONTINUE`)
+  found no snags beyond real obstacles (crates, the 90-degree corner at the top of long A).
 - 2P/4P: work (tested with fake gamepads, `tools/e2e/lib.mjs`). With one gamepad, the gamepad
   is player 1 and the keyboard player 2.

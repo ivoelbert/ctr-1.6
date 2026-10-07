@@ -4,6 +4,7 @@
 //   MODE=1 (Arcade) LAPS=3 NO_TELEPORT=1 (start from the grid) DUST2=free (the free-drive level)
 //   OFFSET=n (drive n units right of the route, negative: left). Reports SNAGs: the speed
 //   falling by 40% in 8 frames with the gas held (a wall or an obstacle hit).
+//   CONTINUE=1: when stuck, report it and carry on from further along (a tour of the map).
 // Steering: CTR yaw grows when turning left; forward is (sin, cos) of yaw in (x, z).
 import fs from 'node:fs';
 import { launch } from './lib.mjs';
@@ -33,6 +34,7 @@ const mode = Number(process.env.MODE ?? 0);
 const { browser, page } = await launch({ query: `?level=0&mode=${mode}&dust2=${process.env.DUST2 ?? 1}`, log: !!process.env.LOG });
 await page.waitForFunction(() => window.ctr && Module._NativeWeb_GetState, { timeout: 120000 });
 if (process.env.SHOTS_DIR) await page.evaluate(() => { window.__noTurbo = true; });
+if (process.env.CONTINUE) await page.evaluate(() => { window.__continue = true; });
 await page.evaluate((path, maxFrames, lookahead, noTeleport) => {
   const TAU = 4096;
   const wrap = (a) => ((a % TAU) + TAU + TAU / 2) % TAU - TAU / 2;
@@ -134,7 +136,17 @@ await page.evaluate((path, maxFrames, lookahead, noTeleport) => {
     }
     if (Math.abs(k.speed) < 1500 && t > 60) {
       if (stuckSince === null) stuckSince = t;
-      else if (t - stuckSince > 240) finish(`t=${t} STUCK at ${k.x | 0},${k.y | 0},${k.z | 0} (path ${idx}/${path.length}, off by ${bestD | 0})`);
+      else if (t - stuckSince > 240) {
+        const msg = `t=${t} STUCK at ${k.x | 0},${k.y | 0},${k.z | 0} (path ${idx}/${path.length}, off by ${bestD | 0})`;
+        if (!window.__continue) return finish(msg);
+        // CONTINUE=1: note it and carry on from further along the path
+        window.__events.push(msg);
+        idx = Math.min(path.length - 4, idx + 30);
+        const [x0, y0, z0] = path[idx];
+        const [x1, , z1] = path[Math.min(idx + 8, path.length - 1)];
+        ctr.teleport(x0, y0 + 100, z0, Math.round((Math.atan2(x1 - x0, z1 - z0) / (2 * Math.PI)) * TAU) & 4095);
+        stuckSince = null;
+      }
     } else stuckSince = null;
     if (t > maxFrames) finish(`t=${t} out of time at path ${idx}/${path.length}`);
   };
