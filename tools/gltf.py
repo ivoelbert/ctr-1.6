@@ -72,7 +72,7 @@ def node_matrices(js):
             visit(root, np.eye(4))
     return mats
 
-def triangles(path, world=False):
+def triangles(path, world=False, with_normals=False):
     """Yields (material index, positions (n,3,3), uv0 (n,3,2), uv1 or None, mesh name).
 
     Positions are in the mesh's own space unless world=True."""
@@ -89,9 +89,16 @@ def triangles(path, world=False):
                 pos = h[:, :3]
             uv0 = accessor(js, b, prim['attributes']['TEXCOORD_0'])
             uv1 = accessor(js, b, prim['attributes']['TEXCOORD_1']) if 'TEXCOORD_1' in prim['attributes'] else None
+            nrm = accessor(js, b, prim['attributes']['NORMAL']) if 'NORMAL' in prim['attributes'] else None
+            if world and nrm is not None:
+                nrm = nrm @ np.linalg.inv(mats[ni][:3, :3])
             idx = accessor(js, b, prim['indices']).reshape(-1).astype(np.int64) if 'indices' in prim else np.arange(len(pos))
             tri = idx.reshape(-1, 3)
-            yield (prim.get('material'), pos[tri], uv0[tri], None if uv1 is None else uv1[tri], mesh.get('name'))
+            if with_normals:
+                yield (prim.get('material'), pos[tri], uv0[tri], None if uv1 is None else uv1[tri], mesh.get('name'),
+                       None if nrm is None else nrm[tri])
+            else:
+                yield (prim.get('material'), pos[tri], uv0[tri], None if uv1 is None else uv1[tri], mesh.get('name'))
 
 def images(path):
     js, b = load_glb(path)

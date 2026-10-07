@@ -2,6 +2,7 @@
 
 #include <macros.h>
 
+#include "platform/native_assets.h"
 #include "platform/native_audio.h"
 #include "platform/native_glad.h"
 #include "platform/native_gpu.h"
@@ -265,6 +266,13 @@ void Platform_Init(const char *title, int width, int height)
 		Platform_LogError("[CTR Native] Failed to initialise PSX renderer state\n");
 		Platform_Shutdown();
 		return;
+	}
+
+	// NOTE(ctr-dust2): a custom level's texture atlas, when the page provides one.
+	{
+		char atlasPath[512];
+		snprintf(atlasPath, sizeof(atlasPath), "%s/dust2/atlas.rgba", NativeAssets_GetAssetDir());
+		NativeRenderer_LoadVirtualAtlas(atlasPath);
 	}
 
 	atexit(Platform_Shutdown);

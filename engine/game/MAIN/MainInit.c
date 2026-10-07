@@ -78,9 +78,22 @@ void MainInit_RainBuffer(struct GameTracker *gGT)
 	}
 }
 
+#define CTR_CUSTOM_LEVEL_PRIM_MEM_SIZE 0x280000
+
 static int MainInit_GetPrimMemSize(struct GameTracker *gGT)
 {
 	int levelID;
+
+#if defined(CTR_NATIVE)
+	// NOTE(ctr-dust2): A custom level (an overridden LEV) sees everything from
+	// everywhere instead of retail's precomputed visibility: give it room for
+	// many more primitives per frame.
+	if (((gGT->gameMode1 & MAIN_MENU) == 0) && (gGT->levelID < NITRO_COURT) &&
+	    NativeCD_IsBigfileEntryOverridden(LOAD_GetBigfileIndex(gGT->levelID, sdata->levelLOD, LVI_LEV)))
+	{
+		return CTR_CUSTOM_LEVEL_PRIM_MEM_SIZE;
+	}
+#endif
 
 	// adv garage
 	if (gGT->levelID == ADVENTURE_GARAGE)

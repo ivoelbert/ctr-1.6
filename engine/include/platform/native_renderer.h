@@ -42,4 +42,8 @@ void NativeRenderer_DrawTriangles(int startVertex, int triangles);
 void NativeRenderer_PushDebugLabel(const char *label);
 void NativeRenderer_PopDebugLabel(void);
 
+// NOTE(ctr-dust2): custom level texture atlas (TF_VIRTUAL_ATLAS).
+int NativeRenderer_LoadVirtualAtlas(const char *path);
+TextureID NativeRenderer_GetVirtualAtlasTexture(void);
+
 #endif

@@ -79,6 +79,15 @@ EMSCRIPTEN_KEEPALIVE int NativeWeb_GetState(int *out)
 	out[3] = sdata->Loading.stage;
 	out[21] = Platform_GetVBlankCount();
 	out[20] = gGT->elapsedEventTime;
+	{
+		// primitive memory: the most the two frame buffers used this frame
+		struct PrimMem *a = &gGT->db[0].primMem;
+		struct PrimMem *b = &gGT->db[1].primMem;
+		int usedA = (int)((u32)a->cursor - (u32)a->start);
+		int usedB = (int)((u32)b->cursor - (u32)b->start);
+		out[27] = usedA > usedB ? usedA : usedB;
+		out[28] = (int)a->capacityBytes;
+	}
 	if ((d == NULL) || ((gGT->gameMode1 & LOADING) != 0) || (gGT->level1 == NULL))
 	{
 		return 32;

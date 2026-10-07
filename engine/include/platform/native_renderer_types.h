@@ -57,7 +57,12 @@ typedef enum
 	TF_8_BIT,
 	TF_16_BIT,
 
-	TF_32_BIT_RGBA
+	TF_32_BIT_RGBA,
+
+	// NOTE(ctr-dust2): a custom level's RGBA atlas. Retail never uses tpage
+	// color mode 3; with an atlas loaded, mode 3 primitives sample the atlas and
+	// their CLUT field picks a 32-texel-aligned origin in it (see ctr_dust2.h).
+	TF_VIRTUAL_ATLAS
 } TexFormat;
 
 typedef u32 TextureID;

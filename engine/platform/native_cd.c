@@ -178,6 +178,14 @@ internal s32 NativeCD_OpenHostPath(const char *path, s32 *outSize)
 	return fileIndex;
 }
 
+#define NATIVE_CD_MAX_BIGFILE_ENTRIES 1024
+global_variable u8 s_bigfileEntryOverridden[NATIVE_CD_MAX_BIGFILE_ENTRIES];
+
+int NativeCD_IsBigfileEntryOverridden(int index)
+{
+	return (index >= 0) && (index < NATIVE_CD_MAX_BIGFILE_ENTRIES) && (s_bigfileEntryOverridden[index] != 0);
+}
+
 // NOTE(ctr-dust2): BIGFILE entry overrides. assets/override/NNN.bin (NNN = the
 // entry index, decimal) replaces BIGFILE entry NNN: the entry is pointed at the
 // host file, so the retail loaders read it as if it were on the disc.
@@ -223,6 +231,10 @@ int NativeCD_ApplyBigfileOverrides(struct BigHeader *bigfile)
 		// cdpos + offset must land on sector 0 of the host file
 		entries[index].offset = (s32)((u32)fileIndex << 24) - bigfile->cdpos;
 		entries[index].size = size;
+		if (index < NATIVE_CD_MAX_BIGFILE_ENTRIES)
+		{
+			s_bigfileEntryOverridden[index] = 1;
+		}
 		printf("[CTR Native] BIGFILE entry %ld <- %s (%d bytes)\n", index, filePath, size);
 		applied++;
 	}

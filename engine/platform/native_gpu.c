@@ -753,6 +753,12 @@ internal bool NativeGpu_RectOverlaps(int ax, int ay, int aw, int ah, int bx, int
 
 internal bool NativeGpu_TPageOverlapsActiveDrawPage(int tpage)
 {
+	// NOTE(ctr-dust2): atlas primitives never read the framebuffer.
+	if ((((tpage >> 7) & 0x3) == 3) && (NativeRenderer_GetVirtualAtlasTexture() != 0))
+	{
+		return false;
+	}
+
 	const int pageX = (tpage & 0xf) << 6;
 	const int pageY = (tpage & 0x10) ? 0x100 : 0;
 	const int pageW = 0x100;
@@ -826,6 +832,17 @@ internal void AddSplit(bool semiTrans, bool textured, bool framebufferFeedback)
 		texFormat = TF_32_BIT_RGBA;
 		textureId = s_gpu.overrideTexture;
 		psxTexturedSemiTrans = false;
+	}
+	else if (textured && (((tpage >> 7) & 0x3) == 3) && (NativeRenderer_GetVirtualAtlasTexture() != 0))
+	{
+		// NOTE(ctr-dust2): tpage color mode 3 samples the custom level atlas.
+		texFormat = TF_VIRTUAL_ATLAS;
+		textureId = NativeRenderer_GetVirtualAtlasTexture();
+		// PS1 textured blending only applies to texels with STP set, and the
+		// atlas has none: atlas primitives are opaque.
+		blendMode = BM_NONE;
+		psxTexturedSemiTrans = false;
+		psxTextureOutputSTP = false;
 	}
 
 	// FIXME: compare drawing environment too?

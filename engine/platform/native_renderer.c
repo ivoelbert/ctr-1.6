@@ -726,6 +726,11 @@ global_variable GTEShader s_gteShader4;
 global_variable GTEShader s_gteShader8;
 global_variable GTEShader s_gteShader16;
 global_variable GTEShader s_gteShader32Rgba;
+global_variable GTEShader s_gteShaderVirtualAtlas;
+global_variable GLint s_virtualAtlasSizeLoc = -1;
+global_variable TextureID s_virtualAtlasTexture = 0;
+global_variable int s_virtualAtlasWidth = 0;
+global_variable int s_virtualAtlasHeight = 0;
 
 GLint u_projectionLoc;
 GLint u_bilinearFilterLoc;
@@ -875,6 +880,26 @@ const char *gte_shader_32_rgba = "	uniform sampler2D s_texture;\n"
                                  "		fragColor = dither(color * v_color);\n"
                                  "		fragColor.a = float(psxDrawMaskSet);\n"
                                  "	}\n";
+
+// NOTE(ctr-dust2): Virtual atlas sampling. The standard PSX vertex shader packs
+// the CLUT into v_page_clut.zw; undo that, then
+//   layer = clut >> 10, origin = layer cell (4 per row, 1024 texels) + 32 * (clut & 31, (clut >> 5) & 31)
+// and sample the RGBA atlas at origin + the primitive's texel UV (mipmapped).
+const char *gte_shader_virtual_atlas = "	uniform sampler2D s_texture;\n"
+                                       "	uniform int psxDrawMaskSet;\n"
+                                       "	uniform vec2 atlasSize;\n"
+                                       "	void main() {\n"
+                                       "		float clutLo = mod(floor(v_page_clut.z * 64.0 + 0.5), 64.0);\n"
+                                       "		float clutHi = floor(v_page_clut.w * 512.0 + 0.5);\n"
+                                       "		float clut = clutLo + clutHi * 64.0;\n"
+                                       "		float layer = floor(clut / 1024.0);\n"
+                                       "		float cell = mod(clut, 1024.0);\n"
+                                       "		vec2 origin = vec2(mod(layer, 4.0) * 1024.0 + mod(cell, 32.0) * 32.0,\n"
+                                       "		                   floor(layer / 4.0) * 1024.0 + floor(cell / 32.0) * 32.0);\n"
+                                       "		vec4 color = texture2D(s_texture, (origin + v_texcoord.xy) / atlasSize);\n"
+                                       "		fragColor = dither(vec4(color.rgb, 1.0) * v_color);\n"
+                                       "		fragColor.a = float(psxDrawMaskSet);\n"
+                                       "	}\n";
 
 #define GTE_PERSPECTIVE_CORRECTION "	gl_Position = Projection * vec4(a_position.xy, 0.0, 1.0);\n"
 
@@ -1095,6 +1120,66 @@ internal void NativeRenderer_InitialisePSXShaders(void)
 	NativeRenderer_CompilePSXShader(&s_gteShader8, gte_shader_8);
 	NativeRenderer_CompilePSXShader(&s_gteShader16, gte_shader_16);
 	NativeRenderer_CompilePSXShader(&s_gteShader32Rgba, gte_shader_32_rgba);
+	NativeRenderer_CompilePSXShader(&s_gteShaderVirtualAtlas, gte_shader_virtual_atlas);
+	s_virtualAtlasSizeLoc = glGetUniformLocation(s_gteShaderVirtualAtlas.shader, "atlasSize");
+}
+
+// NOTE(ctr-dust2): Loads a custom level's texture atlas: "CTRA", u32 width,
+// u32 height, then width * height RGBA8 texels. Returns 1 when loaded.
+int NativeRenderer_LoadVirtualAtlas(const char *path)
+{
+	FILE *file = fopen(path, "rb");
+	u32 header[3];
+
+	if (file == NULL)
+	{
+		return 0;
+	}
+
+	if ((fread(header, sizeof(u32), 3, file) != 3) || (header[0] != 0x41525443u) || (header[1] == 0) || (header[2] == 0) || (header[1] > 16384) ||
+	    (header[2] > 16384))
+	{
+		fclose(file);
+		NATIVE_RENDERER_ERROR("%s: not an atlas\n", path);
+		return 0;
+	}
+
+	size_t bytes = (size_t)header[1] * (size_t)header[2] * 4u;
+	u8 *texels = (u8 *)malloc(bytes);
+	if ((texels == NULL) || (fread(texels, 1, bytes, file) != bytes))
+	{
+		free(texels);
+		fclose(file);
+		NATIVE_RENDERER_ERROR("%s: short read\n", path);
+		return 0;
+	}
+	fclose(file);
+
+	if (s_virtualAtlasTexture == 0)
+	{
+		glGenTextures(1, &s_virtualAtlasTexture);
+	}
+	glBindTexture(GL_TEXTURE_2D, s_virtualAtlasTexture);
+	glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, (GLsizei)header[1], (GLsizei)header[2], 0, GL_RGBA, GL_UNSIGNED_BYTE, texels);
+	glGenerateMipmap(GL_TEXTURE_2D);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glBindTexture(GL_TEXTURE_2D, 0);
+	s_lastBoundTexture = (TextureID)-1;
+	free(texels);
+
+	s_virtualAtlasWidth = (int)header[1];
+	s_virtualAtlasHeight = (int)header[2];
+	NATIVE_RENDERER_LOG("virtual atlas %s: %dx%d\n", path, s_virtualAtlasWidth, s_virtualAtlasHeight);
+	return 1;
+}
+
+TextureID NativeRenderer_GetVirtualAtlasTexture(void)
+{
+	return s_virtualAtlasTexture;
 }
 
 // NOTE(aalhendi): GPU VRAM pack. Samples an RGBA render texture and writes PS1
@@ -1413,6 +1498,19 @@ void NativeRenderer_SetTexture(TextureID texture, TexFormat texFormat)
 		u_psxSemiTransPassLoc = s_gteShader16.psxSemiTransPassLoc;
 		u_psxDrawMaskSetLoc = s_gteShader16.psxDrawMaskSetLoc;
 		u_psxTextureOutputStpLoc = s_gteShader16.psxTextureOutputStpLoc;
+		break;
+	case TF_VIRTUAL_ATLAS:
+		NativeRenderer_SetShader(s_gteShaderVirtualAtlas.shader);
+		u_bilinearFilterLoc = -1;
+		u_projectionLoc = s_gteShaderVirtualAtlas.projectionLoc;
+		u_texelSizeLoc = -1;
+		u_psxSemiTransPassLoc = s_gteShaderVirtualAtlas.psxSemiTransPassLoc;
+		u_psxDrawMaskSetLoc = s_gteShaderVirtualAtlas.psxDrawMaskSetLoc;
+		u_psxTextureOutputStpLoc = s_gteShaderVirtualAtlas.psxTextureOutputStpLoc;
+		if (s_virtualAtlasSizeLoc >= 0)
+		{
+			glUniform2f(s_virtualAtlasSizeLoc, (float)s_virtualAtlasWidth, (float)s_virtualAtlasHeight);
+		}
 		break;
 	case TF_32_BIT_RGBA:
 		NativeRenderer_SetShader(s_gteShader32Rgba.shader);
