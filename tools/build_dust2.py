@@ -583,9 +583,97 @@ def race_setup(out, landmarks):
             xz = np.array([p0[0], p0[2]]) - fwd * (160 + row * 220) + side * ((col - 0.5) * 260)
             y = g.pos[g.nearest(xz[0], p0[1], xz[1])][1]
             spawns.append(((int(xz[0]), int(y) + 32, int(xz[1])), (0, (yaw - 0x400) % 4096, 0)))
-    print(f'race loop {L:.0f} units, {count} checkpoints, {tagged} floor quadblocks on the track')
-    route = dict(length=L, path=pts.tolist(), nodes=[n.pos for n in nodes])
-    return nodes, spawns, route
+    nav = nav_paths(g, pts, arc, step, count)
+    print(f'race loop {L:.0f} units, {count} checkpoints, {tagged} floor quadblocks on the track, '
+          f'{len(nav)} AI paths of {len(nav[0])} frames')
+    route = dict(length=L, path=pts.tolist(), nodes=[n.pos for n in nodes],
+                 ai=[[f['pos'] for f in path] for path in nav])
+    return nodes, spawns, route, nav
+
+
+NAV_SPACING = 400.0   # AI path frames, CTR units (retail tracks: ~150-700)
+NAV_OFFSET = 260.0    # the two side lines, either side of the middle one
+
+
+def drivable_at(g, x, y, z, min_clear=2):
+    """The nav grid node under (x, z) on the floor nearest height y, if drivable with room around."""
+    cx, cz = g.cell(x, z)
+    if not (0 <= cx < g.nx and 0 <= cz < g.nz):
+        return None
+    best = None
+    for k, (fy, _) in enumerate(g.floors[cx][cz]):
+        nid = g.node.get((cx, cz, k))
+        if nid is None or g.wall_dist[nid] < min_clear:
+            continue
+        if best is None or abs(fy - y) < abs(best[1] - y):
+            best = (nid, fy)
+    return best
+
+
+def nav_paths(g, pts, arc, step, count):
+    """Three AI racing lines round the loop: a smoothed middle and two offset either side."""
+    L = float(arc[-1])
+    # smooth the grid path (it zig-zags cell to cell), keeping points that stay drivable
+    sm = pts.copy()
+    for _ in range(6):
+        nxt = sm.copy()
+        for i in range(1, len(sm) - 1):
+            lo, hi = max(0, i - 4), min(len(sm), i + 5)
+            cand = sm[lo:hi].mean(axis=0)
+            hit = drivable_at(g, cand[0], sm[i][1], cand[2])
+            if hit is not None and abs(hit[1] - sm[i][1]) < 80:
+                nxt[i] = [cand[0], hit[1], cand[2]]
+        sm = nxt
+    seg = np.linalg.norm(np.diff(sm[:, [0, 2]], axis=0), axis=1)
+    sarc = np.concatenate([[0.0], np.cumsum(seg)])
+    SL = float(sarc[-1])
+    n = max(16, int(round(SL / NAV_SPACING)))
+
+    def at(sv):
+        i = min(int(np.searchsorted(sarc, sv, side='right')) - 1, len(sm) - 2)
+        f = (sv - sarc[i]) / max(sarc[i + 1] - sarc[i], 1e-9)
+        return sm[i] + (sm[i + 1] - sm[i]) * f
+
+    centre = [at(i * SL / n) for i in range(n)]
+    lines = []
+    for side in (0.0, 1.0, -1.0):
+        line = []
+        for i, c in enumerate(centre):
+            nx_ = centre[(i + 1) % n]
+            pv = centre[(i - 1) % n]
+            d = np.array([nx_[0] - pv[0], nx_[2] - pv[2]])
+            d /= np.linalg.norm(d) + 1e-9
+            lat = np.array([-d[1], d[0]])
+            p = c.copy()
+            if side:
+                for off in (NAV_OFFSET, NAV_OFFSET * 0.66, NAV_OFFSET * 0.33):
+                    q = np.array([c[0] + lat[0] * off * side, c[1], c[2] + lat[1] * off * side])
+                    hit = drivable_at(g, q[0], c[1], q[2])
+                    if hit is not None and abs(hit[1] - c[1]) < 80:
+                        p = np.array([q[0], hit[1], q[2]])
+                        break
+            line.append(p)
+        lines.append(line)
+    paths = []
+    for pi, line in enumerate(lines):
+        frames = []
+        for i, p in enumerate(line):
+            q = line[(i + 1) % n]
+            dx, dy, dz = q[0] - p[0], q[1] - p[1], q[2] - p[2]
+            dxz = math.hypot(dx, dz)
+            dxyz = math.sqrt(dxz * dxz + dy * dy)
+            yaw = int(round(math.atan2(dx, dz) / (2 * math.pi) * 4096)) % 4096
+            slope = int(round(math.atan2(dy, dxz) / (2 * math.pi) * 4096))
+            frames.append(dict(
+                pos=(int(p[0]), int(p[1]), int(p[2])),
+                rot=((-slope >> 4) & 0xFF, (yaw >> 4) & 0xFF, 0, (slope >> 4) & 0xFF),
+                distXYZ=int(dxyz), distXZ=int(dxz),
+                flags=0,                        # terrain 0 (asphalt) in bits 3..7
+                change=(((pi + 1) % 3) << 10) | i,  # overtaking: the same spot on the next line
+                checkpoint=min(int((i * SL / n) / SL * L // step), count - 1),
+                special=0))
+        paths.append(frames)
+    return paths
 
 
 def kill_plane(out, y=-1600, size=4096):
@@ -622,12 +710,12 @@ def main(glb, outdir):
     print(f'{len(out)} quadblocks')
 
     landmarks = landmark_positions(tris)
-    nodes, spawns, route = race_setup(out, landmarks)
+    nodes, spawns, route, nav = race_setup(out, landmarks)
     kill_plane(out)
 
     lv = Level(quads=out, nodes=nodes, spawns=spawns,
                clear_colors=[(170, 190, 220, 1), (230, 200, 160, 1), (200, 210, 230, 1)],
-               build_name='de_dust2')
+               build_name='de_dust2', nav_paths=nav)
     data, info = write_level(lv)
     data += b'\0' * ((-len(data)) % 2048)
     with open(os.path.join(outdir, 'dust2.lev'), 'wb') as f:

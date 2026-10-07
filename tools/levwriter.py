@@ -90,6 +90,7 @@ class Level:
     build_name: str = 'Dust 2'
     max_leaf_quads: int = 6
     bsp: tuple = None  # (nodes, order) to use instead of building one (tests)
+    nav_paths: list = field(default_factory=list)  # up to 3 lists of NavFrame dicts (AI racing lines)
     icons: list = field(default_factory=list)  # (name, global index, TexLayout)
     icon_groups: list = field(default_factory=list)  # (name, groupID, [icon indices])
 
@@ -395,6 +396,22 @@ def write_level(lv: Level):
         b.put(ltl + 8, 'I', len(lv.icon_groups))
         b.ptr(ltl + 12, groups_ptrs)
 
+    # AI paths: LevNavTable -> 3 NavHeader pointers -> header (magic 0xECFD) + NavFrames
+    nav_table = None
+    if lv.nav_paths:
+        nav_table = b.alloc(4 * 3)
+        for pi, frames in enumerate(lv.nav_paths[:3]):
+            hdr_off = b.alloc(0x4C + 0x14 * len(frames))
+            b.put(hdr_off, 'hhi', -0x1303, len(frames), frames[0]['pos'][1] if frames else 0)
+            b.put(hdr_off + 8, 'I', 0)  # "last": the game fills it in
+            for fi, f in enumerate(frames):
+                o = hdr_off + 0x4C + 0x14 * fi
+                b.put(o, 'hhh', *f['pos'])
+                b.buf[o + 6:o + 10] = bytes(f['rot'])
+                b.put(o + 10, 'hhhh', f['distXYZ'], f['distXZ'], f['flags'], f['change'])
+                b.put(o + 18, 'BB', f['checkpoint'], f['special'])
+            b.ptr(nav_table + 4 * pi, hdr_off)
+
     # build strings
     strs = {}
     for k, s in (('start', 'Tue Oct  6 2026'), ('end', 'Tue Oct  6 2026'), ('type', lv.build_name)):
@@ -421,6 +438,7 @@ def write_level(lv: Level):
     b.ptr(hdr + 0x14C, nodes_off)
     for i, (r, g, bb, en) in enumerate(lv.clear_colors):
         b.buf[hdr + 0x160 + 4 * i:hdr + 0x164 + 4 * i] = bytes([r, g, bb, en])
+    b.ptr(hdr + 0x188, nav_table)
     b.ptr(hdr + 0x190, vismem)
 
     info = dict(quads=nq, verts=len(verts), bsp_nodes=nn, depth=tree_depth(nodes), layouts=len(layouts))

@@ -14,8 +14,10 @@ let path = [];
 for (let l = 0; l < laps; l++) path = path.concat(route.path.map(([x, y, z]) => [x, y, z]));
 const noTeleport = process.env.NO_TELEPORT === '1';
 
-const { browser, page } = await launch({ query: '?level=0&mode=0&dust2=1', log: !!process.env.LOG });
+const mode = Number(process.env.MODE ?? 0);
+const { browser, page } = await launch({ query: `?level=0&mode=${mode}&dust2=1`, log: !!process.env.LOG });
 await page.waitForFunction(() => window.ctr && Module._NativeWeb_GetState, { timeout: 120000 });
+if (process.env.SHOTS_DIR) await page.evaluate(() => { window.__noTurbo = true; });
 await page.evaluate((path, maxFrames, lookahead, noTeleport) => {
   const TAU = 4096;
   const wrap = (a) => ((a % TAU) + TAU + TAU / 2) % TAU - TAU / 2;
@@ -33,7 +35,7 @@ await page.evaluate((path, maxFrames, lookahead, noTeleport) => {
     ctr.turbo(false);
     Module.ctrOnVBlank = null;
   };
-  ctr.turbo(true);
+  ctr.turbo(!window.__noTurbo);
   Module.ctrOnVBlank = (n) => {
     const s = ctr.state();
     if (!s.kart) return;
@@ -94,6 +96,15 @@ await page.evaluate((path, maxFrames, lookahead, noTeleport) => {
     if (t > maxFrames) finish(`t=${t} out of time at path ${idx}/${path.length}`);
   };
 }, path, maxFrames, lookahead, noTeleport);
+if (process.env.SHOTS_DIR) {
+  // screenshots every few seconds of real time while it drives (turbo off so frames show)
+  fs.mkdirSync(process.env.SHOTS_DIR, { recursive: true });
+  let k = 0;
+  while (!(await page.evaluate(() => window.__done))) {
+    await new Promise((r) => setTimeout(r, Number(process.env.SHOTS_EVERY ?? 3000)));
+    await page.screenshot({ path: `${process.env.SHOTS_DIR}/shot-${String(k++).padStart(3, '0')}.png` });
+  }
+}
 await page.waitForFunction(() => window.__done, { timeout: 900000, polling: 500 });
 const { trace, events } = await page.evaluate(() => ({ trace: window.__trace, events: window.__events }));
 if (process.env.SHOT) await page.screenshot({ path: process.env.SHOT });
