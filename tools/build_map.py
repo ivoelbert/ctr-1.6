@@ -102,6 +102,16 @@ def select_faces(bsp, cfg):
     return sel
 
 
+def merge_faces(bsp, sel):
+    """select_faces' faces with the pieces the map compiler split surfaces into joined back
+    (goldsrc.merge_coplanar), kind by kind: fewer, bigger polygons, fewer vertices."""
+    out = []
+    for kind in dict.fromkeys(k for _, k in sel):
+        out += [(fi, kind) for fi in goldsrc.merge_coplanar(bsp, [fi for fi, k in sel if k == kind])]
+    print(f'{len(out)} faces once merged ({len(sel)} in the file)')
+    return out
+
+
 def load_map(cstrike, map_name, cfg):
     """The map with its edits, baked into atlas layers: (bsp, sel, charts, layer images (PNG),
     light maps for the karts' shade)."""
@@ -115,7 +125,7 @@ def load_map(cstrike, map_name, cfg):
         if old.lower() in by_name and new.lower() in by_name:
             n, size, _ = bsp.textures[by_name[old.lower()]]
             bsp.textures[by_name[old.lower()]] = (n, size, bsp.textures[by_name[new.lower()]][2])
-    sel = select_faces(bsp, cfg)
+    sel = merge_faces(bsp, select_faces(bsp, cfg))
     kind_of = dict(sel)
     density_by_texture = {k.lower(): v for k, v in getattr(cfg, 'TEXTURE_DENSITY', {}).items()}
 
@@ -315,7 +325,8 @@ def main(map_name, cstrike, disc, outdir):
     print(f'{len(out)} quadblocks')
     track.kill_plane(out, y=kill_y)
     bases, vrms = track.base_levels(disc)
-    window = track.minimap_window(out)
+    cells = track.drivable_cells(g, start)
+    window = track.minimap_window(cells)
 
     print(f'{name}_free:')
     nodes, spawns, route, nav = track.race_setup(out, g, landmarks, free_route)
@@ -323,7 +334,7 @@ def main(map_name, cstrike, disc, outdir):
     for qi, q in enumerate(out):
         q.checkpoint = free_cp.get(qi, 0xFF)
     info = track.write_modes(outdir, f'{name}_free', out, free_nodes, spawns, nav, route, g, bases, vrms,
-                             (window, track.minimap_image(out, window)), build_name=map_name,
+                             (window, track.minimap_image(cells, window)), build_name=map_name,
                              clear_colors=getattr(cfg, 'SKY', [(170, 190, 220, 1), (230, 200, 160, 1), (200, 210, 230, 1)]))
     print(info)
     with open(os.path.join(outdir, f'{name}_free_route.json'), 'w') as f:

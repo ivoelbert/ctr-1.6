@@ -93,6 +93,8 @@ A map comes in from its file (tools/goldsrc.py) as textured, lit polygons in map
 (Hammer's; CTR's are 4 times smaller) and goes out as Dingo Canyon's four LEVs with its geometry
 in place of the canyon's.
 
+- The minimap shows the drivable grid's cells reachable from the start (roofs are floors too:
+  Inferno's covered the whole map).
 - Grafted onto Dingo Canyon (entry 1): its models, skybox, textures. Free drive's route runs
   from the T spawn to the CT spawn and back; along it (`place_pickups`), weapon crates in rows of
   four across the track, wumpa fruit in lines along it and two fruit crates.
@@ -111,8 +113,8 @@ in place of the canyon's.
   grid cell in 8 directions (~12,000 views on Dust 2, ~16,000 on Aztec), once with a depth
   buffer and once checking the game's slots, and the polygons whose quadblocks have things
   behind them painted over them (40 pixels or more in all) are cut to 256 units, then the ones
-  still at it to 128, as many as the vertex budget takes. Dust 2: 70,500 + 44,500 pixels out of
-  order (nearer slot + same slot) down to 2,600 + 35,500, for 760 more quadblocks.
+  still at it to 128, as many as the vertex budget takes. Dust 2: 144,500 + 72,200 pixels out of
+  order (nearer slot + same slot) down to 2,900 + 30,600.
 - Build time: the audit runs a painter.c process per CPU over a share of the views (its counts
   are sums over views: the same result), and the level's polygons are paired once for all its
   trial cuts. `FAST=1` takes the cuts of the last full build per polygon (identified by
@@ -131,6 +133,12 @@ in place of the canyon's.
   at 10,000 matched points; shadows lifted 15% of the way to the plain texture (SHADOW_LIFT).
 - The entities are read from their lump: a '{' byte can come earlier in the file (Dust 2's
   planes have one), and parsing from there found no WADs (grey Dust 2).
+- Merging: the map compiler splits surfaces along its BSP's planes, and into pieces of at most
+  240 texels for their light maps. Faces in one plane with one texture mapping that share an edge
+  are merged back while the result stays convex (goldsrc.merge_coplanar): 24 to 33% fewer faces
+  (Inferno 8,130 -> 5,491), 5 to 12% fewer vertices (Inferno didn't fit before: 71,000 of
+  65,536), and room for more of the painter's cuts.
+  A merged face's atlas chart takes each texel's light from the piece it falls in.
 - Edits per map (tools/maps/MAP.py): brush entities kept or left out by class or model number,
   textures swapped; tool textures ('sky', 'clip', triggers) and alpha-tested ones ('{': vines,
   rungs; the atlas has no alpha yet) are left out everywhere. Counter-Strike culls back faces
@@ -149,12 +157,18 @@ in place of the canyon's.
 ## Dust 2 (tools/maps/de_dust2.py)
 
 - As Counter-Strike has it, doors and all. It draws about two thirds of Aztec's surface: sharper
-  textures (0.55 texels per unit, 12 atlas layers), a 256-unit floor grid and 800-unit walls,
-  49,600 vertices.
+  textures (0.55 texels per unit, 13 atlas layers), a 256-unit floor grid and 800-unit walls,
+  46,200 vertices.
 - The mid doors stand half open with a 39-unit gap (a Counter-Strike player is 32 wide): a kart
   doesn't fit, so it goes round (long A, short A or B). The model the project began with had the
   leaves taken out; from the map file that means patching the floor, jambs and arch the map
   compiler cut away where the leaves stood.
+
+## Inferno (tools/maps/de_inferno.py)
+
+- As Counter-Strike has it. The most faces of the three: 62,400 vertices before the painter's
+  cuts, room for its 66 worst offenders; textures at 0.42 texels per unit to leave an atlas layer
+  spare (all 14 at 0.45).
 
 ## Aztec (tools/maps/de_aztec.py)
 
@@ -167,7 +181,7 @@ in place of the canyon's.
   edge is the deck's end, and a kart (which rides a hair below a floor) leaving the bridge ran
   into it, every time at one end and in some lanes at the other.
 - Budget: as big as Dust 2 in CTR units but nearly twice the drawn surface: a 512-unit floor
-  grid, walls up to 1200; 13,500 quadblocks, 57,400 vertices before the painter's cuts, which
+  grid, walls up to 1200; 12,600 quadblocks, 54,500 vertices before the painter's cuts, which
   then take the worst offenders that fit under 64,000.
 
 ## Tools
@@ -186,9 +200,9 @@ in place of the canyon's.
   mid doors, mid, outside long; and the long way through B site and the tunnels.)
 - More maps, each a module in tools/maps.
 - Map edits that cut into the world, like taking Dust 2's door leaves out (see Dust 2).
-- Aztec: its vines and ladder rungs (alpha-tested) aren't drawn; its sky is Dingo Canyon's; it
-  uses 64,000 of the 65,536 vertices (merging the coplanar fragments the map compiler splits
-  walls into would free room, and let the painter's audit cut more).
+- Aztec: its vines and ladder rungs (alpha-tested) aren't drawn; its sky is Dingo Canyon's.
+- Vertices: Aztec and Inferno still use all 64,000 the painter's cuts may (out-of-order pixels
+  left: Aztec 66,000 + 217,000, Inferno about 140,000 + 254,000).
 - Track select previews and menu maps still show Dingo Canyon's.
 - Collision-only quadblocks (stair ramps, the kill plane) use atlas layer 15, which the atlas
   shader discards, and stay out of the visibility lists (a quadblock without textures is drawn
@@ -200,8 +214,10 @@ in place of the canyon's.
 - Painter's sort: what the audit still finds is mostly same-slot ties inside one BSP leaf or
   between leaves the split planes don't separate (splitting at wall planes might help), and
   faces under 64 units apart (one slot).
-- The autopilot (`pursuit.mjs`) gets stuck where it cuts a corner: on Aztec, the end of the wall
-  west of the bridge's tunnel (map x -1664), both ways.
+- The autopilot (`pursuit.mjs`) gets stuck where its line hugs a corner or an edge: on Aztec, the
+  crate on the bridge's east landing and the end of the wall west of the bridge's tunnel (map x
+  -1664); on Inferno, the corner of a block where a ramp starts (map -416, 752) and the edge of a
+  raised platform it rolls off (around 200, 700); on Dust 2, the mid doors (a kart doesn't fit).
 - The memory pool is 32 MiB on the web (a level is up to ~7.5 MB, 15,000 quadblocks).
 - 2P/4P: work (tested with fake gamepads, `tools/e2e/lib.mjs`). With one gamepad, the gamepad
   is player 1 and the keyboard player 2.

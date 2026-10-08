@@ -1,7 +1,7 @@
 # CTR 1.6
 
 Crash Team Racing's kart, with the game's own driving code, on Counter-Strike 1.6's maps,
-built from the game's own map files: de_dust2 and de_aztec so far. For now every map is a free
+built from the game's own map files: de_dust2, de_aztec and de_inferno so far. For now every map is a free
 drive, no laps: pick one and drive it round. Races come next, the same way for every map.
 
 - `engine/` is [ctr-native](https://github.com/CTR-tools/ctr-native) (the CTR decompilation as a
@@ -89,7 +89,7 @@ lists what's been built.
 ## Credits
 
 - Crash Team Racing © 1999 Sony Computer Entertainment / Naughty Dog.
-- Counter-Strike © Valve. de_dust2 by Dave Johnston; de_aztec by Christopher "Narby" Auty
-  (textures by Chris Ashton).
+- Counter-Strike © Valve. de_dust2 by Dave Johnston; de_aztec (textures by Chris Ashton) and
+  de_inferno by Christopher "Narby" Auty.
 - [CTR-ModSDK](https://github.com/CTR-tools/CTR-ModSDK) and
   [ctr-native](https://github.com/CTR-tools/ctr-native): the decompilation and the native port.

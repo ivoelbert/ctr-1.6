@@ -707,11 +707,16 @@ MAP_CLEAR, MAP_WHITE, MAP_EDGE, MAP_FLOOR = 0, 1, 2, 3
 MAP_COLORS = (0x0000, 0x7FFF, 0xA108, 0x1CC6)   # 15-bit BGR; 0x8000 = blended
 
 
-def minimap_window(out, margin=0.03):
-    """A square of the world (x0, z0, side) around everything drivable."""
-    pts = np.array([p for q in out if q.flags & FLAG_GROUND and not q.flags & FLAG_KILL_PLANE for p in q.pos], dtype=float)
-    x0, x1 = pts[:, 0].min(), pts[:, 0].max()
-    z0, z1 = pts[:, 2].min(), pts[:, 2].max()
+def drivable_cells(g, start):
+    """The (x, z) middles of the drivable grid's cells a kart can reach from node `start`: what
+    the minimap shows (not roofs, nor floors no one gets to)."""
+    return np.array([(g.pos[nid][0], g.pos[nid][2]) for nid in sorted(g.reachable(start))], dtype=float)
+
+
+def minimap_window(cells, margin=0.03):
+    """A square of the world (x0, z0, side) around the drivable cells."""
+    x0, x1 = cells[:, 0].min(), cells[:, 0].max()
+    z0, z1 = cells[:, 1].min(), cells[:, 1].max()
     side = max(x1 - x0, z1 - z0) * (1 + 2 * margin)
     return ((x0 + x1) / 2 - side / 2, (z0 + z1) / 2 - side / 2, side)
 
@@ -725,19 +730,17 @@ def minimap_placement(window):
     return (int(x0) + rng, int(z0) + rng, int(x0), int(z0), MAP_SIZE, MAP_SIZE // 2, start_x, start_y, 0, 0)
 
 
-def minimap_image(out, window, route=None, scale=4):
-    """The map: floors in slate, a race loop over them in white."""
+def minimap_image(cells, window, route=None, scale=4, cell=64.0):
+    """The map: the drivable cells (drivable_cells, `cell` units square) in slate, a race loop
+    over them in white."""
     from PIL import ImageDraw
     x0, z0, side = window
     n = MAP_SIZE * scale
     k = n / side
     floor = Image.new('L', (n, n), 0)
     d = ImageDraw.Draw(floor)
-    for q in out:
-        if not q.flags & FLAG_GROUND or q.flags & FLAG_KILL_PLANE:
-            continue
-        ring = [q.pos[i] for i in ((0, 1, 2) if q.triangle else (0, 1, 3, 2))]
-        d.polygon([((p[0] - x0) * k, (p[2] - z0) * k) for p in ring], fill=255)
+    for x, z in cells:
+        d.rectangle([(x - cell / 2 - x0) * k, (z - cell / 2 - z0) * k, (x + cell / 2 - x0) * k, (z + cell / 2 - z0) * k], fill=255)
     cover = np.asarray(floor.resize((MAP_SIZE, MAP_SIZE), Image.BOX), dtype=np.float32) / 255
     img = np.full((MAP_SIZE, MAP_SIZE), MAP_CLEAR, dtype=np.uint8)
     img[cover > 0.4] = MAP_FLOOR

@@ -104,6 +104,7 @@ class Bsp:
         self.faces = np.frombuffer(self.lump['faces'], FACE)
         self.models = np.frombuffer(self.lump['models'], MODEL)
         self.lighting = np.frombuffer(self.lump['lighting'], np.uint8)
+        self.merged = {}        # faces merge_coplanar made: index past the file's -> (polygon, sources)
         # textures: embedded, else from the WADs
         tl = self.lump['textures']
         n = struct.unpack_from('<i', tl, 0)[0]
@@ -130,22 +131,31 @@ class Bsp:
                 out[int(m[1:])] = e
         return out
 
+    def face_sources(self, fi):
+        """The map file's faces face fi stands for: itself, or those merge_coplanar joined."""
+        return self.merged[fi][1] if fi in self.merged else [fi]
+
     def face_points(self, fi):
+        if fi in self.merged:
+            return self.merged[fi][0].copy()
         f = self.faces[fi]
         se = self.surfedges[f['firstedge']:f['firstedge'] + f['numedges']]
         idx = np.where(se >= 0, self.edges[np.abs(se), 0], self.edges[np.abs(se), 1])
         return self.vertices[idx]
 
     def face_normal(self, fi):
-        f = self.faces[fi]
+        f = self.faces[self.face_sources(fi)[0]]
         n = self.planes[f['plane']]['n'].astype(np.float64)
         return -n if f['side'] else n
 
+    def face_texinfo(self, fi):
+        return self.texinfo[self.faces[self.face_sources(fi)[0]]['texinfo']]
+
     def face_texture(self, fi):
-        return self.textures[self.texinfo[self.faces[fi]['texinfo']]['miptex']]
+        return self.textures[self.face_texinfo(fi)['miptex']]
 
     def face_st(self, fi, pts):
-        ti = self.texinfo[self.faces[fi]['texinfo']]
+        ti = self.face_texinfo(fi)
         s = pts @ ti['s'][:3].astype(np.float64) + float(ti['s'][3])
         t = pts @ ti['t'][:3].astype(np.float64) + float(ti['t'][3])
         return s, t
@@ -186,6 +196,93 @@ class Bsp:
                 break
             light += self.lighting[o:o + size].reshape(h, w, 3)
         return light, s0, t0
+
+
+def merge_coplanar(bsp, faces):
+    """`faces` with the pieces the map compiler split one surface into joined back: it splits
+    along its BSP's planes, and into pieces of at most 240 texels for their light maps. Faces in
+    one plane with one texture mapping that share an edge are merged while the result stays
+    convex (points in a straight line between two edges dropped). Returns face indices, the
+    merged ones new (Bsp.face_sources gives what they're made of), in a stable order."""
+    groups = {}
+    for fi in faces:
+        f = bsp.faces[fi]
+        groups.setdefault((int(f['plane']), int(f['side']), int(f['texinfo'])), []).append(fi)
+    out = []
+    for fis in groups.values():
+        n = bsp.face_normal(fis[0])
+        alive = {i: (bsp.face_points(fi), [fi]) for i, fi in enumerate(fis)}
+        changed = len(fis) > 1
+        while changed:
+            changed = False
+            edge_of = {}
+            for i, (poly, _) in alive.items():
+                for k in range(len(poly)):
+                    edge_of[(_vkey(poly[k]), _vkey(poly[(k + 1) % len(poly)]))] = i
+            done = set()     # merged this pass: their edges are the next pass's
+            for i in sorted(alive):
+                if i not in alive or i in done:
+                    continue
+                poly, src = alive[i]
+                for k in range(len(poly)):
+                    a, b = _vkey(poly[k]), _vkey(poly[(k + 1) % len(poly)])
+                    j = edge_of.get((b, a))
+                    if j is None or j == i or j not in alive or j in done:
+                        continue
+                    joined = _join(poly, k, alive[j][0], a, b, n)
+                    if joined is not None:
+                        alive[i] = (joined, src + alive[j][1])
+                        del alive[j]
+                        done.add(i)
+                        changed = True
+                        break
+        for i in sorted(alive):
+            poly, src = alive[i]
+            if len(src) == 1:
+                out.append(src[0])
+            else:
+                fi = len(bsp.faces) + len(bsp.merged)
+                bsp.merged[fi] = (poly, sorted(src))
+                out.append(fi)
+    return out
+
+
+def _vkey(p):
+    return (round(float(p[0]), 2), round(float(p[1]), 2), round(float(p[2]), 2))
+
+
+def _join(p, k, q, a, b, n):
+    """Convex polygons p and q (n, 3), one winding, sharing p's edge k (a -> b) as q's (b -> a):
+    their union if it's convex, else None."""
+    j = next(j for j in range(len(q)) if _vkey(q[j]) == b and _vkey(q[(j + 1) % len(q)]) == a)
+    pts = [p[(k + 1 + m) % len(p)] for m in range(len(p))] + [q[(j + 2 + m) % len(q)] for m in range(len(q) - 2)]
+    # drop points in a straight line between their neighbours
+    keep = []
+    for m in range(len(pts)):
+        u, v, w = pts[m - 1], pts[m], pts[(m + 1) % len(pts)]
+        if np.linalg.norm(np.cross(v - u, w - v)) > 1e-6 * np.linalg.norm(v - u) * np.linalg.norm(w - v) + 1e-9:
+            keep.append(v)
+    if len(keep) < 3:
+        return None
+    turns = [np.dot(np.cross(keep[m] - keep[m - 1], keep[(m + 1) % len(keep)] - keep[m]), n) for m in range(len(keep))]
+    if max(turns) > 1e-6 and min(turns) < -1e-6:
+        return None
+    return np.array(keep)
+
+
+def _inside(poly, s, t):
+    """Signed distance (texels) from points (s, t) into a convex polygon (n, 2) in texture
+    space: positive inside, negative outside."""
+    area = sum(poly[m - 1][0] * poly[m][1] - poly[m][0] * poly[m - 1][1] for m in range(len(poly)))
+    sign = 1.0 if area > 0 else -1.0
+    d = np.full(np.shape(s), np.inf)
+    for m in range(len(poly)):
+        (ax, ay), (bx, by) = poly[m - 1], poly[m]
+        length = math.hypot(bx - ax, by - ay)
+        if length < 1e-9:
+            continue
+        d = np.minimum(d, sign * ((bx - ax) * (t - ay) - (by - ay) * (s - ax)) / length)
+    return d
 
 
 def clip_polygon(poly, axis, c, keep_below):
@@ -286,7 +383,7 @@ def bake(bsp, faces, density=0.5, layer_size=1024, first_layer=1, pad=2, supersa
     for fi in faces:
         pts = bsp.face_points(fi)
         s, t = bsp.face_st(fi, pts)
-        ti = bsp.texinfo[bsp.faces[fi]['texinfo']]
+        ti = bsp.face_texinfo(fi)
         ls = float(np.linalg.norm(ti['s'][:3]))
         lt = float(np.linalg.norm(ti['t'][:3]))
         if ls < 1e-6 or lt < 1e-6:
@@ -327,15 +424,29 @@ def bake(bsp, faces, density=0.5, layer_size=1024, first_layer=1, pad=2, supersa
             tex[..., 3] = 255
         else:
             tex = rgba[np.floor(T).astype(int) % rgba.shape[0], np.floor(S).astype(int) % rgba.shape[1]].astype(np.float32)
-        lit = bsp.face_light(fi)
-        if lit is None:
-            mul = np.full((h, w, 1), float(fullbright))
-            lum = np.full((h, w), float(fullbright), np.float32)
-        else:
-            grid, s0, t0 = lit
-            L = _sample_light(grid, s0, t0, S.mean(axis=(2, 3)), T.mean(axis=(2, 3)))
-            mul = light_multiplier(L, gain, gamma, lift)
-            lum = (0.299 * mul[..., 0] + 0.587 * mul[..., 1] + 0.114 * mul[..., 2]).astype(np.float32)
+        # the light: a merged face's texels each take that of the piece they fall in (the
+        # nearest one, at its edges)
+        Sm, Tm = S.mean(axis=(2, 3)), T.mean(axis=(2, 3))
+        sources = bsp.face_sources(fi)
+        mul = best = None
+        for src in sources:
+            lit = bsp.face_light(src)
+            if lit is None:
+                m_src = np.full((h, w, 3), float(fullbright))
+            else:
+                grid, s0, t0 = lit
+                m_src = light_multiplier(_sample_light(grid, s0, t0, Sm, Tm), gain, gamma, lift)
+            if len(sources) == 1:
+                mul = m_src
+                break
+            ss, ts = bsp.face_st(src, bsp.face_points(src))
+            d = _inside(np.stack([ss, ts], axis=1), Sm, Tm)
+            if mul is None:
+                mul, best = m_src, d
+            else:
+                mul = np.where((d > best)[..., None], m_src, mul)
+                best = np.maximum(best, d)
+        lum = (0.299 * mul[..., 0] + 0.587 * mul[..., 1] + 0.114 * mul[..., 2]).astype(np.float32)
         a = tex[..., 3:4] / 255.0
         rgb = (tex[..., :3] * a).sum(axis=(2, 3)) / np.maximum(a.sum(axis=(2, 3)), 1e-6)
         layers[layer][y0:y0 + h, x0:x0 + w] = rgb * mul
