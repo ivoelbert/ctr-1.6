@@ -8,7 +8,7 @@
 #   DUST2_ZIP=...    the "De_Dust 2 with real light" download from Sketchfab
 #                    (default: ~/Documents/CTRDUST2/dust-2-cs-16.zip)
 #   DUST2_MODEL=...  or its de_dust_2_with_real_light.glb directly
-#   CSTRIKE=...      a Counter-Strike 1.6 install's cstrike folder, for Aztec (free drive)
+#   CSTRIKE=...      a Counter-Strike 1.6 install's cstrike folder: the maps read from it (Aztec)
 #                    (default: Steam's, ~/Library/Application Support/Steam/steamapps/common/Half-Life/cstrike)
 #   PORT=8642
 #   NO_OPEN=1        serve without opening a browser
