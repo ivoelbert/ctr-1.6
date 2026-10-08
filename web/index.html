@@ -80,7 +80,7 @@
         <div class="modes" id="modes">
           <button class="mode" data-mode="race" aria-pressed="true"><b>Race</b><span>Seven CTR racers, weapon crates, wumpa fruit</span></button>
           <button class="mode" data-mode="tt" aria-pressed="false"><b>Time Trial</b><span>You, the clock and the loop</span></button>
-          <button class="mode" data-mode="free" aria-pressed="false"><b>Free drive</b><span>All of Dust 2, no laps: A site, B, tunnels, T spawn</span></button>
+          <button class="mode" data-mode="free" aria-pressed="false"><b>Free drive</b><span>A whole map, no laps: Dust 2 or Aztec</span></button>
           <button class="mode" data-mode="menus" aria-pressed="false"><b>CTR menus</b><span>The whole game: Dust 2 in Dingo Canyon's place, Dust 2 Tunnels in Dragon Mines'</span></button>
         </div>
         <div class="row">
@@ -92,6 +92,12 @@
               <option value="9">Papu Papu</option><option value="10">Ripper Roo</option><option value="11">Komodo Joe</option>
               <option value="12">N. Tropy</option><option value="13">Penta Penguin</option><option value="14">Fake Crash</option>
               <option value="15">Nitros Oxide</option>
+            </select>
+          </label>
+          <label id="mapBox" class="off">Map
+            <select id="map">
+              <option value="dust2">Dust 2</option>
+              <option value="aztec">Aztec</option>
             </select>
           </label>
           <label id="trackBox">Track
@@ -251,12 +257,15 @@
   // replaces, to match that mode's textures), its VRMs (those textures, with a Dust 2
   // minimap) entries 0, 2, 4, 6, and the model's textures go in the atlas the renderer
   // samples for tpage mode 3 ("CTRA", width, height, RGBA).
-  const TRACK_NAMES = { dust2: 'DUST 2', dust2_b: 'DUST 2 TUNNELS', dust2_free: 'DUST 2' };
+  const TRACK_NAMES = { dust2: 'DUST 2', dust2_b: 'DUST 2 TUNNELS', dust2_free: 'DUST 2', aztec_free: 'AZTEC' };
+  // which map a track file belongs to: its meta (atlas, landmarks) is MAP.json
+  const mapOf = (name) => (name.startsWith('aztec') ? 'aztec' : 'dust2');
   // tracks: { slot (level ID): track file name }, e.g. { 0: 'dust2' }. A slot's eight BIGFILE
   // entries (8 * slot + 0..7) take the track's four VRMs and four LEVs.
   async function loadDust2(tracks) {
     const base = params.get('dust2dir') || 'lev/';
-    const meta = await (await fetch(base + 'dust2.json', { cache: 'no-store' })).json();
+    // one atlas for the session: every slot's track comes from one map
+    const meta = await (await fetch(base + mapOf(Object.values(tracks)[0]) + '.json', { cache: 'no-store' })).json();
     Module.FS.mkdirTree('/assets/override');
     const pad = (n) => String(n).padStart(3, '0');
     Module.ctrRename = {};
@@ -264,8 +273,9 @@
       for (const [suffix, k] of [['', 1], ['_2p', 3], ['_4p', 5], ['_tt', 7]]) {
         // each mode's level, and its textures with the Dust 2 minimap drawn in (entry before)
         const entry = 8 * Number(slot) + k;
-        Module.FS.writeFile(`/assets/override/${pad(entry)}.bin`, await fetchWithProgress(`${base}${name}${suffix}.lev`, 'Dust 2'));
-        Module.FS.writeFile(`/assets/override/${pad(entry - 1)}.bin`, await fetchWithProgress(`${base}${name}${suffix}.vrm`, 'Dust 2'));
+        const label = TRACK_NAMES[name] || 'Dust 2';
+        Module.FS.writeFile(`/assets/override/${pad(entry)}.bin`, await fetchWithProgress(`${base}${name}${suffix}.lev`, label));
+        Module.FS.writeFile(`/assets/override/${pad(entry - 1)}.bin`, await fetchWithProgress(`${base}${name}${suffix}.vrm`, label));
       }
       Module.ctrRename[slot] = TRACK_NAMES[name] || 'DUST 2';
     }
@@ -368,8 +378,10 @@
     } : null;
     const which = params.get('dust2');
     const slot = Number(params.get('dust2slot') ?? 0);  // the level ID it takes
+    const map = params.get('map') || 'dust2';           // &map=aztec: Aztec (free drive only)
     const tracks = !params.has('dust2') ? null
       : which === 'menus' ? { 0: 'dust2', 1: 'dust2_b' }   // as the launcher's CTR menus mode
+      : map !== 'dust2' ? { [slot]: `${map}_free` }
       : { [slot]: { free: 'dust2_free', b: 'dust2_b' }[which] || 'dust2' };
     start({ tracks, boot }).catch((e) => { say(String(e)); console.error(e); });
   } else {
@@ -391,6 +403,7 @@
       for (const m of modes.children) m.setAttribute('aria-pressed', String(m === b));
       lapsBox.classList.toggle('off', !(mode === 'race' || mode === 'tt'));
       trackBox.classList.toggle('off', !(mode === 'race' || mode === 'tt'));
+      document.getElementById('mapBox').classList.toggle('off', mode !== 'free');
       playersBox.classList.toggle('off', !(mode === 'race' || mode === 'free'));
       showPlayersNote();
     });
@@ -408,7 +421,7 @@
         // Arcade takes one or two players (with AI racers), VS two to four; Time Trial one
         race: { tracks: { 0: track }, boot: { level: 0, mode: players <= 2 ? 1 : 2, character, laps, players } },
         tt: { tracks: { 0: track }, boot: { level: 0, mode: 0, character, laps } },
-        free: { tracks: { 0: 'dust2_free' }, boot: { level: 0, mode: players === 1 ? 0 : 2, character, laps: 99, players } },
+        free: { tracks: { 0: `${document.getElementById('map').value}_free` }, boot: { level: 0, mode: players === 1 ? 0 : 2, character, laps: 99, players } },
         // the whole game: Dust 2 in Dingo Canyon's place, Dust 2 Tunnels in Dragon Mines'
         menus: { tracks: { 0: 'dust2', 1: 'dust2_b' }, boot: null },
       };

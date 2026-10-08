@@ -22,6 +22,9 @@ on http://localhost:8642/ and opens it in Chrome. It needs:
   `~/Documents/CTRDUST2/CTR - Crash Team Racing/CTR - Crash Team Racing.bin` (`CTR_DISC=...`);
 - the "De_Dust 2 with real light" download from Sketchfab, by default at
   `~/Documents/CTRDUST2/dust-2-cs-16.zip` (`DUST2_ZIP=...`, or `DUST2_MODEL=...` for its `.glb`);
+- for Aztec (free drive), Counter-Strike 1.6 installed through Steam: its map file is read
+  directly (`CSTRIKE=...` for another install's `cstrike` folder); without it, the launcher's
+  Aztec choice has nothing to load;
 - Python 3 with numpy and Pillow, a C compiler (`cc`: on a Mac, Xcode's command line tools),
   Node.js, and a browser with WebAssembly JSPI (Chrome or Edge 137+). The first build fetches
   Emscripten 6.0.10 unless `$EMSDK` points at one.
@@ -43,7 +46,8 @@ The launcher has four modes:
   - *The long way* (Dust 2 Tunnels, ~47 s laps): long A, CT spawn, B doors, B site, the upper
     tunnels, T spawn, outside long, long doors.
 - **Time Trial**: either loop alone against the clock.
-- **Free drive**: the whole map without laps (A site, B, the tunnels, T spawn).
+- **Free drive**: a whole map without laps: Dust 2 (A site, B, the tunnels, T spawn) or Aztec
+  (the river, the bridge, both sites), made from Counter-Strike 1.6's own map file.
 - **CTR menus**: the whole game from its title screen, with Dust 2 in Dingo Canyon's place and
   Dust 2 Tunnels in Dragon Mines'.
 
@@ -78,7 +82,9 @@ node tools/serve.mjs                                            # http://localho
 ```
 
 `?dust2&level=0&mode=1` boots straight into a race on Dust 2 (`mode=0` Time Trial,
-`dust2=b` the tunnels loop, `dust2=free` free drive, `character=N`, `laps=N`); without
+`dust2=b` the tunnels loop, `dust2=free` free drive, `dust2=free&map=aztec` Aztec's free drive,
+`character=N`, `laps=N`; `python3 -I tools/build_aztec.py CSTRIKE_DIR DISC.bin build/lev` builds
+Aztec); without
 `dust2`, `level=N` is any CTR track
 (`enum LevelID` in `engine/include/namespace_Level.h`). `tools/e2e/` drives the game headless
 (see its scripts' headers) and `NOTES.md` has what was learned on the way.

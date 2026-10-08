@@ -116,6 +116,32 @@ the map.
   quadblocks, 61,600 of the 65,536 vertices. The A-site crates no longer show through the
   wall of long A.
 
+## Counter-Strike 1.6 maps (tools/goldsrc.py, tools/build_aztec.py)
+
+- The game's own map files (GoldSrc BSP 30) carry everything the Sketchfab model of Dust 2 was
+  made from: convex faces with a texture mapping, the textures (8-bit + palette, in the map or
+  in WADs) and baked light (RGB samples every 16 texels per face, per light style). goldsrc.bake
+  gives each face a chart in 1024^2 atlas layers, texture times light, so the rest of the Dust 2
+  pipeline takes it as it took the model.
+- Light grids: the size of a face's grid follows the engine's float arithmetic (each texture
+  coordinate summed in double, stored as a float); in double precision a few hundred faces per
+  map read the wrong samples. With it, every face's grid tiles the lighting lump exactly.
+- Brightness: about light / 116 (GoldSrc's lightmaps are overbright), fitted to the Dust 2 model
+  at 10,000 matched points; shadows lifted 15% of the way to the plain texture (SHADOW_LIFT).
+- Edits per map (build_aztec.py): brush entities kept or left out by class or model number,
+  textures swapped (Aztec's wall tops are a 16-pixel barrel texture), tool textures ('sky',
+  'clip', triggers) and alpha-tested ones ('{': vines, rungs; the atlas has no alpha yet) out.
+- Water: the engine draws a kart on water/mud terrain only above y 0 (half sunk), so Aztec is
+  shifted so the river's surface is at y 0, and the surface is a floor with the water terrain
+  (70% speed, the water sound). A liquid brush is drawn from both sides: only each one's top
+  is the water floor (its inside-out bottom painted over the real one everywhere). Everything
+  under the surface is clipped off: never seen, and painted after it (out of order) it showed.
+- Budget: Aztec is as big as Dust 2 in CTR units but has nearly twice the drawn surface. Floors
+  are cut into cells polygon by polygon (cutting the triangles split every cell their diagonal
+  crossed), only near ground the kart can reach (roofs stay whole), at 512 units (Dust 2: 256);
+  walls up to 1200 (800). 13,500 quadblocks, 57,300 vertices before the painter's cuts, which
+  then take the worst offenders that fit under 64,000.
+
 ## Tools
 
 - `tools/navgrid.py` drivable grid + A*, `tools/route.py`, `tools/floor_map.py` (maps),

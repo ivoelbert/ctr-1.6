@@ -66,9 +66,13 @@ SHADE_MIN = 20          # the darkest floor colour: a kart is never quite black
 light_maps = None       # per atlas layer: blurred luminance, set by main()
 
 
+FLOOR_Z = 0.0           # Hammer z at CTR y 0 (the engine draws karts on water terrain only above
+                        # y 0: a map with water puts its surface there)
+
+
 def to_ctr(p):
     p = np.asarray(p, dtype=np.float64)
-    return np.stack([(p[..., 0] - CENTER[0]) * SCALE, p[..., 2] * SCALE, -(p[..., 1] - CENTER[1]) * SCALE], axis=-1)
+    return np.stack([(p[..., 0] - CENTER[0]) * SCALE, (p[..., 2] - FLOOR_Z) * SCALE, -(p[..., 1] - CENTER[1]) * SCALE], axis=-1)
 
 
 def dir_to_ctr(n):
@@ -77,7 +81,7 @@ def dir_to_ctr(n):
 
 
 class Tri:
-    __slots__ = ('p', 'uv', 'layer', 'n', 'ph', 'nh', 'solid')
+    __slots__ = ('p', 'uv', 'layer', 'n', 'ph', 'nh', 'solid', 'terrain')
 
     def __init__(self, p, uv, layer, n, ph, nh):
         self.p = p        # (3,3) CTR space
@@ -87,6 +91,7 @@ class Tri:
         self.ph = ph      # (3,3) Hammer space
         self.nh = nh      # unit normal, Hammer space
         self.solid = True  # False: drawn but not collided with (stair risers under a ramp)
+        self.terrain = 0   # CTR terrain type (enum TerrainType): 0 asphalt, 4 water...
 
 
 # Model edits for driving.
@@ -483,7 +488,7 @@ def pair_quads(tris):
                 if tj == ti or used[tj]:
                     continue
                 u = tris[tj]
-                if u.layer != t.layer or np.dot(u.n, t.n) < 0.9999 or u.solid != t.solid:
+                if u.layer != t.layer or np.dot(u.n, t.n) < 0.9999 or u.solid != t.solid or u.terrain != t.terrain:
                     continue
                 # cyclic quad: t = (A, B, C) with shared edge A->B (index e), u has B->A
                 A, B, C = t.p[e], t.p[(e + 1) % 3], t.p[(e + 2) % 3]
@@ -524,7 +529,7 @@ def pair_quads(tris):
         if best:
             _, tj, pts, uvs = best
             used[ti] = used[tj] = True
-            quads.append((np.array(pts), np.array(uvs), t.layer, t.n, t.solid))
+            quads.append((np.array(pts), np.array(uvs), t.layer, t.n, t.solid, t.terrain))
     singles = [t for i, t in enumerate(tris) if not used[i]]
     print(f'{len(quads)} quads from pairs, {len(singles)} triangles left')
     return quads, singles
@@ -574,7 +579,7 @@ def invisible_quad(P9, n, triangle=False):
                 hidden=True)
 
 
-def quad_block(P9, UV9, layer, n, triangle, solid=True):
+def quad_block(P9, UV9, layer, n, triangle, solid=True, terrain=0):
     """A Quad from 9 slot positions/uvs (CTR space), wound so its front faces n."""
     P9 = [np.asarray(p) for p in P9]
     front = np.cross(P9[2] - P9[0], P9[1] - P9[0])
@@ -585,7 +590,7 @@ def quad_block(P9, UV9, layer, n, triangle, solid=True):
         return None
     faces = [layout(np.array([UV9[c] for c in fc]), layer, origin) for fc in FACE_CORNERS]
     low = layout(np.array([UV9[c] for c in (0, 1, 2, 3)]), layer, origin)
-    flags, terrain = surface_flags(n, solid)
+    flags, _ = surface_flags(n, solid)
     pos = [tuple(int(round(v)) for v in p) for p in P9]
     color = None
     if flags & FLAG_GROUND and light_maps is not None:
@@ -640,7 +645,7 @@ def hlen(a, b):
     return math.hypot(a[0] - b[0], a[2] - b[2])
 
 
-def emit_quad(pts, uvs, layer, n, out, depth=0, solid=True, cut=None):
+def emit_quad(pts, uvs, layer, n, out, depth=0, solid=True, cut=None, terrain=0):
     """pts/uvs in cyclic order A, B, C, D (CCW about n). Tessellates into quadblocks, and into
     pieces at most `cut` long horizontally when given (see painter_cuts)."""
     A, B, C, D = pts
@@ -671,7 +676,7 @@ def emit_quad(pts, uvs, layer, n, out, depth=0, solid=True, cut=None):
                     2: (s0, t1), 8: (sm, t1), 3: (s1, t1)}
             P9 = [bilinear(corners, *grid[k]) for k in range(9)]
             U9 = [bilinear(ucorners, *grid[k]) for k in range(9)]
-            q = quad_block(P9, U9, layer, n, False, solid)
+            q = quad_block(P9, U9, layer, n, False, solid, terrain)
             if q is None:
                 if depth > 3:
                     print('warning: dropped a quad whose texture spans too much')
@@ -687,12 +692,12 @@ def emit_quad(pts, uvs, layer, n, out, depth=0, solid=True, cut=None):
                     if np.dot(np.cross(pp[1] - pp[0], pp[3] - pp[0]), n) < 0:
                         pp = pp[[0, 3, 2, 1]]
                         uu = [uu[0], uu[3], uu[2], uu[1]]
-                    emit_quad(pp, np.array(uu), layer, n, out, depth + 1, solid, cut)
+                    emit_quad(pp, np.array(uu), layer, n, out, depth + 1, solid, cut, terrain)
                 continue
             out.append(q)
 
 
-def emit_triangle(p, uv, layer, n, out, solid=True, cut=None):
+def emit_triangle(p, uv, layer, n, out, solid=True, cut=None, terrain=0):
     """Subdivides a triangle into a k x k grid: parallelogram cells become quadblocks, the
     diagonal row triangle quadblocks. cut: as for emit_quad."""
     a, b, c = p
@@ -717,7 +722,7 @@ def emit_triangle(p, uv, layer, n, out, solid=True, cut=None):
                 if np.dot(np.cross(pts[1] - pts[0], pts[3] - pts[0]), n) < 0:
                     pts = pts[[0, 3, 2, 1]]
                     uvs = uvs[[0, 3, 2, 1]]
-                emit_quad(pts, uvs, layer, n, out, solid=solid, cut=cut)
+                emit_quad(pts, uvs, layer, n, out, solid=solid, cut=cut, terrain=terrain)
             else:
                 t = [P(i, j), P(i + 1, j), P(i, j + 1)]
                 tu = [U(i, j), U(i + 1, j), U(i, j + 1)]
@@ -729,7 +734,7 @@ def emit_triangle(p, uv, layer, n, out, solid=True, cut=None):
                 uA, uB, uC = tu
                 P9 = [A, B, Cc, Cc, (A + B) / 2, (A + Cc) / 2, (B + Cc) / 2, (B + Cc) / 2, Cc]
                 U9 = [uA, uB, uC, uC, (uA + uB) / 2, (uA + uC) / 2, (uB + uC) / 2, (uB + uC) / 2, uC]
-                q = quad_block(P9, U9, layer, n, True, solid)
+                q = quad_block(P9, U9, layer, n, True, solid, terrain)
                 if q is None:
                     print('warning: dropped a triangle whose texture spans too much')
                     continue
@@ -1374,7 +1379,11 @@ def place_pickups(route, g, by_model):
     return out
 
 
-def write_modes(outdir, name, out, nodes, spawns, nav, route, g, bases, vrms, minimap):
+DUST2_SKY = [(170, 190, 220, 1), (230, 200, 160, 1), (200, 210, 230, 1)]
+
+
+def write_modes(outdir, name, out, nodes, spawns, nav, route, g, bases, vrms, minimap, build_name='de_dust2',
+                clear_colors=DUST2_SKY):
     """The track as one LEV per mode, each grafted onto that mode's Dingo Canyon level, and that
     mode's texture file with the track's minimap drawn in."""
     hitbox_of = {'crate_question': (76, 48), 'crate_fruit': (76, 48), 'fruit': (64, 64)}
@@ -1394,8 +1403,8 @@ def write_modes(outdir, name, out, nodes, spawns, nav, route, g, bases, vrms, mi
                 r, lift = hitbox_of[kind]
                 hitboxes.append(dict(inst=k, radius=r, lift=lift, flags=0x4C0))
         lv = Level(quads=out, nodes=nodes, spawns=spawns,
-                   clear_colors=[(170, 190, 220, 1), (230, 200, 160, 1), (200, 210, 230, 1)],
-                   build_name='de_dust2', nav_paths=nav, base=base, instances=pickups, hitboxes=hitboxes,
+                   clear_colors=clear_colors,
+                   build_name=build_name, nav_paths=nav, base=base, instances=pickups, hitboxes=hitboxes,
                    flyin=base_flyin(base), minimap=minimap_placement(window))
         data, mode_info = write_level(lv)
         data += b'\0' * ((-len(data)) % 2048)
@@ -1426,12 +1435,14 @@ def _split(poly, axis, c, eps=0.01):
     return lo, hi
 
 
-def grid_cut_floors(tris, cell=FLOOR_CELL):
-    """Floor triangles cut along the lines x, z = cell * i (CTR units), as fans of triangles."""
+def grid_cut_floors(tris, cell=None, near=None):
+    """Floor triangles cut along the lines x, z = cell * i (CTR units; FLOOR_CELL by default), as
+    fans of triangles; only those near(t) says a kart's camera can get close to, when given."""
+    cell = cell or FLOOR_CELL
     out = []
     cut = 0
     for t in tris:
-        if t.n[1] <= 0.7:
+        if t.n[1] <= 0.7 or (near is not None and not near(t)):
             out.append(t)
             continue
         polys = [[(t.p[k].astype(float), t.uv[k].astype(float), t.ph[k].astype(float)) for k in range(3)]]
@@ -1461,6 +1472,7 @@ def grid_cut_floors(tris, cell=FLOOR_CELL):
                     continue   # a sliver where a line grazed a corner
                 r = Tri(p, np.array([a[1], b[1], c[1]]), t.layer, t.n, np.array([a[2], b[2], c[2]]), t.nh)
                 r.solid = t.solid
+                r.terrain = t.terrain
                 out.append(r)
     print(f'{cut} floor triangles cut along the {cell:.0f}-unit grid: {len(tris)} -> {len(out)} triangles')
     return out
@@ -1469,6 +1481,7 @@ def grid_cut_floors(tris, cell=FLOOR_CELL):
 def _child(t, p, uv, ph):
     r = Tri(np.asarray(p, dtype=float), np.asarray(uv, dtype=float), t.layer, t.n, np.asarray(ph, dtype=float), t.nh)
     r.solid = t.solid
+    r.terrain = t.terrain
     return r
 
 
@@ -1559,24 +1572,24 @@ def fix_t_junctions(tris, eps=0.6, cell=32.0, which=is_floor):
     return out
 
 
-def emit_level(tris, ramps, cuts=None):
+def emit_level(tris, ramps, cuts=None, near=None):
     """Quadblocks for the model's triangles, after the stair ramps. Each gets .src, the polygon
     it comes from (('q', i): a merged pair, ('t', i): a lone triangle; None: a ramp), and
-    cuts {src: length} cuts some shorter (see painter_cuts)."""
+    cuts {src: length} cuts some shorter (see painter_cuts); near: see grid_cut_floors."""
     cuts = cuts or {}
     out = list(ramps)
     for q in out:
         q.src = None
-    tris = fix_t_junctions(grid_cut_floors(tris))
+    tris = fix_t_junctions(grid_cut_floors(tris, near=near))
     quads, singles = pair_quads(tris)
-    for i, (pts, uvs, layer, n, solid) in enumerate(quads):
+    for i, (pts, uvs, layer, n, solid, terrain) in enumerate(quads):
         first = len(out)
-        emit_quad(pts, uvs, layer, n, out, solid=solid, cut=cuts.get(('q', i)))
+        emit_quad(pts, uvs, layer, n, out, solid=solid, cut=cuts.get(('q', i)), terrain=terrain)
         for q in out[first:]:
             q.src = ('q', i)
     for i, t in enumerate(singles):
         first = len(out)
-        emit_triangle(t.p, t.uv, t.layer, t.n, out, solid=t.solid, cut=cuts.get(('t', i)))
+        emit_triangle(t.p, t.uv, t.layer, t.n, out, solid=t.solid, cut=cuts.get(('t', i)), terrain=t.terrain)
         for q in out[first:]:
             q.src = ('t', i)
     shade_ramps(out)
@@ -1609,7 +1622,7 @@ def face_drawn(q, fi):
     return not q.hidden and f is not None and (f.clut >> 10) != 15
 
 
-def painter_cuts(tris, ramps, out, g, start):
+def painter_cuts(tris, ramps, out, g, start, near=None):
     """`out` again, with the polygons the painter's audit flags cut shorter (see above)."""
     import tempfile
     import time
@@ -1635,9 +1648,26 @@ def painter_cuts(tris, ramps, out, g, start):
             changed = sum(1 for k, v in more.items() if cuts.get(k) != v)
             print(f'painter audit: {sum(e for e, _ in seen)} + {sum(t for _, t in seen)} pixels painted out of order '
                   f'in {len(seen)} views; cutting {changed} polygons to {length:.0f}')
-            cut_out = emit_level(tris, ramps, more)
+            cut_out = emit_level(tris, ramps, more, near)
             if vertex_count(cut_out) > VERTEX_BUDGET:
-                print(f'  that makes {vertex_count(cut_out)} vertices, over {VERTEX_BUDGET}: stopping')
+                # over budget: the worst offenders first, as many as fit (a binary search)
+                by_src = {}
+                for qi in np.nonzero(score >= PAINTER_MIN_PIXELS)[0]:
+                    if out[qi].src is not None:
+                        by_src[out[qi].src] = by_src.get(out[qi].src, 0) + score[qi]
+                ranked = sorted((k for k, v in more.items() if cuts.get(k) != v), key=lambda k: -by_src.get(k, 0))
+                lo, hi, best = 0, len(ranked), (cuts, out)
+                while hi - lo > 1:
+                    mid = (lo + hi) // 2
+                    trial = dict(cuts)
+                    trial.update({k: more[k] for k in ranked[:mid]})
+                    trial_out = emit_level(tris, ramps, trial, near)
+                    if vertex_count(trial_out) <= VERTEX_BUDGET:
+                        lo, best = mid, (trial, trial_out)
+                    else:
+                        hi = mid
+                print(f'  that makes {vertex_count(cut_out)} vertices, over {VERTEX_BUDGET}: the worst {lo} only')
+                cuts, out = best
                 break
             cuts, out = more, cut_out
         per_quad, per_view = painter.audit(out, views, tmp, face_drawn, near_first=True)
@@ -1674,6 +1704,7 @@ def reversed_twins(tris, exposed):
         t = tris[k]
         r = Tri(t.p[[0, 2, 1]].copy(), t.uv[[0, 2, 1]].copy(), t.layer, -t.n, t.ph[[0, 2, 1]].copy(), -t.nh)
         r.solid = t.solid
+        r.terrain = t.terrain
         out.append(r)
     return out
 

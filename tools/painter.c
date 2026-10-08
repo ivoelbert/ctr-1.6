@@ -29,6 +29,8 @@
 //                                                        where a face behind in the same slot
 //                                                        ends up on top
 //         nviews x { i32 err, tie }  (-1: skipped)
+// PAINTER_VIEW=n (environment): every error pixel of view n on stderr, "x y kind front-turn
+// front-slot painted-turn painted-slot" (kind 2: nearer slot, 1: a lost tie), for debugging.
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -68,6 +70,7 @@ static uint8_t *mark;
 static int32_t *key, *qrank, *rank;
 static Face *faces;
 static uint32_t *front_err, *front_tie, *behind_err, *views_err, *stamp;
+static int32_t *intruder;   // per pixel: a face painted over the front one (PAINTER_VIEW dumps)
 
 static void read_all(void *dst, size_t size, size_t count)
 {
@@ -134,11 +137,13 @@ static void raster(SV a, SV b, SV c, int face, int pass)
 			{
 				mark[i] = 2;
 				behind_err[face]++;
+				intruder[i] = face;
 			}
 			else if (key[face] == key[t] && rank[face] < rank[t] && mark[i] == 0)
 			{
 				mark[i] = 1;
 				behind_err[face]++;
+				intruder[i] = face;
 			}
 		}
 	}
@@ -271,6 +276,9 @@ int main(void)
 	zbuf = malloc(sizeof(float) * W * H);
 	ibuf = malloc(sizeof(int32_t) * W * H);
 	mark = malloc(W * H);
+	intruder = malloc(sizeof(int32_t) * W * H);
+	const char *dump_env = getenv("PAINTER_VIEW");   // debug: list one view's error pairs on stderr
+	int dump_view = dump_env ? atoi(dump_env) : -1;
 	key = malloc(sizeof(int32_t) * nf);
 	front_err = calloc(nf, 4);
 	front_tie = calloc(nf, 4);
@@ -327,6 +335,7 @@ int main(void)
 			zbuf[i] = 0;
 			ibuf[i] = -1;
 			mark[i] = 0;
+			intruder[i] = -1;
 		}
 		next_rank = 0;
 		walk(0, v->eye, mode);
@@ -409,6 +418,17 @@ int main(void)
 		}
 		view_out[2 * vi] = err;
 		view_out[2 * vi + 1] = tie;
+		if (vi == dump_view)
+		{
+			for (int i = 0; i < W * H; i++)
+			{
+				if (mark[i])
+				{
+					fprintf(stderr, "%d %d %d %d %d %d %d\n", i % W, i / W, mark[i], faces[ibuf[i]].quad, key[ibuf[i]],
+					        faces[intruder[i]].quad, key[intruder[i]]);
+				}
+			}
+		}
 	}
 
 	for (int f = 0; f < nf; f++)

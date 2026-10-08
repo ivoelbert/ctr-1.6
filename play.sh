@@ -8,16 +8,20 @@
 #   DUST2_ZIP=...    the "De_Dust 2 with real light" download from Sketchfab
 #                    (default: ~/Documents/CTRDUST2/dust-2-cs-16.zip)
 #   DUST2_MODEL=...  or its de_dust_2_with_real_light.glb directly
+#   CSTRIKE=...      a Counter-Strike 1.6 install's cstrike folder, for Aztec (free drive)
+#                    (default: Steam's, ~/Library/Application Support/Steam/steamapps/common/Half-Life/cstrike)
 #   PORT=8642
 #   NO_OPEN=1        serve without opening a browser
 #
-# The level it writes (build/lev) holds data from your disc: keep it to yourself.
+# The levels it writes (build/lev) hold data from your disc (and from Counter-Strike's map
+# files): keep them to yourself.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
 
 DISC="${CTR_DISC:-$HOME/Documents/CTRDUST2/CTR - Crash Team Racing/CTR - Crash Team Racing.bin}"
 ZIP="${DUST2_ZIP:-$HOME/Documents/CTRDUST2/dust-2-cs-16.zip}"
+CSTRIKE="${CSTRIKE:-$HOME/Library/Application Support/Steam/steamapps/common/Half-Life/cstrike}"
 PORT="${PORT:-8642}"
 URL="http://localhost:$PORT/"
 
@@ -45,6 +49,15 @@ LEV="$ROOT/build/lev/dust2.lev"
 if [ ! -f "$LEV" ] || [ -n "$(find tools -maxdepth 1 -name '*.py' -newer "$LEV" | head -1)" ]; then
   echo "Building the Dust 2 track (a few minutes)..."
   python3 -I tools/build_dust2.py "$MODEL" "$DISC" "$ROOT/build/lev"
+fi
+
+# Aztec, from Counter-Strike 1.6's own map file, when the game is installed.
+AZTEC="$ROOT/build/lev/aztec_free.lev"
+if [ -f "$CSTRIKE/maps/de_aztec.bsp" ]; then
+  if [ ! -f "$AZTEC" ] || [ -n "$(find tools -maxdepth 1 -name '*.py' -newer "$AZTEC" | head -1)" ]; then
+    echo "Building Aztec from Counter-Strike's map (a few minutes)..."
+    python3 -I tools/build_aztec.py "$CSTRIKE" "$DISC" "$ROOT/build/lev"
+  fi
 fi
 
 # The game, when it's missing or older than its sources.
