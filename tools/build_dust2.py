@@ -20,6 +20,7 @@ facing -z turns left toward -x), so a Hammer point (x, y, z) goes to SCALE * (x 
 Collision in CTR is one-sided: a quadblock's front is (p2 - p0) x (p1 - p0), so every face is
 wound to face the side its model normal points to (into the playable space).
 """
+import hashlib
 import io
 import itertools
 import json
@@ -28,6 +29,7 @@ import os
 import struct
 import subprocess
 import sys
+import time
 
 import numpy as np
 from PIL import Image
@@ -602,9 +604,10 @@ def quad_block(P9, UV9, layer, n, triangle, solid=True, terrain=0):
 def floor_shade(layer, uv):
     """A floor vertex colour from the baked light at its texel (see SUNLIT)."""
     lum = light_maps[layer]
-    x = int(np.clip(uv[0], 0, lum.shape[1] - 1))
-    y = int(np.clip(uv[1], 0, lum.shape[0] - 1))
-    v = int(round(np.clip(0x60 * lum[y, x] / SUNLIT, SHADE_MIN, 0xFF)))
+    # min/max, not np.clip: the same numbers, and this runs for every floor vertex
+    x = int(min(max(uv[0], 0), lum.shape[1] - 1))
+    y = int(min(max(uv[1], 0), lum.shape[0] - 1))
+    v = int(round(min(max(0x60 * lum[y, x] / SUNLIT, SHADE_MIN), 0xFF)))
     return (v, v, v)
 
 
@@ -1572,16 +1575,22 @@ def fix_t_junctions(tris, eps=0.6, cell=32.0, which=is_floor):
     return out
 
 
-def emit_level(tris, ramps, cuts=None, near=None):
+def level_polygons(tris, near=None):
+    """emit_level's polygons, (quads, single triangles): floors cut along the grid, T-junctions
+    closed, triangles paired. The same whatever the cuts, so painter_cuts makes them once."""
+    return pair_quads(fix_t_junctions(grid_cut_floors(tris, near=near)))
+
+
+def emit_level(tris, ramps, cuts=None, near=None, polygons=None):
     """Quadblocks for the model's triangles, after the stair ramps. Each gets .src, the polygon
     it comes from (('q', i): a merged pair, ('t', i): a lone triangle; None: a ramp), and
-    cuts {src: length} cuts some shorter (see painter_cuts); near: see grid_cut_floors."""
+    cuts {src: length} cuts some shorter (see painter_cuts); near: see grid_cut_floors;
+    polygons: level_polygons(tris, near), when already made."""
     cuts = cuts or {}
     out = list(ramps)
     for q in out:
         q.src = None
-    tris = fix_t_junctions(grid_cut_floors(tris, near=near))
-    quads, singles = pair_quads(tris)
+    quads, singles = polygons or level_polygons(tris, near)
     for i, (pts, uvs, layer, n, solid, terrain) in enumerate(quads):
         first = len(out)
         emit_quad(pts, uvs, layer, n, out, solid=solid, cut=cuts.get(('q', i)), terrain=terrain)
@@ -1622,12 +1631,26 @@ def face_drawn(q, fi):
     return not q.hidden and f is not None and (f.clut >> 10) != 15
 
 
-def painter_cuts(tris, ramps, out, g, start, near=None):
-    """`out` again, with the polygons the painter's audit flags cut shorter (see above)."""
+def painter_cuts(tris, ramps, g, start, name, near=None, polygons=None):
+    """The level (emit_level), with the polygons the painter's audit flags cut shorter (see
+    above); with FAST, those the last full build of `name` cut (see FAST). polygons:
+    level_polygons(tris, near), when already made."""
     import tempfile
-    import time
     import painter
     t0 = time.time()
+    polygons = polygons or level_polygons(tris, near)
+    quads, singles = polygons
+    keys = dict(zip([('q', i) for i in range(len(quads))] + [('t', i) for i in range(len(singles))],
+                    polygon_keys([(pts, n, layer) for pts, _, layer, n, _, _ in quads] +
+                                 [(t.p, t.n, t.layer) for t in singles])))
+    if FAST:
+        saved = load_checks(name).get('cuts', {})
+        cuts = {src: saved[k] for src, k in keys.items() if k in saved}
+        out = emit_level(tris, ramps, cuts, near, polygons)
+        print(f'painter audit as the last full build had it (FAST): {len(cuts)} of its {len(saved)} cuts, '
+              f'{vertex_count(out)} vertices')
+        return out
+    out = emit_level(tris, ramps, None, near, polygons)
     views = painter.chase_views(g, start)
     cuts = {}
     with tempfile.TemporaryDirectory() as tmp:
@@ -1648,7 +1671,7 @@ def painter_cuts(tris, ramps, out, g, start, near=None):
             changed = sum(1 for k, v in more.items() if cuts.get(k) != v)
             print(f'painter audit: {sum(e for e, _ in seen)} + {sum(t for _, t in seen)} pixels painted out of order '
                   f'in {len(seen)} views; cutting {changed} polygons to {length:.0f}')
-            cut_out = emit_level(tris, ramps, more, near)
+            cut_out = emit_level(tris, ramps, more, near, polygons)
             if vertex_count(cut_out) > VERTEX_BUDGET:
                 # over budget: the worst offenders first, as many as fit (a binary search)
                 by_src = {}
@@ -1661,7 +1684,7 @@ def painter_cuts(tris, ramps, out, g, start, near=None):
                     mid = (lo + hi) // 2
                     trial = dict(cuts)
                     trial.update({k: more[k] for k in ranked[:mid]})
-                    trial_out = emit_level(tris, ramps, trial, near)
+                    trial_out = emit_level(tris, ramps, trial, near, polygons)
                     if vertex_count(trial_out) <= VERTEX_BUDGET:
                         lo, best = mid, (trial, trial_out)
                     else:
@@ -1674,7 +1697,70 @@ def painter_cuts(tris, ramps, out, g, start, near=None):
     seen = [v for v in per_view if v is not None]
     print(f'painter audit: {sum(e for e, _ in seen)} + {sum(t for _, t in seen)} pixels left out of order, '
           f'{vertex_count(out)} vertices ({time.time() - t0:.0f} s)')
+    save_checks(name, cuts={keys[src]: length for src, length in cuts.items()})
     return out
+
+
+# Fast builds: FAST=1 skips the two slow checks, which faces are seen from behind and the
+# painter's audit, and takes their results from the last full build of the level (kept in
+# build/checks/) for every polygon still there unchanged; new or changed polygons go without
+# until the next full build. For iterating on a map: a level that ships is built in full.
+FAST = os.environ.get('FAST') == '1'
+CHECKS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'build', 'checks')
+
+
+def polygon_keys(polygons):
+    """An identity for each polygon (corners, facing, atlas layer) that holds from one build to
+    the next: its corners in any order, the way it faces, its texture layer; numbered when the
+    same polygon comes up again."""
+    seen = {}
+    keys = []
+    for p, n, layer in polygons:
+        corners = sorted(tuple(round(float(v), 1) + 0.0 for v in c) for c in p)
+        facing = tuple(round(float(v), 3) + 0.0 for v in n)
+        k = hashlib.sha1(repr((corners, facing, int(layer))).encode()).hexdigest()[:16]
+        seen[k] = seen.get(k, 0) + 1
+        keys.append(k if seen[k] == 1 else f'{k}.{seen[k]}')
+    return keys
+
+
+def load_checks(name):
+    try:
+        with open(os.path.join(CHECKS_DIR, f'{name}.json')) as f:
+            return json.load(f)
+    except FileNotFoundError:
+        raise SystemExit(f'FAST=1 takes the checks of a full build of {name} ({CHECKS_DIR}): build it in full first')
+
+
+def save_checks(name, **parts):
+    path = os.path.join(CHECKS_DIR, f'{name}.json')
+    os.makedirs(CHECKS_DIR, exist_ok=True)
+    checks = {}
+    if os.path.exists(path):
+        with open(path) as f:
+            checks = json.load(f)
+    checks.update(parts)
+    with open(path, 'w') as f:
+        json.dump(checks, f)
+
+
+def backface_twins(tris, g, start, name, extra=()):
+    """reversed_twins of the triangles seen from behind from where the karts go (see
+    visibility.py) and of `extra`; with FAST, of those the last full build of `name` found."""
+    from visibility import exposed_backfaces
+    t0 = time.time()
+    keys = polygon_keys([(t.p, t.n, t.layer) for t in tris])
+    if FAST:
+        saved = set(load_checks(name).get('exposed', []))
+        exposed = {i for i, k in enumerate(keys) if k in saved}
+        how = 'as the last full build had them (FAST)'
+    else:
+        exposed = set(exposed_backfaces([t.p for t in tris], [t.n for t in tris], g, start))
+        save_checks(name, exposed=sorted(keys[i] for i in exposed))
+        how = f'({time.time() - t0:.0f} s)'
+    twins = reversed_twins(tris, exposed | set(extra))
+    print(f'{len(twins)} triangles seen from behind get a reversed twin {how}')
+    return twins
 
 
 def door_frames(glb, tris, margin=256.0, above=192.0):
@@ -1711,9 +1797,8 @@ def reversed_twins(tris, exposed):
 
 def main(glb, disc, outdir):
     global light_maps
-    import time
     from navgrid import NavGrid
-    from visibility import exposed_backfaces
+    t_start = time.time()
     os.makedirs(outdir, exist_ok=True)
     tris, imgs = load(glb)
     light_maps = load_light_maps(imgs)
@@ -1724,14 +1809,10 @@ def main(glb, disc, outdir):
     g = NavGrid([(q.flags, q.pos, q.triangle) for q in out])
 
     # faces seen from behind from anywhere a kart can drive to get a twin facing the other way
-    t0 = time.time()
     s = landmarks[LOOPS['dust2'][0]]
-    exposed = exposed_backfaces([t.p for t in tris], [t.n for t in tris], g, g.nearest(s[0], s[1] or 0, s[2]))
-    twins = reversed_twins(tris, set(exposed) | door_frames(glb, tris))
-    print(f'{len(twins)} triangles seen from behind get a reversed twin ({time.time() - t0:.0f} s)')
-    if twins:
-        out = emit_level(tris + twins, ramps)
-    out = painter_cuts(tris + twins, ramps, out, g, g.nearest(s[0], s[1] or 0, s[2]))
+    start = g.nearest(s[0], s[1] or 0, s[2])
+    twins = backface_twins(tris, g, start, 'dust2', extra=door_frames(glb, tris))
+    out = painter_cuts(tris + twins, ramps, g, start, 'dust2')
     print(f'{len(out)} quadblocks')
     kill_plane(out)
     bases, vrms = base_levels(disc)
@@ -1765,6 +1846,7 @@ def main(glb, disc, outdir):
                 modes=[suffix for suffix, _ in MODES])
     with open(os.path.join(outdir, 'dust2.json'), 'w') as f:
         json.dump(meta, f, indent=1)
+    print(f'built in {time.time() - t_start:.0f} s' + (' (FAST: checks of the last full build)' if FAST else ''))
 
 
 if __name__ == '__main__':

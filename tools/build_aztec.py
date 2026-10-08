@@ -363,7 +363,7 @@ def near_drivable(g, start):
 
 def main(cstrike, disc, outdir):
     from navgrid import NavGrid
-    from visibility import exposed_backfaces
+    t_start = time.time()
     os.makedirs(outdir, exist_ok=True)
     d2.SCALE = SCALE
     # the river's surface at CTR y 0: karts on water terrain are drawn only above y 0 (half
@@ -396,17 +396,13 @@ def main(cstrike, disc, outdir):
     ramps = []
     d2.add_stair_ramps(tris, ramps)
     add_bridge(bsp, sel, charts, ramps)
-    out = d2.emit_level(tris, ramps, near=tri_near)
+    polygons = d2.level_polygons(tris, tri_near)
+    out = d2.emit_level(tris, ramps, near=tri_near, polygons=polygons)
     print(f'{len(out)} quadblocks, {d2.vertex_count(out)} vertices')
     g = NavGrid([(q.flags, q.pos, q.triangle) for q in out])
     start = g.nearest(s[0], s[1] or 0, s[2])
-    t0 = time.time()
-    exposed = exposed_backfaces([t.p for t in tris], [t.n for t in tris], g, start)
-    twins = d2.reversed_twins(tris, set(exposed))
-    print(f'{len(twins)} triangles seen from behind get a reversed twin ({time.time() - t0:.0f} s)')
-    if twins:
-        out = d2.emit_level(tris + twins, ramps, near=tri_near)
-    out = d2.painter_cuts(tris + twins, ramps, out, g, start, near=tri_near)
+    twins = d2.backface_twins(tris, g, start, 'aztec')
+    out = d2.painter_cuts(tris + twins, ramps, g, start, 'aztec', near=tri_near, polygons=None if twins else polygons)
     print(f'{len(out)} quadblocks')
     d2.kill_plane(out, y=kill_y)
     bases, vrms = d2.base_levels(disc)
@@ -427,6 +423,7 @@ def main(cstrike, disc, outdir):
                 spawn=spawns[0], info=info, landmarks=landmarks, tracks={}, modes=[suffix for suffix, _ in d2.MODES])
     with open(os.path.join(outdir, 'aztec.json'), 'w') as f:
         json.dump(meta, f, indent=1)
+    print(f'built in {time.time() - t_start:.0f} s' + (' (FAST: checks of the last full build)' if d2.FAST else ''))
 
 
 if __name__ == '__main__':

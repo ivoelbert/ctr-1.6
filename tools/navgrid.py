@@ -61,7 +61,7 @@ class NavGrid:
         for x in range(self.nx):
             for z in range(self.nz):
                 self.floors[x][z] = self._merge(self.floors[x][z])
-        # walls: (x, z) -> list of (ymin, ymax)
+        # walls: (x, z) -> set of (ymin, ymax)
         self.walls = {}
         for qi, ts in walls:
             for a, b, c in ts:
@@ -108,14 +108,17 @@ class NavGrid:
 
     def _raster_wall(self, a, b, c):
         ymin, ymax = min(a[1], b[1], c[1]), max(a[1], b[1], c[1])
-        # sample the triangle densely in xz
+        # sample the triangle densely in xz (in plain floats: the same sums, faster)
         pts = [a, b, c]
         n = 1 + int(max(np.linalg.norm(np.array([p[0], p[2]]) - np.array([q[0], q[2]])) for p in pts for q in pts) / (CELL / 2))
+        ax, az = float(a[0]), float(a[2])
+        bx, bz = float(b[0]) - ax, float(b[2]) - az
+        cx, cz = float(c[0]) - ax, float(c[2]) - az
+        span = (ymin, ymax)
         for i in range(n + 1):
             for j in range(n + 1 - i):
-                p = a + (b - a) * (i / n) + (c - a) * (j / n)
-                key = self.cell(p[0], p[2])
-                self.walls.setdefault(key, []).append((ymin, ymax))
+                key = self.cell(ax + bx * (i / n) + cx * (j / n), az + bz * (i / n) + cz * (j / n))
+                self.walls.setdefault(key, set()).add(span)
 
     def _blocked(self, cx, cz, y):
         for (lo, hi) in self.walls.get((cx, cz), ()):
@@ -128,6 +131,21 @@ class NavGrid:
         self.node = {}
         self.pos = []
         self.wall_dist = []
+        # the 9 x 9 scans below ask about the same cell at the same height again and again
+        blocked_at, floor_at = {}, {}
+
+        def is_blocked(x2, z2, y):
+            r = blocked_at.get((x2, z2, y))
+            if r is None:
+                r = blocked_at[(x2, z2, y)] = self._blocked(x2, z2, y)
+            return r
+
+        def has_floor(x2, z2, y):
+            r = floor_at.get((x2, z2, y))
+            if r is None:
+                r = floor_at[(x2, z2, y)] = any(abs(y2 - y) < STEP for y2, _ in self.floors[x2][z2])
+            return r
+
         blocked = set()
         for cx in range(self.nx):
             for cz in range(self.nz):
@@ -147,9 +165,9 @@ class NavGrid:
                             if not (0 <= x2 < self.nx and 0 <= z2 < self.nz):
                                 continue
                             dd = max(abs(dx), abs(dz))
-                            if self._blocked(x2, z2, y):
+                            if is_blocked(x2, z2, y):
                                 near_wall = min(near_wall, dd)
-                            elif not any(abs(y2 - y) < STEP for y2, _ in self.floors[x2][z2]):
+                            elif not has_floor(x2, z2, y):
                                 near_edge = min(near_edge, dd)
                     if near_wall <= CLEAR:
                         continue

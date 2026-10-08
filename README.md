@@ -81,6 +81,11 @@ python3 -I tools/build_dust2.py MODEL.glb DISC.bin build/lev   # the track
 node tools/serve.mjs                                            # http://localhost:8642/
 ```
 
+Most of a level build is two checks: which faces are seen from behind, and the painter's-order
+audit (the game sorts faces instead of keeping a depth buffer). `FAST=1` before a build command
+takes their results from the last full build (`build/checks/`) for every polygon that hasn't
+changed instead of running them: for trying edits quickly. Build in full before playing for real.
+
 `?dust2&level=0&mode=1` boots straight into a race on Dust 2 (`mode=0` Time Trial,
 `dust2=b` the tunnels loop, `dust2=free` free drive, `dust2=free&map=aztec` Aztec's free drive,
 `character=N`, `laps=N`; `python3 -I tools/build_aztec.py CSTRIKE_DIR DISC.bin build/lev` builds

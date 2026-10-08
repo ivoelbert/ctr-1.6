@@ -13,6 +13,7 @@ import math
 import os
 import struct
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 
@@ -80,26 +81,42 @@ def audit(quads, views, build_dir, visible, near_first=False, max_leaf=6):
     """Per quadblock: [pixels where something behind it is painted over it from a nearer
     slot, from the same slot, pixels where it is painted over something in front of it,
     views with errors], and per view: (error pixels, same-slot error pixels) or None when its
-    camera was inside something. near_first: the BSP walked near side first."""
+    camera was inside something. near_first: the BSP walked near side first. The views are
+    shared out among a painter process per CPU (every count is a sum over views)."""
     faces = level_faces(quads, visible)
     nodes, order = build_bsp(quads, max_leaf)
     turn = np.empty(len(quads), dtype=np.int64)
     turn[np.array(order)] = np.arange(len(order))
-    buf = bytearray(struct.pack('<6if', len(faces), len(views), WIDTH, HEIGHT, len(nodes), 1 if near_first else 0, FOCAL))
+    body = bytearray()
     for P, qi, fi, ds in faces:
-        buf += struct.pack('<12f3i', *[float(c) for p in P for c in p], 0, 1 if ds else 0, int(turn[qi]))
+        body += struct.pack('<12f3i', *[float(c) for p in P for c in p], 0, 1 if ds else 0, int(turn[qi]))
     for n in nodes:
         if n['leaf']:
-            buf += struct.pack('<7i', 1, 0, 0, -1, -1, n['first'], n['count'])
+            body += struct.pack('<7i', 1, 0, 0, -1, -1, n['first'], n['count'])
         else:
             ax = max(range(3), key=lambda a: abs(n['axis'][a]))
             c = [-1 if x is None else x for x in n['children']]
-            buf += struct.pack('<7i', 0, ax, n['axis'][3], c[0], c[1], 0, 0)
-    for eye, m, anchor in views:
-        buf += struct.pack('<15f', *eye, *m.reshape(9), *anchor)
-    out = subprocess.run([painter_binary(build_dir)], input=bytes(buf), capture_output=True, check=True).stdout
-    per_face = np.frombuffer(out, dtype=np.uint32, count=4 * len(faces)).reshape(-1, 4)
-    per_view = np.frombuffer(out, dtype=np.int32, offset=16 * len(faces)).reshape(-1, 2)
+            body += struct.pack('<7i', 0, ax, n['axis'][3], c[0], c[1], 0, 0)
+    exe = painter_binary(build_dir)
+    # PAINTER_VIEW=n (painter.c's dump of view n) numbers the views of one process
+    jobs = 1 if os.environ.get('PAINTER_VIEW') else max(1, min(os.cpu_count() or 1, len(views)))
+
+    def run(j):
+        mine = range(j, len(views), jobs)
+        buf = bytearray(struct.pack('<6if', len(faces), len(mine), WIDTH, HEIGHT, len(nodes), 1 if near_first else 0, FOCAL))
+        buf += body
+        for i in mine:
+            eye, m, anchor = views[i]
+            buf += struct.pack('<15f', *eye, *m.reshape(9), *anchor)
+        return subprocess.run([exe], input=bytes(buf), capture_output=True, check=True).stdout
+
+    with ThreadPoolExecutor(jobs) as pool:
+        outs = list(pool.map(run, range(jobs)))
+    per_face = np.zeros((len(faces), 4), dtype=np.int64)
+    per_view = np.zeros((len(views), 2), dtype=np.int32)
+    for j, out in enumerate(outs):
+        per_face += np.frombuffer(out, dtype=np.uint32, count=4 * len(faces)).reshape(-1, 4)
+        per_view[j::jobs] = np.frombuffer(out, dtype=np.int32, offset=16 * len(faces)).reshape(-1, 2)
     per_quad = np.zeros((len(quads), 4), dtype=np.int64)
     for (P, qi, fi, ds), row in zip(faces, per_face):
         per_quad[qi] += row

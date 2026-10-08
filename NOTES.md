@@ -156,6 +156,11 @@ the map.
   `tools/inspect_region.py` (a zoomed floor map with a trace).
 - `tools/e2e`: `pursuit.mjs` (autopilot round a route, laps, items), `trace.mjs`,
   `tour.mjs`/`view.mjs` (screenshots at places), `probe.mjs`.
+- Build time: the painter's audit runs a painter.c process per CPU over a share of the views,
+  and the backface rays a thread per CPU (every count is a sum over views: the same result);
+  the level's polygons are paired once for all of the audit's trial cuts. `FAST=1` reuses the
+  last full build's results of both checks per polygon (identified by corners, facing and
+  texture layer; `build/checks/`) instead of running them.
 
 ## Left to do
 

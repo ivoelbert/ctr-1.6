@@ -115,7 +115,7 @@ class Level:
 class Blob:
     def __init__(self):
         self.buf = bytearray()
-        self.ptr_slots = []
+        self.ptr_slots = {}     # slot -> whether it holds a pointer (the last write wins)
 
     def alloc(self, size, align=4):
         pad = (-len(self.buf)) % align
@@ -131,15 +131,15 @@ class Blob:
         """A pointer at `slot` to data offset `target` (None = null, and out of the map)."""
         if target is None:
             self.put(slot, 'I', 0)
-            self.ptr_slots = [s for s in self.ptr_slots if s != slot]
+            self.ptr_slots[slot] = False
             return
         self.put(slot, 'I', target)
-        self.ptr_slots.append(slot)
+        self.ptr_slots[slot] = True
 
     def finish(self):
         pad = (-len(self.buf)) % 4
         self.buf += b'\0' * pad
-        slots = sorted(set(self.ptr_slots))
+        slots = sorted(s for s, live in self.ptr_slots.items() if live)
         out = bytearray(struct.pack('<I', len(self.buf)))
         out += self.buf
         out += struct.pack('<I', 4 * len(slots))
@@ -258,7 +258,7 @@ def write_level(lv: Level):
     b = Blob()
     if lv.base is not None:
         b.buf = bytearray(lv.base.data)
-        b.ptr_slots = list(lv.base.ptr_slots)
+        b.ptr_slots = dict.fromkeys(lv.base.ptr_slots, True)
         hdr = 0
     else:
         hdr = b.alloc(LEVEL_SIZE)
