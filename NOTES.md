@@ -141,6 +141,9 @@ the map.
   Aztec's rope bridge is such decor (func_illusionary planks): the build lays an invisible
   deck along the planks' tops, in the three planes of the beams under them, shaded with the
   planks' light for the kart, and invisible walls under the rails, where CS clips them too.
+  The walls under the landings that face the bridge are only drawn across its width: their
+  top edge is the deck's end, and a kart (which rides a hair below a floor) leaving the bridge
+  ran into it, every time at one end and in some lanes at the other.
 - Budget: Aztec is as big as Dust 2 in CTR units but has nearly twice the drawn surface. Floors
   are cut into cells polygon by polygon (cutting the triangles split every cell their diagonal
   crossed), only near ground the kart can reach (roofs stay whole), at 512 units (Dust 2: 256);

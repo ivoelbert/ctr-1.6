@@ -178,7 +178,10 @@ def make_tris(bsp, sel, charts, near=None):
                 continue
         floor = n[2] > 0.7
         pieces = floor_cells(pts) if floor and (near is None or near(d2.to_ctr(pts))) else [pts]
-        for poly in pieces:
+        solid = [kind != 'decor'] * len(pieces)
+        if kind != 'decor' and under_bridge_end(pts, n):
+            pieces, solid = across_bridge(pts)
+        for poly, poly_solid in zip(pieces, solid):
             uv = chart.uv(bsp, fi, poly)
             for i in range(1, len(poly) - 1):
                 idx = [0, i, i + 1]
@@ -190,7 +193,7 @@ def make_tris(bsp, sel, charts, near=None):
                     idx = [0, i + 1, i]
                     p = poly[idx]
                 t = d2.Tri(d2.to_ctr(p), uv[idx].copy(), chart.layer, d2.dir_to_ctr(n), p.copy(), n.copy())
-                t.solid = kind != 'decor'
+                t.solid = poly_solid
                 if kind == 'water':
                     t.terrain = TERRAIN_WATER
                 tris.append(t)
@@ -244,6 +247,26 @@ def floor_cells(pts):
                 done.append(rest)
         polys = done
     return polys
+
+
+def under_bridge_end(pts, n):
+    """Is face (pts, n) the wall under a landing, facing the bridge from its end? Its top edge is
+    the deck's end, and a kart rides a hair below the deck: leaving the bridge, it ran into it."""
+    for (x, z), facing in ((BRIDGE_DECK[0], 1), (BRIDGE_DECK[-1], -1)):
+        if n[0] * facing > 0.99 and np.all(np.abs(pts[:, 0] - x) < 0.5) and abs(pts[:, 2].max() - z) < 0.5:
+            return pts[:, 1].min() < BRIDGE_Y[1] and pts[:, 1].max() > BRIDGE_Y[0]
+    return False
+
+
+def across_bridge(pts):
+    """A wall under a bridge end cut along the bridge's sides: (pieces, solid), only drawn where
+    the deck meets it."""
+    y0, y1 = BRIDGE_Y
+    middle = _clip(pts, 1, y0, False)
+    middle = None if middle is None else _clip(middle, 1, y1, True)
+    pieces = [(_clip(pts, 1, y0, True), True), (middle, False), (_clip(pts, 1, y1, False), True)]
+    pieces = [(p, s) for p, s in pieces if p is not None]
+    return [p for p, _ in pieces], [s for _, s in pieces]
 
 
 def deck_z(x):
