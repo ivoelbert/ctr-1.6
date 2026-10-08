@@ -1,24 +1,11 @@
-"""Builds the Dust 2 track for CTR from the "De_Dust 2 with real light" model (Neo_minigan, CC-BY-4.0).
+"""The track pipeline every map goes through: textured, lit triangles in map units in, CTR
+level files out (one per mode, each grafted onto Dingo Canyon's), with their textures' atlas and
+minimap. tools/build_map.py feeds it a Counter-Strike map.
 
-  python3 -I tools/build_dust2.py MODEL.glb DISC.bin OUTDIR
-
-DISC.bin is your NTSC-U CTR disc image: Dust 2 is grafted onto Dingo Canyon's level (it
-keeps that track's models -- weapon crates, wumpa fruit, the start banner -- its skybox and
-its textures), so the output contains data from your disc. Never share it.
-
-Writes
-  OUTDIR/dust2.lev        a race round long A and mid (a CTR LEV file, see levwriter.py)
-  OUTDIR/dust2_b.lev      a race the long way round, through B site and the tunnels
-  OUTDIR/dust2_free.lev   the map with no laps, checkpoints everywhere
-                          (each also as *_2p.lev, *_4p.lev and *_tt.lev: see MODES)
-  OUTDIR/*_route.json     each race loop as a dense path, its checkpoints and AI lines (tests)
-  OUTDIR/dust2_atlas.jpg  the model's textures in one image, sampled through tpage mode 3
-  OUTDIR/dust2.json       numbers the page and the tests use (scale, spawn, atlas size, tracks)
-
-The model is in Hammer units (x east, y north, z up). CTR is right-handed with y up (a kart
-facing -z turns left toward -x), so a Hammer point (x, y, z) goes to SCALE * (x - cx, z, -(y - cy)).
-Collision in CTR is one-sided: a quadblock's front is (p2 - p0) x (p1 - p0), so every face is
-wound to face the side its model normal points to (into the playable space).
+A map's units (Hammer's) go to CTR's as SCALE * (x - cx, z - FLOOR_Z, -(y - cy)): CTR is
+right-handed with y up (a kart facing -z turns left toward -x). Collision in CTR is one-sided: a
+quadblock's front is (p2 - p0) x (p1 - p0), so every face is wound to face the side its map
+normal points to (into the playable space).
 """
 import hashlib
 import io
@@ -35,12 +22,11 @@ import numpy as np
 from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from gltf import images, triangles  # noqa: E402
 from levwriter import (FLAG_CAMERA_SEARCH, FLAG_COLLISION_SURFACE, FLAG_GROUND, Level, Node, Quad,  # noqa: E402
                        TexLayout, write_level)
 
-SCALE = 4.0             # CTR units per Hammer unit
-CENTER = (-320.0, 1120.0)  # Hammer x, y of the map's middle
+SCALE = 4.0             # CTR units per map unit
+CENTER = (0.0, 0.0)     # map x, y of the map's middle (CTR's origin): set by the builder
 MAX_EDGE = 800.0        # longest quadblock edge, CTR units
 # floors: the renderer gives up on big faces right under the camera (a big floor quad showed
 # as a hole to the void), so floors are cut along a world grid of FLOOR_CELL units (as retail
@@ -57,7 +43,6 @@ ATLAS_COLS = 4
 PAGE_ALIGN = 32         # texture page origins are 32-texel aligned (TF_VIRTUAL_ATLAS)
 MAX_UV_SPAN = 255 - PAGE_ALIGN
 TPAGE_ATLAS = 3 << 7    # color mode 3
-DOUBLE_SIDED = os.environ.get('DOUBLE_SIDED') == '1'
 
 # Kart lighting: the game shades a kart by the vertex colours of the floor under it (brightness
 # 0x60 and up is full light, less fades it toward black: COLL_FIXED_PlayerSearch_UpdateLighting).
@@ -94,374 +79,6 @@ class Tri:
         self.nh = nh      # unit normal, Hammer space
         self.solid = True  # False: drawn but not collided with (stair risers under a ramp)
         self.terrain = 0   # CTR terrain type (enum TerrainType): 0 asphalt, 4 water...
-
-
-# Model edits for driving.
-# Triangles to leave out: (mesh name) -> indices.
-# Door leaves, taken out (by mesh name: one set of triangles per leaf). The mid doors stand half
-# closed with a gap a kart can't fit through and the long doors make a zig-zag; swung open, the
-# leaves z-fought with the frames and looked broken. The floor was cut around them: patched.
-DOOR_LEAVES = {
-    'part8_part8_0': [{300, 301, 302, 305, 306, 307, 867, 868}, {403, 404, 405, 408, 409, 410, 973, 974}],     # mid
-    'part11_part11_0': [{201, 202, 203, 204, 205, 215, 216, 217, 218, 219, 643, 644},                          # long
-                        {210, 211, 212, 213, 214, 220, 221, 222, 223, 224, 645, 646}],
-}
-REMOVED = {name: set().union(*leaves) for name, leaves in DOOR_LEAVES.items()}
-
-
-def load(glb):
-    js, imgs = images(glb)
-    # Images go in atlas cells 1..11, never 0: a near quadblock's "mosaic" layout word
-    # (u0, v0, clut) is tested by the renderer as a possible pointer into the heap
-    # (DrawLevelOvr1P_GetProjectedMidTexture); clut >= 1024 keeps it far from the heap.
-    layer_of_mat = {i: 1 + js['textures'][m['pbrMetallicRoughness']['baseColorTexture']['index']]['source']
-                    for i, m in enumerate(js['materials'])}
-    tris = []
-    flipped = 0
-    for mat, P, UV, _, name, N in triangles(glb, with_normals=True):
-        layer = layer_of_mat[mat]
-        skip = REMOVED.get(name, ())
-        for k in range(len(P)):
-            if k in skip:
-                continue
-            p = P[k].copy()
-            uv = UV[k] * LAYER_SIZE
-            nk = N[k].copy()
-            geo = np.cross(p[1] - p[0], p[2] - p[0])
-            area2 = np.linalg.norm(geo)
-            if area2 < 1e-3:
-                continue
-            geo /= area2
-            vn = nk.sum(axis=0)
-            if np.dot(geo, vn) < 0:  # wound against its normals: turn it around
-                p = p[[0, 2, 1]]
-                uv = uv[[0, 2, 1]]
-                geo = -geo
-                flipped += 1
-            tris.append(Tri(to_ctr(p), uv.copy(), layer, dir_to_ctr(geo), p, geo))
-    patches = door_floor_patches(glb, tris)
-    tris.extend(patches)
-    slots = door_slot_fills(glb, layer_of_mat)
-    tris.extend(slots)
-    print(f'{len(tris)} triangles ({flipped} turned to face their normals, {len(patches)} floor patches and '
-          f'{len(slots)} slot fills where door leaves were)')
-    fill_black_faces(tris, imgs)
-    return tris, imgs
-
-
-def fill_black_faces(tris, imgs, radius=700.0):
-    """Faces the model's light baking left (mostly) black. Most have a twin somewhere in the map,
-    a lit triangle of the same shape (Dust 2 repeats its crates, frames and steps): they take
-    the nearest twin's texture, corner for corner. The rest take one texel from around them: of
-    the lit faces within radius (facing the same way if there are any), the sample nearest their
-    median brightness, so a fill is no brighter than its surroundings."""
-    lum = {}
-    for i, data in enumerate(imgs):
-        a = np.asarray(Image.open(io.BytesIO(data)).convert('RGB'), dtype=np.float32)
-        lum[i + 1] = 0.299 * a[..., 0] + 0.587 * a[..., 1] + 0.114 * a[..., 2]
-
-    def texel(layer, uv):
-        L = lum[layer]
-        return L[int(np.clip(uv[1], 0, LAYER_SIZE - 1)), int(np.clip(uv[0], 0, LAYER_SIZE - 1))]
-
-    # barycentric sample points: the middle, the corners pulled 20% in, the edge middles pulled in
-    weights = [(1 / 3, 1 / 3, 1 / 3)] + [tuple(0.8 * (k == j) + 0.1 for k in range(3)) for j in range(3)] + \
-              [tuple(0.4 * (k != j) + 0.2 * (k == j) for k in range(3)) for j in range(3)]
-
-    def samples(t):
-        """Points across the face: (luminance, uv)."""
-        return [(texel(t.layer, q), tuple(q)) for q in (np.dot(w, t.uv) for w in weights)]
-
-    def kind(t):
-        return 0 if t.n[1] > 0.7 else 2 if t.n[1] < -0.7 else 1
-
-    # black means unbaked: every sample (near) zero. Dark faces stay as they are: the passages and
-    # their crates are dark in the model's light, and a dark texture is not a broken one (taking
-    # "mostly darker than 10" for black once repainted a dark crate in the long doors passage).
-    rgb = {i + 1: np.asarray(Image.open(io.BytesIO(data)).convert('RGB')) for i, data in enumerate(imgs)}
-
-    def brightest(t):
-        A = rgb[t.layer]
-        return max(int(A[int(np.clip(q[1], 0, LAYER_SIZE - 1)), int(np.clip(q[0], 0, LAYER_SIZE - 1))].max())
-                   for q in (np.dot(w, t.uv) for w in weights))
-
-    black = [i for i, t in enumerate(tris) if brightest(t) < 6]
-    blackset = set(black)
-    centres = np.array([t.p.mean(axis=0) for t in tris])
-    kinds = np.array([kind(t) for t in tris])
-
-    def edges(t):
-        return [float(np.linalg.norm(t.ph[(k + 1) % 3] - t.ph[k])) for k in range(3)]
-
-    def shape(t):
-        return tuple(round(e * 2) / 2 for e in sorted(edges(t)))
-
-    twins = {}
-    for k, t in enumerate(tris):
-        if k not in blackset and min(edges(t)) > 0.5:
-            twins.setdefault(shape(t), []).append(k)
-
-    # a quad's two halves: triangles sharing an edge in one plane
-    def vkey(p):
-        return tuple(np.round(p, 1))
-
-    edge_tris = {}
-    for k, t in enumerate(tris):
-        for e in range(3):
-            edge_tris.setdefault(frozenset((vkey(t.ph[e]), vkey(t.ph[(e + 1) % 3]))), []).append(k)
-
-    def partner(k):
-        t = tris[k]
-        for e in range(3):
-            for m in edge_tris.get(frozenset((vkey(t.ph[e]), vkey(t.ph[(e + 1) % 3]))), ()):
-                if m != k and float(np.dot(tris[m].nh, t.nh)) > 0.999:
-                    return m
-        return None
-
-    def copy_pair(i, j):
-        """Black halves i, j of a quad take a lit quad's texture (twins sharing the same edge)."""
-        ti, tj = tris[i], tris[j]
-        shared = [vkey(p) for p in ti.ph if vkey(p) in {vkey(q) for q in tj.ph}]
-        if len(shared) != 2:
-            return False
-        best = None
-        for k in twins.get(shape(ti), ()):
-            m = partner(k)
-            if m is None or m in blackset or shape(tris[m]) != shape(tj) or kinds[k] != kinds[i]:
-                continue
-            tk, tm = tris[k], tris[m]
-            sk = [vkey(p) for p in tk.ph if vkey(p) in {vkey(q) for q in tm.ph}]
-            if len(sk) != 2:
-                continue
-            for c, d in ((sk[0], sk[1]), (sk[1], sk[0])):
-                # corners of i and j onto corners of k and m: the shared edge either way round
-                to_k = {shared[0]: c, shared[1]: d}
-                oi = [vkey(p) for p in ti.ph if vkey(p) not in shared][0]
-                oj = [vkey(p) for p in tj.ph if vkey(p) not in shared][0]
-                ok = [vkey(p) for p in tk.ph if vkey(p) not in sk][0]
-                om = [vkey(p) for p in tm.ph if vkey(p) not in sk][0]
-                to_k[oi], to_m = ok, {shared[0]: c, shared[1]: d, oj: om}
-                err = sum(abs(np.linalg.norm(np.subtract(a, b)) - np.linalg.norm(np.subtract(to_k[a], to_k[b])))
-                          for a, b in ((shared[0], oi), (shared[1], oi)))
-                err += sum(abs(np.linalg.norm(np.subtract(a, b)) - np.linalg.norm(np.subtract(to_m[a], to_m[b])))
-                           for a, b in ((shared[0], oj), (shared[1], oj)))
-                dist = float(np.linalg.norm(centres[k] - centres[i]))
-                if err < 1.0 and (best is None or dist < best[0]):
-                    best = (dist, k, m, dict(to_k), dict(to_m))
-        if best is None:
-            return False
-        _, k, m, to_k, to_m = best
-        uv_k = {vkey(p): uv for p, uv in zip(tris[k].ph, tris[k].uv)}
-        uv_m = {vkey(p): uv for p, uv in zip(tris[m].ph, tris[m].uv)}
-        ti.layer, tj.layer = tris[k].layer, tris[m].layer
-        ti.uv = np.array([uv_k[to_k[vkey(p)]] for p in ti.ph])
-        tj.uv = np.array([uv_m[to_m[vkey(p)]] for p in tj.ph])
-        return True
-
-    copied = filled = 0
-    done = set()
-    for i in black:
-        j = partner(i)
-        if i not in done and j is not None and j in blackset and j not in done and copy_pair(i, j):
-            done |= {i, j}
-            copied += 2
-    for i in black:
-        if i in done:
-            continue
-        t = tris[i]
-        cands = [k for k in twins.get(shape(t), ()) if kinds[k] == kinds[i]] or twins.get(shape(t), [])
-        if cands:
-            k = min(cands, key=lambda k: float(np.linalg.norm(centres[k] - centres[i])))
-            et, src = edges(t), tris[k]
-            # corners matched so each edge lands on an edge of the same length (edge j runs from
-            # corner j to corner j + 1)
-            best = min(itertools.permutations(range(3)),
-                       key=lambda pm: sum(abs(et[j] - float(np.linalg.norm(src.ph[pm[(j + 1) % 3]] - src.ph[pm[j]])))
-                                          for j in range(3)))
-            t.layer = src.layer
-            t.uv = src.uv[list(best)].copy()
-            copied += 1
-            continue
-        d = np.linalg.norm(centres - centres[i], axis=1)
-        near = [k for k in np.argsort(d) if d[k] < radius and k not in blackset]
-        same = [k for k in near if kinds[k] == kinds[i]]
-        pool = [(lv, tris[k].layer, uv) for k in (same or near) for lv, uv in samples(tris[k]) if lv >= 10]
-        if not pool:
-            continue
-        target = float(np.median([lv for lv, _, _ in pool]))
-        _, layer, uv = min(pool, key=lambda sm: abs(sm[0] - target))
-        t.layer = layer
-        t.uv = np.array([uv, uv, uv])
-        filled += 1
-    print(f'{len(black)} black faces: {copied} take a lit twin\'s texture, {filled} the colour around them')
-
-
-def _chains(edges):
-    """Edges (pairs of vertex keys) -> paths (lists of keys), each from one end to the other."""
-    nbr = {}
-    for a, b in edges:
-        nbr.setdefault(a, []).append(b)
-        nbr.setdefault(b, []).append(a)
-    seen, paths = set(), []
-    for start in [v for v, ns in nbr.items() if len(ns) == 1] + list(nbr):
-        if start in seen:
-            continue
-        path, prev, cur = [start], None, start
-        seen.add(start)
-        while True:
-            nxt = [n for n in nbr[cur] if n != prev and n not in seen]
-            if not nxt:
-                break
-            prev, cur = cur, nxt[0]
-            seen.add(cur)
-            path.append(cur)
-        paths.append(path)
-    return paths
-
-
-def door_slot_fills(glb, layer_of_mat):
-    """The arches and jambs were modelled with a slot where each door leaf's top and hinge edges
-    sat (the leaf filled it). With the leaves out, that slot shows the hollow wall and the sky:
-    close it, zipping the two outlines the leaf's faces left (open edges of the remaining mesh),
-    textured as the surface beside it."""
-    key = lambda p: tuple(np.round(p, 1))  # noqa: E731
-    out = []
-    for mat, P, UV, _, name, N in triangles(glb, with_normals=True):
-        leaves = DOOR_LEAVES.get(name, ())
-        if not leaves:
-            continue
-        removed = set().union(*leaves)
-        uvs = UV * LAYER_SIZE
-        layer = layer_of_mat[mat]
-        pos = {}
-        edge_use = {}
-        for k in range(len(P)):
-            if k in removed:
-                continue
-            for e in range(3):
-                a, b = key(P[k][e]), key(P[k][(e + 1) % 3])
-                pos[a], pos[b] = P[k][e], P[k][(e + 1) % 3]
-                edge_use.setdefault(frozenset((a, b)), []).append(k)
-        for ids in leaves:
-            # the leaf's two big faces: vertices by the side of the leaf they are on
-            normals = []
-            for k in ids:
-                n = np.cross(P[k][1] - P[k][0], P[k][2] - P[k][0])
-                normals.append((np.linalg.norm(n), n / (np.linalg.norm(n) + 1e-12), k))
-            main = max(normals)[1]
-            side = {}
-            for _, n, k in normals:
-                d = float(np.dot(n, main))
-                if abs(d) > 0.9:
-                    for p in P[k]:
-                        side[key(p)] = 0 if d > 0 else 1
-            zmin = min(p[2] for k in ids for p in P[k])
-            open_edges = [[], []]
-            owner = {}
-            for e, ks in edge_use.items():
-                if len(ks) != 1 or len(e) != 2:
-                    continue
-                a, b = tuple(e)
-                if a not in side or b not in side or side[a] != side[b]:
-                    continue
-                if abs(pos[a][2] - zmin) < 0.5 and abs(pos[b][2] - zmin) < 0.5:
-                    continue   # the floor cut: door_floor_patches
-                open_edges[side[a]].append((a, b))
-                owner[frozenset((a, b))] = ks[0]
-            ca, cb = _chains(open_edges[0]), _chains(open_edges[1])
-            if len(ca) != 1 or len(cb) != 1:
-                continue
-            A, B = ca[0], cb[0]
-            if (np.linalg.norm(pos[A[0]] - pos[B[0]]) + np.linalg.norm(pos[A[-1]] - pos[B[-1]]) >
-                    np.linalg.norm(pos[A[0]] - pos[B[-1]]) + np.linalg.norm(pos[A[-1]] - pos[B[0]])):
-                B = B[::-1]
-            i = j = 0
-            while i < len(A) - 1 or j < len(B) - 1:
-                if j == len(B) - 1 or (i < len(A) - 1 and
-                                       np.linalg.norm(pos[A[i + 1]] - pos[B[j]]) <= np.linalg.norm(pos[A[i]] - pos[B[j + 1]])):
-                    tri, ok = [A[i], A[i + 1], B[j]], owner[frozenset((A[i], A[i + 1]))]
-                    i += 1
-                else:
-                    tri, ok = [A[i], B[j], B[j + 1]], owner[frozenset((B[j], B[j + 1]))]
-                    j += 1
-                ph = np.array([pos[v] for v in tri])
-                n = np.cross(ph[1] - ph[0], ph[2] - ph[0])
-                if np.linalg.norm(n) < 1e-6:
-                    continue
-                o = P[ok]
-                on = np.cross(o[1] - o[0], o[2] - o[0])
-                if np.dot(n, on) < 0:   # face the way the surface beside it faces
-                    ph = ph[[0, 2, 1]]
-                    n = -n
-                # texture: the neighbour's mapping, carried across the slot
-                e1, e2 = o[1] - o[0], o[2] - o[0]
-                G = np.array([[e1 @ e1, e1 @ e2], [e1 @ e2, e2 @ e2]])
-                uv = []
-                for p in ph:
-                    rhs = np.array([(p - o[0]) @ e1, (p - o[0]) @ e2])
-                    u, v = np.linalg.solve(G, rhs)
-                    uv.append(uvs[ok][0] + u * (uvs[ok][1] - uvs[ok][0]) + v * (uvs[ok][2] - uvs[ok][0]))
-                nh = n / np.linalg.norm(n)
-                out.append(Tri(to_ctr(ph), np.clip(np.array(uv), 0, LAYER_SIZE - 1), layer, dir_to_ctr(nh), ph, nh))
-    return out
-
-
-def door_floor_patches(glb, tris):
-    """The floor was cut around the closed door leaves: fill where a leaf stood, with the texture
-    of the floor beside it."""
-    out = []
-    floors = [t for t in tris if t.nh[2] > 0.99]
-    for mat, P, UV, _, name, N in triangles(glb, with_normals=True):
-        for ids in DOOR_LEAVES.get(name, ()):
-            pts = np.concatenate([P[k] for k in ids])
-            zmin = pts[:, 2].min()
-            base = pts[np.abs(pts[:, 2] - zmin) < 1.0][:, :2]
-            hull = convex_hull(base)
-            if len(hull) < 3:
-                continue
-            mid = hull.mean(axis=0)
-            # the biggest floor triangle near the door lends its texture: the patch is laid on it,
-            # centred, so it samples the middle of that floor's island (the floor's own mapping,
-            # extended under the door, ran into other islands: black and orange strips)
-            near = [t for t in floors if abs(t.ph[0, 2] - zmin) <= 1.0 and
-                    np.linalg.norm(t.ph[:, :2].mean(axis=0) - mid) < 160]
-            if not near:
-                continue
-            area = lambda t: abs(np.cross(t.ph[1, :2] - t.ph[0, :2], t.ph[2, :2] - t.ph[0, :2])) / 2  # noqa: E731
-            ft = max(near, key=area)
-            A = np.column_stack([ft.ph[:, :2], np.ones(3)])
-            try:
-                to_uv = np.linalg.solve(A, ft.uv)   # Hammer (x, y, 1) -> texel, on that floor
-            except np.linalg.LinAlgError:
-                continue
-            shift = ft.ph[:, :2].mean(axis=0) - mid
-            for i in range(1, len(hull) - 1):
-                tri = np.array([[*hull[0], zmin], [*hull[i], zmin], [*hull[i + 1], zmin]])
-                if np.cross(tri[1] - tri[0], tri[2] - tri[0])[2] < 0:
-                    tri = tri[[0, 2, 1]]
-                n = np.array([0.0, 0.0, 1.0])
-                uv = np.column_stack([tri[:, :2] + shift, np.ones(3)]) @ to_uv
-                out.append(Tri(to_ctr(tri), np.clip(uv, 0, LAYER_SIZE - 1), ft.layer, dir_to_ctr(n), tri, n))
-    return out
-
-
-def convex_hull(pts):
-    pts = sorted(set((round(float(x), 3), round(float(y), 3)) for x, y in pts))
-    if len(pts) < 3:
-        return np.array(pts)
-
-    def cross(o, a, b):
-        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
-    lower, upper = [], []
-    for p in pts:
-        while len(lower) >= 2 and cross(lower[-2], lower[-1], p) <= 0:
-            lower.pop()
-        lower.append(p)
-    for p in reversed(pts):
-        while len(upper) >= 2 and cross(upper[-2], upper[-1], p) <= 0:
-            upper.pop()
-        upper.append(p)
-    return np.array(lower[:-1] + upper[:-1])
 
 
 def pair_quads(tris):
@@ -598,7 +215,7 @@ def quad_block(P9, UV9, layer, n, triangle, solid=True, terrain=0):
     if flags & FLAG_GROUND and light_maps is not None:
         color = [floor_shade(layer, uv) for uv in UV9]
     return Quad(pos=pos, faces=faces, low=low, flags=flags, terrain=terrain, triangle=triangle,
-                double_sided=DOUBLE_SIDED, color=color)
+                color=color)
 
 
 def floor_shade(layer, uv):
@@ -625,17 +242,6 @@ def shade_ramps(out):
                 d = np.abs(P - np.array(p, dtype=np.float64)).sum(axis=1)
                 colors.append(C[int(np.argmin(d))])
             q.color = colors
-
-
-def load_light_maps(imgs):
-    """Blurred luminance of each model texture, by atlas layer (cell 0 is empty)."""
-    from PIL import ImageFilter
-    maps = {}
-    for i, data in enumerate(imgs):
-        im = Image.open(io.BytesIO(data)).convert('RGB').filter(ImageFilter.BoxBlur(4))
-        a = np.asarray(im, dtype=np.float32)
-        maps[i + 1] = 0.299 * a[..., 0] + 0.587 * a[..., 1] + 0.114 * a[..., 2]
-    return maps
 
 
 def bilinear(c, s, t):
@@ -766,55 +372,9 @@ def floor_height(tris, x, z, above):
     return best
 
 
-# Places on the map (Hammer x, y, facing in degrees: 0 = north, 90 = east)
-LANDMARKS = {
-    # the race loop, in order: round the block between T ramp and mid -- outside long ->
-    # long doors -> long A -> CT ramp -> CT spawn -> mid doors -> mid -> back south of the block
-    'race_start': (-280, -500, 90),
-    'ring_bottom_e': (150, -500, 90),
-    'start': (-1500, -700, 90),
-    'ring_bottom': (100, -720, 90),
-    'ring_east': (640, -100, 0),
-    'long_doors': (640, 480, 0),
-    'long_corner': (800, 950, 90),
-    'long_bottom': (1430, 1100, 0),
-    'long_start': (1430, 1330, 0),
-    'long_top': (1430, 2300, 0),
-    'a_site': (1150, 2700, 270),
-    'a_west': (600, 2550, 270),
-    'ct_spawn': (0, 2250, 180),
-    'mid_doors': (-380, 1780, 180),
-    'ct_south': (390, 2000, 180),
-    'a_short_bottom': (320, 1560, 270),
-    'catwalk_west': (0, 1520, 270),
-    'mid_top': (-420, 1450, 180),
-    'mid_bottom': (-420, 420, 180),
-    'mid_exit': (-440, -250, 180),
-    'ring_west': (-470, -100, 180),
-    't_return': (-700, -720, 270),
-    # elsewhere
-    't_spawn': (-560, -774, 0),
-    'b_site': (-1800, 2300, 0),
-    'b_halls': (-800, 2300, 270),
-    'upper_tunnels': (-1850, 1200, 0),
-    'lower_tunnels': (-900, 1400, 90),
-    't_to_tunnels': (-1700, 300, 0),
-    'pit': (1430, 150, 0),
-}
-
-
 def heading(deg):
     """CTR yaw (4096 = full turn) for a compass heading: north is CTR -z (2048), east +x (1024)."""
     return int(round((2048 - deg * 4096 / 360) % 4096))
-
-
-def landmark_positions(tris):
-    out = {}
-    for name, (hx, hy, deg) in LANDMARKS.items():
-        x, _, z = to_ctr([hx, hy, 0.0])
-        y = floor_height(tris, x, z, 4000)
-        out[name] = [int(x), None if y is None else int(y), int(z), heading(deg)]
-    return out
 
 
 def dilate(im, steps=24):
@@ -886,15 +446,6 @@ def add_stair_ramps(tris, out):
     print(f'{len(stairs)} staircases and steps get ramps ({sum(len(s) for s in stairs)} risers)')
 
 
-# The race loops, through landmarks. Both start on long A (the widest straight), heading north.
-LOOPS = {
-    # round the block between T ramp and mid: long A, CT spawn, mid doors, mid, outside long
-    'dust2': ['long_start', 'long_top', 'ct_spawn', 'mid_doors', 'mid_top', 'mid_bottom', 'mid_exit', 'race_start',
-              'ring_bottom_e', 'ring_east', 'long_doors', 'long_corner', 'long_bottom', 'long_start'],
-    # the long way round: long A, CT spawn, B doors, B site, the tunnels, T spawn, outside long
-    'dust2_b': ['long_start', 'long_top', 'ct_spawn', 'b_halls', 'b_site', 'upper_tunnels', 't_to_tunnels', 'start',
-                'ring_bottom', 'ring_east', 'long_doors', 'long_corner', 'long_bottom', 'long_start'],
-}
 NODE_SPACING = 800.0     # checkpoint nodes along the route, CTR units
 ROUTE_RADIUS = 14        # grid cells (64 units) around the route that count as on the track
 ROUTE_REACH = 720.0      # and floors this close to it (xz distance + height difference), CTR units
@@ -1124,7 +675,7 @@ def kill_plane(out, y=-1600, size=4096):
 
 
 # Dingo Canyon's level files, one per mode (BIGFILE entry 8 * level + 1, 3, 5, 7). Each mode
-# loads its own texture file (the entry before) with its own VRAM layout, so Dust 2 is grafted
+# loads its own texture file (the entry before) with its own VRAM layout, so a map is grafted
 # onto each mode's level in turn: the file suffix and the base entry.
 MODES = [('', 1), ('_2p', 3), ('_4p', 5), ('_tt', 7)]
 
@@ -1146,7 +697,7 @@ def base_levels(disc):
 
 # The minimap: CTR draws a track's map as two 80 x 40 halves that share one 4-bit image, each
 # half through its own palette (the top half shows the high two bits of each texel, the bottom
-# half the low two), additively blended. Dust 2's palettes: clear, opaque white (the loop), an
+# half the low two), additively blended. The palettes: clear, opaque white (a route), an
 # added grey (edges) and an opaque dark slate (the floors, like Counter-Strike's radar). Racer
 # icons go at icon start + world position * icon size / world range (UI_Map_GetIconPos); the
 # image sits with its bottom-right corner at (500, 195) on the 512 x 240 screen.
@@ -1382,11 +933,7 @@ def place_pickups(route, g, by_model):
     return out
 
 
-DUST2_SKY = [(170, 190, 220, 1), (230, 200, 160, 1), (200, 210, 230, 1)]
-
-
-def write_modes(outdir, name, out, nodes, spawns, nav, route, g, bases, vrms, minimap, build_name='de_dust2',
-                clear_colors=DUST2_SKY):
+def write_modes(outdir, name, out, nodes, spawns, nav, route, g, bases, vrms, minimap, build_name, clear_colors):
     """The track as one LEV per mode, each grafted onto that mode's Dingo Canyon level, and that
     mode's texture file with the track's minimap drawn in."""
     hitbox_of = {'crate_question': (76, 48), 'crate_fruit': (76, 48), 'fruit': (64, 64)}
@@ -1701,10 +1248,10 @@ def painter_cuts(tris, ramps, g, start, name, near=None, polygons=None):
     return out
 
 
-# Fast builds: FAST=1 skips the two slow checks, which faces are seen from behind and the
-# painter's audit, and takes their results from the last full build of the level (kept in
-# build/checks/) for every polygon still there unchanged; new or changed polygons go without
-# until the next full build. For iterating on a map: a level that ships is built in full.
+# Fast builds: FAST=1 skips the slow check, the painter's audit, and takes its cuts from the last
+# full build of the level (kept in build/checks/) for every polygon still there unchanged; new
+# or changed polygons go uncut until the next full build. For iterating on a map: a level that
+# ships is built in full.
 FAST = os.environ.get('FAST') == '1'
 CHECKS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'build', 'checks')
 
@@ -1743,111 +1290,3 @@ def save_checks(name, **parts):
     with open(path, 'w') as f:
         json.dump(checks, f)
 
-
-def backface_twins(tris, g, start, name, extra=()):
-    """reversed_twins of the triangles seen from behind from where the karts go (see
-    visibility.py) and of `extra`; with FAST, of those the last full build of `name` found."""
-    from visibility import exposed_backfaces
-    t0 = time.time()
-    keys = polygon_keys([(t.p, t.n, t.layer) for t in tris])
-    if FAST:
-        saved = set(load_checks(name).get('exposed', []))
-        exposed = {i for i, k in enumerate(keys) if k in saved}
-        how = 'as the last full build had them (FAST)'
-    else:
-        exposed = set(exposed_backfaces([t.p for t in tris], [t.n for t in tris], g, start))
-        save_checks(name, exposed=sorted(keys[i] for i in exposed))
-        how = f'({time.time() - t0:.0f} s)'
-    twins = reversed_twins(tris, exposed | set(extra))
-    print(f'{len(twins)} triangles seen from behind get a reversed twin {how}')
-    return twins
-
-
-def door_frames(glb, tris, margin=256.0, above=192.0):
-    """Triangles around the doorways whose leaves were taken out: the frames and arches have
-    faces that only the leaves hid from behind (seen through gaps in the arch from a few spots
-    only, too few for the ray sampling to be sure of), so they all get twins."""
-    boxes = []
-    for mat, P, UV, _, name, N in triangles(glb, with_normals=True):
-        for leaves in [DOOR_LEAVES.get(name, ())]:
-            if not leaves:
-                continue
-            pts = np.concatenate([P[k] for ids in leaves for k in ids])
-            boxes.append((pts.min(axis=0) - [margin, margin, 0.0], pts.max(axis=0) + [margin, margin, above]))
-    out = set()
-    for k, t in enumerate(tris):
-        c = t.ph.mean(axis=0)
-        if any(np.all(c >= lo) and np.all(c <= hi) for lo, hi in boxes):
-            out.add(k)
-    return out
-
-
-def reversed_twins(tris, exposed):
-    """Back-to-back copies of the triangles seen from behind (see visibility.py): CTR draws and
-    collides with one side of a face, so a twin facing the other way closes the hole."""
-    out = []
-    for k in sorted(exposed):
-        t = tris[k]
-        r = Tri(t.p[[0, 2, 1]].copy(), t.uv[[0, 2, 1]].copy(), t.layer, -t.n, t.ph[[0, 2, 1]].copy(), -t.nh)
-        r.solid = t.solid
-        r.terrain = t.terrain
-        out.append(r)
-    return out
-
-
-def main(glb, disc, outdir):
-    global light_maps
-    from navgrid import NavGrid
-    t_start = time.time()
-    os.makedirs(outdir, exist_ok=True)
-    tris, imgs = load(glb)
-    light_maps = load_light_maps(imgs)
-    ramps = []
-    add_stair_ramps(tris, ramps)
-    out = emit_level(tris, ramps)
-    landmarks = landmark_positions(tris)
-    g = NavGrid([(q.flags, q.pos, q.triangle) for q in out])
-
-    # faces seen from behind from anywhere a kart can drive to get a twin facing the other way
-    s = landmarks[LOOPS['dust2'][0]]
-    start = g.nearest(s[0], s[1] or 0, s[2])
-    twins = backface_twins(tris, g, start, 'dust2', extra=door_frames(glb, tris))
-    out = painter_cuts(tris + twins, ramps, g, start, 'dust2')
-    print(f'{len(out)} quadblocks')
-    kill_plane(out)
-    bases, vrms = base_levels(disc)
-    window = minimap_window(out)
-    tracks = {}
-    first = None
-    for name, stops in LOOPS.items():
-        print(f'{name}:')
-        nodes, spawns, route, nav = race_setup(out, g, landmarks, stops)
-        map_img = minimap_image(out, window, route['path'])
-        info = write_modes(outdir, name, out, nodes, spawns, nav, route, g, bases, vrms, (window, map_img))
-        with open(os.path.join(outdir, f'{name}_route.json'), 'w') as f:
-            json.dump(route, f)
-        tracks[name] = dict(lev=f'{name}.lev', route=f'{name}_route.json', length=route['length'],
-                            spawn=spawns[0], stops=stops)
-        print(info)
-        if first is None:
-            first = (spawns, nav, route, info)
-
-    # free drive: the first loop's start, pickups and AI lines, checkpoints everywhere, no laps
-    spawns, nav, route, info = first
-    print('dust2_free:')
-    free_nodes, free_cp = free_setup(out, g)
-    for qi, q in enumerate(out):
-        q.checkpoint = free_cp.get(qi, 0xFF)
-    write_modes(outdir, 'dust2_free', out, free_nodes, spawns, nav, route, g, bases, vrms,
-                (window, minimap_image(out, window)))
-    size = build_atlas(imgs, os.path.join(outdir, 'dust2_atlas.jpg'))
-    meta = dict(scale=SCALE, center=CENTER, atlas=dict(image='dust2_atlas.jpg', width=size[0], height=size[1]),
-                spawn=spawns[0], info=info, landmarks=landmarks, tracks=tracks,
-                modes=[suffix for suffix, _ in MODES])
-    with open(os.path.join(outdir, 'dust2.json'), 'w') as f:
-        json.dump(meta, f, indent=1)
-    print(f'built in {time.time() - t_start:.0f} s' + (' (FAST: checks of the last full build)' if FAST else ''))
-
-
-if __name__ == '__main__':
-    main(sys.argv[1], sys.argv[2], sys.argv[3])

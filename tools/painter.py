@@ -18,7 +18,6 @@ from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 
 from levwriter import build_bsp
-from visibility import reachable
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FACE_CORNERS = [(0, 4, 5, 6), (4, 1, 6, 7), (5, 6, 2, 8), (6, 7, 8, 3)]
@@ -45,7 +44,7 @@ def painter_binary(build_dir):
 def chase_views(g, start, every=4, headings=8):
     """(eye, 3x3 view matrix, anchor) for the chase camera behind a kart on every `every`th
     drivable grid cell reachable from `start`, facing `headings` ways."""
-    ok = reachable(g, start)
+    ok = g.reachable(start)
     views = []
     cp, sp = math.cos(CAM_PITCH), math.sin(CAM_PITCH)
     for (cx, cz, _), nid in sorted(g.node.items()):

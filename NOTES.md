@@ -1,8 +1,8 @@
 # Notes
 
-What was learned putting Counter-Strike 1.6's maps into CTR (Dust 2 first, from a model of it;
-then Aztec, from the game's own map file), and what's left. The code has the details; this is
-the map.
+What was learned putting Counter-Strike 1.6's maps into CTR, and what's left. The code has the
+details; this is the map. (The project began with Dust 2 from a Sketchfab model of it, then
+moved every map to Counter-Strike's own map files.)
 
 ## The engine (engine/, ctr-native fc3fa26 + changes)
 
@@ -75,8 +75,8 @@ the map.
 - The minimap: SpawnType1 slot 0 is a struct UIMap (world range, icon size and start, rotation)
   and the image is two global icons ('map-proto8-01'/'-02') that share one 80x40 4-bit image
   in the mode's VRM, each half through its own palette (high/low two bits of a texel). A VRM
-  is two raw 16-bit VRAM blocks, so build_dust2 redraws the texels and palettes (slate
-  floors, the loop in white) in a copy of each mode's VRM; the page loads those too.
+  is two raw 16-bit VRAM blocks, so track.py redraws the texels and palettes (slate floors, a
+  route in white) in a copy of each mode's VRM; the page loads those too.
 - Laps: distToFinish (x8) must exceed 32000 at the line; a lap counts when it jumps from
   < 1200 to > 32000. Checkpoint indices are u8 (255 = none). Mask grab fires on GROUND
   quadblocks that jump more than a quarter lap ahead of the last valid one.
@@ -87,127 +87,121 @@ the map.
   referencing quadblock: share it an odd number of times. Pickups need hitboxes in BSP leaves
   (flag 0x4C0, radius, radius^2, centre above the instance, InstDef pointer).
 
-## Every map (the track pipeline, tools/build_dust2.py)
+## Every map (tools/build_map.py, tools/track.py)
 
-A map comes in as textured, lit triangles in Hammer units (a map's own units; CTR's are 4 times
-smaller) and goes out as Dingo Canyon's four LEVs with its geometry in place of the canyon's.
+A map comes in from its file (tools/goldsrc.py) as textured, lit polygons in map units
+(Hammer's; CTR's are 4 times smaller) and goes out as Dingo Canyon's four LEVs with its geometry
+in place of the canyon's.
 
-- Grafted onto Dingo Canyon (entry 1): its models, skybox, textures. Along the route
-  (`place_pickups`): weapon crates in rows of four across the track, wumpa fruit in lines
-  along it, two fruit crates, and the start banner over the start line.
+- Grafted onto Dingo Canyon (entry 1): its models, skybox, textures. Free drive's route runs
+  from the T spawn to the CT spawn and back; along it (`place_pickups`), weapon crates in rows of
+  four across the track, wumpa fruit in lines along it and two fruit crates.
+- Floors the kart can get near are cut along a world grid (a map's FLOOR_CELL): the renderer
+  gave up on big floor quads right under the camera (holes to the void). Polygon by polygon, so
+  whole cells stay single quads (cutting triangles split every cell their diagonal crossed);
+  roofs and ledges no one reaches stay whole. Floor T-junctions are closed.
 - Stairs get invisible ramps (tools/stairs.py).
 - Karts are shaded by the vertex colours of the floor under them, so floors carry the map's
-  baked light as vertex colours (sunlit sand = 0x60, full light); the atlas shader leaves
-  vertex colours out, so they only light the karts. Stair ramps take the nearest floor's.
+  light as vertex colours (sunlit sand = 0x60, full light); the atlas shader leaves vertex
+  colours out, so they only light the karts. Stair ramps take the nearest floor's.
 - Free drive's checkpoint nodes each point at a twin straight above: the wrong-way test
   compares the heading with the way between a node's next two nodes, which is then vertical.
-- Floors near a loop that the nav grid doesn't reach take the nearest route point's checkpoint
-  (`ROUTE_REACH`); pickups without floor at their spot take the nearest drivable one.
 - The painter's audit (`tools/painter.py`, `tools/painter.c`, compiled with `cc` during the
   build): the level is rendered at half resolution from the chase camera at every 4th drivable
   grid cell in 8 directions (~12,000 views on Dust 2, ~16,000 on Aztec), once with a depth
   buffer and once checking the game's slots, and the polygons whose quadblocks have things
   behind them painted over them (40 pixels or more in all) are cut to 256 units, then the ones
-  still at it to 128, as many as the vertex budget takes. On Dust 2, out of order pixels went
-  from 326,000 (the fixed walk, uncut walls) to 48,000, for ~800 more quadblocks (61,600 of
-  the 65,536 vertices), and the A-site crates no longer show through the wall of long A.
-
-## Dust 2 (tools/build_dust2.py, from its model)
-
-- Model: "De_Dust 2 with real light" (Neo_minigan, CC-BY-4.0): 9061 triangles in Hammer
-  units, 11 baked 1024^2 atlases. Hammer (x, y, z) -> CTR 4 * (x + 320, z, -(y - 1120)).
-- Mid doors and long doors are taken out (see Left to do).
-- The model's light baking left ~270 faces (mostly) black: they take a texel from around them
-  (`fill_black_faces`), as dim as their surroundings.
-- Two race loops (`LOOPS`), both starting on long A heading north: round the block between T
-  ramp and mid (outside long, long doors, long A, CT ramp, CT spawn, mid doors, mid; 36034
-  units), and the long way round (long A, CT spawn, B doors, B site, upper tunnels, T spawn,
-  outside long; 52036 units). Each is its own LEV (dust2.lev, dust2_b.lev); the page loads
-  the chosen one into Dingo Canyon's slot and renames it. A slot's eight BIGFILE entries can
-  take any of them: the CTR menus mode puts the tunnels loop in Dragon Mines' slot too.
+  still at it to 128, as many as the vertex budget takes. Dust 2: 70,500 + 44,500 pixels out of
+  order (nearer slot + same slot) down to 2,600 + 35,500, for 760 more quadblocks.
+- Build time: the audit runs a painter.c process per CPU over a share of the views (its counts
+  are sums over views: the same result), and the level's polygons are paired once for all its
+  trial cuts. `FAST=1` takes the cuts of the last full build per polygon (identified by
+  corners, facing and texture layer; `build/checks/`) instead of running it.
 
 ## Counter-Strike 1.6 map files (tools/goldsrc.py)
 
-- The game's own map files (GoldSrc BSP 30) carry everything the Sketchfab model of Dust 2 was
-  made from: convex faces with a texture mapping, the textures (8-bit + palette, in the map or
-  in WADs) and baked light (RGB samples every 16 texels per face, per light style). goldsrc.bake
-  gives each face a chart in 1024^2 atlas layers, texture times light, so the track pipeline
-  takes it as it took the model.
+- A map file (GoldSrc BSP 30) has the world and the brush entities as convex faces with a
+  texture mapping, the textures (8-bit + palette, in the map or in the WADs worldspawn names)
+  and baked light (RGB samples every 16 texels per face, per light style). goldsrc.bake gives
+  each face a chart in 1024^2 atlas layers, texture times light.
 - Light grids: the size of a face's grid follows the engine's float arithmetic (each texture
   coordinate summed in double, stored as a float); in double precision a few hundred faces per
   map read the wrong samples. With it, every face's grid tiles the lighting lump exactly.
 - Brightness: about light / 116 (GoldSrc's lightmaps are overbright), fitted to the Dust 2 model
   at 10,000 matched points; shadows lifted 15% of the way to the plain texture (SHADOW_LIFT).
-- Edits per map (in its build script): brush entities kept or left out by class or model
-  number, textures swapped, tool textures ('sky', 'clip', triggers) and alpha-tested ones ('{':
-  vines, rungs; the atlas has no alpha yet) out.
+- The entities are read from their lump: a '{' byte can come earlier in the file (Dust 2's
+  planes have one), and parsing from there found no WADs (grey Dust 2).
+- Edits per map (tools/maps/MAP.py): brush entities kept or left out by class or model number,
+  textures swapped; tool textures ('sky', 'clip', triggers) and alpha-tested ones ('{': vines,
+  rungs; the atlas has no alpha yet) are left out everywhere. Counter-Strike culls back faces
+  too, so nothing on a map is seen from behind.
 - Clip: Counter-Strike keeps players on things that are only drawn with 'clip' brushes, which
   the map file keeps only in its collision hulls (planes, no faces; a point probe of hull 1
-  shows where). A map's build lays its own invisible floors and walls there.
+  shows where). A map's module lays its own invisible floors and walls there (extra_quads).
 - Water: the engine draws a kart on water/mud terrain only above y 0 (half sunk), so a map with
   water is shifted so its surface is at y 0, and the surface is a floor with the water terrain
   (70% speed, the water sound). A liquid brush is drawn from both sides: only each one's top
   is the water floor (its inside-out bottom painted over the real one everywhere). Everything
   under the surface is clipped off: never seen, and painted after it (out of order) it showed.
+- Spawns: free drive starts in the middle of the T spawn points, facing the way most of them
+  face (Counter-Strike's yaw: 0 east, 90 north).
 
-## Aztec (tools/build_aztec.py)
+## Dust 2 (tools/maps/de_dust2.py)
+
+- As Counter-Strike has it, doors and all. It draws about two thirds of Aztec's surface: sharper
+  textures (0.55 texels per unit, 12 atlas layers), a 256-unit floor grid and 800-unit walls,
+  49,600 vertices.
+- The mid doors stand half open with a 39-unit gap (a Counter-Strike player is 32 wide): a kart
+  doesn't fit, so it goes round (long A, short A or B). The model the project began with had the
+  leaves taken out; from the map file that means patching the floor, jambs and arch the map
+  compiler cut away where the leaves stood.
+
+## Aztec (tools/maps/de_aztec.py)
 
 - Edits: the wall tops are a 16-pixel barrel texture that reads as flat yellow from a kart on
   higher ground, swapped for the walls' stone; the river and the pool are the water floor.
-- The rope bridge is decor (func_illusionary planks), with clip under it: the build lays an
-  invisible deck along the planks' tops, in the three planes of the beams under them, shaded
-  with the planks' light for the kart, and invisible walls under the rails, where Counter-Strike
-  clips them too. The walls under the landings that face the bridge are only drawn across its
-  width: their top edge is the deck's end, and a kart (which rides a hair below a floor) leaving
-  the bridge ran into it, every time at one end and in some lanes at the other.
-- Budget: Aztec is as big as Dust 2 in CTR units but has nearly twice the drawn surface. Floors
-  are cut into cells polygon by polygon (cutting the triangles split every cell their diagonal
-  crossed), only near ground the kart can reach (roofs stay whole), at 512 units (Dust 2: 256);
-  walls up to 1200 (800). 13,500 quadblocks, 57,300 vertices before the painter's cuts, which
+- The rope bridge is decor (func_illusionary planks), with clip under it: an invisible deck
+  along the planks' tops, in the three planes of the beams under them, shaded with the planks'
+  light for the kart, and invisible walls under the rails, where Counter-Strike clips them too.
+  The walls under the landings that face the bridge are only drawn across its width: their top
+  edge is the deck's end, and a kart (which rides a hair below a floor) leaving the bridge ran
+  into it, every time at one end and in some lanes at the other.
+- Budget: as big as Dust 2 in CTR units but nearly twice the drawn surface: a 512-unit floor
+  grid, walls up to 1200; 13,500 quadblocks, 57,400 vertices before the painter's cuts, which
   then take the worst offenders that fit under 64,000.
 
 ## Tools
 
-- `tools/navgrid.py` drivable grid + A*, `tools/route.py`, `tools/floor_map.py` (maps),
-  `tools/inspect_region.py` (a zoomed floor map with a trace).
-- `tools/e2e`: `pursuit.mjs` (autopilot round a route, laps, items), `trace.mjs`,
-  `tour.mjs`/`view.mjs` (screenshots at places), `probe.mjs`.
-- Build time: the painter's audit runs a painter.c process per CPU over a share of the views,
-  and the backface rays a thread per CPU (every count is a sum over views: the same result);
-  the level's polygons are paired once for all of the audit's trial cuts. `FAST=1` reuses the
-  last full build's results of both checks per polygon (identified by corners, facing and
-  texture layer; `build/checks/`) instead of running them.
+- `tools/navgrid.py`: the drivable grid (from the level's own collision data), A*, what's
+  reachable from where.
+- `tools/e2e`: `launcher.mjs` (the launcher, then a map from it), `smoke.mjs` (boots and
+  screenshots; fake gamepads for split screen), `shots.mjs` (screenshots at places on a map),
+  `pursuit.mjs` (an autopilot along a map's free-drive route: snags and stuck spots).
+- `tools/roundtrip.py` rebuilds a retail level with levwriter (a test of the writer).
 
 ## Left to do
 
-- More maps: any Counter-Strike 1.6 map file goes through goldsrc.py; each needs its edits and
-  landmarks (README, Adding a map). Dust 2 could come from its map file too.
-- Aztec: a race loop; its vines and ladder rungs (alpha-tested) aren't drawn; its sky is
-  Dingo Canyon's; it uses 64,000 of the 65,536 vertices (merging the coplanar fragments the
-  map compiler splits walls into would free room, and let the painter's audit cut more).
-- Track select previews and menu maps still show Dingo Canyon's and Dragon Mines'.
+- Races, the same way for every map: a loop through landmarks, Time Trial, CTR's own menus with
+  the maps in retail tracks' places. (Dust 2 had two loops from its model: long A, CT spawn,
+  mid doors, mid, outside long; and the long way through B site and the tunnels.)
+- More maps, each a module in tools/maps.
+- Map edits that cut into the world, like taking Dust 2's door leaves out (see Dust 2).
+- Aztec: its vines and ladder rungs (alpha-tested) aren't drawn; its sky is Dingo Canyon's; it
+  uses 64,000 of the 65,536 vertices (merging the coplanar fragments the map compiler splits
+  walls into would free room, and let the painter's audit cut more).
+- Track select previews and menu maps still show Dingo Canyon's.
 - Collision-only quadblocks (stair ramps, the kill plane) use atlas layer 15, which the atlas
   shader discards, and stay out of the visibility lists (a quadblock without textures is drawn
   black, with texture page 0).
-- Floors are cut along a world grid (Dust 2: 256 units), and floor T-junctions closed: the renderer
-  gave up on big floor quads right under the camera (holes to the void), and floor pieces split
-  their own way left dotted cracks. The 1-pixel cracks where neighbouring quadblocks are
-  subdivided differently by distance (the PS1 snaps split points to whole pixels) are covered
-  by the atlas polygons' 0.6-pixel dilation. Leaf render flags 4X1/4X2/4X4 didn't help (4X1
-  adds sparkles). Walls aren't T-junction-fixed: past 65536 vertices (u16 indices).
+- The 1-pixel cracks where neighbouring quadblocks are subdivided differently by distance (the
+  PS1 snaps split points to whole pixels) are covered by the atlas polygons' 0.6-pixel dilation.
+  Leaf render flags 4X1/4X2/4X4 didn't help (4X1 adds sparkles). Walls aren't
+  T-junction-fixed: past 65536 vertices (u16 indices).
 - Painter's sort: what the audit still finds is mostly same-slot ties inside one BSP leaf or
   between leaves the split planes don't separate (splitting at wall planes might help), and
-  faces under 64 units apart (one slot). More cuts cost vertices: 4000 left.
-- Dust 2's door leaves are taken out (swung open, they z-fought with the frames). The frames had faces
-  only the leaves hid from behind: every triangle around a doorway gets a reversed twin, as
-  does any triangle a ray from a reachable spot hits from behind (tools/visibility.py). The
-  arches and jambs had a slot where each leaf's edge sat (the leaf filled it): the two outlines
-  the leaf's faces left (open mesh edges) are zipped closed with the arch's texture.
-- The memory pool is 32 MiB on the web (the levels are ~7.7 MB, 16,000 quadblocks).
-- Dust 2: an edge at A site (CTR ~6300, -6700) is two steps (ramped, drivable) for most of its width
-  and a 32-unit ledge (a wall, in Counter-Strike too) for the rest; the nav grid's 64-unit
-  cells blur the two, so a tour route can cut across the ledge.
-- Driving off-centre round both Dust 2 loops (`OFFSET`) and a tour of every landmark (`CONTINUE`)
-  found no snags beyond real obstacles (crates, the 90-degree corner at the top of long A).
+  faces under 64 units apart (one slot).
+- The autopilot (`pursuit.mjs`) gets stuck where it cuts a corner: on Aztec, the end of the wall
+  west of the bridge's tunnel (map x -1664), both ways.
+- The memory pool is 32 MiB on the web (a level is up to ~7.5 MB, 15,000 quadblocks).
 - 2P/4P: work (tested with fake gamepads, `tools/e2e/lib.mjs`). With one gamepad, the gamepad
   is player 1 and the keyboard player 2.

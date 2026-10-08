@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CTR on Dust 2</title>
+<title>CTR 1.6</title>
 <style>
   :root {
     color-scheme: dark;
@@ -33,13 +33,7 @@
   @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
   .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
   .panel h2 { margin: 0 0 12px; font-size: 13px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--muted); }
-  .modes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  @media (max-width: 480px) { .modes { grid-template-columns: 1fr; } }
-  .mode { text-align: left; background: var(--panel-2); color: var(--text); border: 2px solid transparent; border-radius: 10px; padding: 12px; cursor: pointer; font: inherit; }
-  .mode b { display: block; font-size: 16px; margin-bottom: 2px; }
-  .mode span { color: var(--muted); font-size: 13px; }
-  .mode[aria-pressed="true"] { border-color: var(--accent); background: #3a2510; }
-  .row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 14px; align-items: end; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; }
   label { display: grid; gap: 4px; color: var(--muted); font-size: 13px; }
   select { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: inherit; min-width: 160px; }
   #go { margin-top: 18px; width: 100%; padding: 14px; font: 700 18px/1 system-ui, sans-serif; color: #1a0f04; background: linear-gradient(180deg, var(--accent-2), var(--accent)); border: 0; border-radius: 10px; cursor: pointer; }
@@ -58,7 +52,6 @@
     background: rgba(20, 14, 8, .92); color: var(--text); border: 1px solid var(--accent); border-radius: 8px;
     padding: 8px 14px; font: 13px/1.4 ui-monospace, monospace; pointer-events: none; opacity: 0; transition: opacity .3s; }
   #toast.show { opacity: 1; }
-  .off { display: none !important; }
 </style>
 </head>
 <body>
@@ -68,22 +61,19 @@
 
 <div id="launcher" hidden>
   <div class="wrap">
-    <h1>Crash Team Racing <span class="x">×</span> de_dust2</h1>
-    <p class="sub">CTR's own driving, AI and weapons (the decompiled game, running in your browser) on
-      Counter-Strike's Dust 2: two race loops through long doors, long A, CT spawn, mid, B site and
-      the tunnels, or the whole map to drive round.</p>
+    <h1>Crash Team Racing <span class="x">×</span> Counter-Strike 1.6</h1>
+    <p class="sub">CTR's own driving (the decompiled game, running in your browser) on Counter-Strike
+      1.6's maps, built from the game's own map files. Free drive for now: pick a map and drive it
+      round.</p>
     <p id="nojspi" hidden>This browser can't run the game: it needs WebAssembly JSPI, which Chrome and
       Edge have had since version 137. Open this page in one of those.</p>
     <div class="grid">
       <div class="panel">
-        <h2>Mode</h2>
-        <div class="modes" id="modes">
-          <button class="mode" data-mode="race" aria-pressed="true"><b>Race</b><span>Seven CTR racers, weapon crates, wumpa fruit</span></button>
-          <button class="mode" data-mode="tt" aria-pressed="false"><b>Time Trial</b><span>You, the clock and the loop</span></button>
-          <button class="mode" data-mode="free" aria-pressed="false"><b>Free drive</b><span>A whole map, no laps: Dust 2 or Aztec</span></button>
-          <button class="mode" data-mode="menus" aria-pressed="false"><b>CTR menus</b><span>The whole game: Dust 2 in Dingo Canyon's place, Dust 2 Tunnels in Dragon Mines'</span></button>
-        </div>
+        <h2>Free drive</h2>
         <div class="row">
+          <label>Map
+            <select id="map"></select>
+          </label>
           <label>Racer
             <select id="character">
               <option value="0">Crash</option><option value="1">Cortex</option><option value="2">Tiny</option>
@@ -94,28 +84,14 @@
               <option value="15">Nitros Oxide</option>
             </select>
           </label>
-          <label id="mapBox" class="off">Map
-            <select id="map">
-              <option value="dust2">Dust 2</option>
-              <option value="aztec">Aztec</option>
-            </select>
-          </label>
-          <label id="trackBox">Track
-            <select id="track">
-              <option value="dust2">Long A and mid</option>
-              <option value="dust2_b">The long way: B site and tunnels</option>
-            </select>
-          </label>
-          <label id="playersBox">Players
+          <label>Players
             <select id="players"><option>1</option><option>2</option><option>3</option><option>4</option></select>
           </label>
-          <label id="lapsBox">Laps
-            <select id="laps"><option>1</option><option selected>3</option><option>5</option><option>7</option></select>
-          </label>
         </div>
+        <p class="note" id="nomaps" hidden>No maps built yet: <code>./play.sh</code> builds them from your
+          Counter-Strike 1.6 install.</p>
         <p class="note" id="playersNote" hidden>Split screen: every player past the first needs a gamepad
-          (with one gamepad, it drives player 1 and the keyboard player 2). Three or four players race
-          without the AI racers.</p>
+          (with one gamepad, it drives player 1 and the keyboard player 2).</p>
         <div id="discpick">
           <label>Your NTSC-U CTR disc image (.bin, MODE2/2352)
             <input type="file" id="discfile" accept=".bin">
@@ -142,10 +118,8 @@
         <p class="note">A gamepad works too, with CTR's own buttons. Power slide: hold Right Shift
           through a turn and tap Left Shift when the exhaust turns black (either Shift starts the
           slide, the other one boosts); three boosts in a row and you're flying.</p>
-        <p class="note">Map: "De_Dust 2 with real light" by
-          <a href="https://sketchfab.com/neominigan" target="_blank" rel="noopener">Neo_minigan</a>,
-          <a href="http://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC-BY-4.0</a>.
-          Crash Team Racing © 1999 Sony / Naughty Dog. Runs on
+        <p class="note">Maps: Counter-Strike 1.6 © Valve (de_dust2 by Dave Johnston, de_aztec by
+          Christopher "Narby" Auty). Crash Team Racing © 1999 Sony / Naughty Dog. Runs on
           <a href="https://github.com/CTR-tools/ctr-native" target="_blank" rel="noopener">ctr-native</a>.</p>
       </div>
     </div>
@@ -252,34 +226,23 @@
     navigator.clipboard.writeText(text).then(() => toast('Copied: ' + text), () => toast(text));
   }, true);
 
-  // Dust 2 takes Dingo Canyon's slot (level 0): its LEVs replace the 1P, 2P, 4P and
-  // Time Trial/Relic files (BIGFILE entries 1, 3, 5, 7; each is grafted onto the one it
-  // replaces, to match that mode's textures), its VRMs (those textures, with a Dust 2
-  // minimap) entries 0, 2, 4, 6, and the model's textures go in the atlas the renderer
-  // samples for tpage mode 3 ("CTRA", width, height, RGBA).
-  const TRACK_NAMES = { dust2: 'DUST 2', dust2_b: 'DUST 2 TUNNELS', dust2_free: 'DUST 2', aztec_free: 'AZTEC' };
-  // which map a track file belongs to: its meta (atlas, landmarks) is MAP.json
-  const mapOf = (name) => (name.startsWith('aztec') ? 'aztec' : 'dust2');
-  // tracks: { slot (level ID): track file name }, e.g. { 0: 'dust2' }. A slot's eight BIGFILE
-  // entries (8 * slot + 0..7) take the track's four VRMs and four LEVs.
-  async function loadDust2(tracks) {
-    const base = params.get('dust2dir') || 'lev/';
-    // one atlas for the session: every slot's track comes from one map
-    const meta = await (await fetch(base + mapOf(Object.values(tracks)[0]) + '.json', { cache: 'no-store' })).json();
+  // The map takes Dingo Canyon's slot (level 0): its LEVs replace the 1P, 2P, 4P and Time Trial
+  // files (BIGFILE entries 1, 3, 5, 7; each is grafted onto the one it replaces, to match that
+  // mode's textures), its VRMs (those textures, with the map's minimap) entries 0, 2, 4, 6, and
+  // its textures go in the atlas the renderer samples for tpage mode 3 ("CTRA", width, height,
+  // RGBA). lev/maps.json lists the maps built: { dust2: 'Dust 2', ... }.
+  const mapList = fetch('lev/maps.json', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : {})).catch(() => ({}));
+  async function loadMap(map) {
+    const title = (await mapList)[map] || map;
+    const meta = await (await fetch(`lev/${map}.json`, { cache: 'no-store' })).json();
     Module.FS.mkdirTree('/assets/override');
     const pad = (n) => String(n).padStart(3, '0');
-    Module.ctrRename = {};
-    for (const [slot, name] of Object.entries(tracks)) {
-      for (const [suffix, k] of [['', 1], ['_2p', 3], ['_4p', 5], ['_tt', 7]]) {
-        // each mode's level, and its textures with the Dust 2 minimap drawn in (entry before)
-        const entry = 8 * Number(slot) + k;
-        const label = TRACK_NAMES[name] || 'Dust 2';
-        Module.FS.writeFile(`/assets/override/${pad(entry)}.bin`, await fetchWithProgress(`${base}${name}${suffix}.lev`, label));
-        Module.FS.writeFile(`/assets/override/${pad(entry - 1)}.bin`, await fetchWithProgress(`${base}${name}${suffix}.vrm`, label));
-      }
-      Module.ctrRename[slot] = TRACK_NAMES[name] || 'DUST 2';
+    for (const [suffix, k] of [['', 1], ['_2p', 3], ['_4p', 5], ['_tt', 7]]) {
+      Module.FS.writeFile(`/assets/override/${pad(k)}.bin`, await fetchWithProgress(`lev/${map}_free${suffix}.lev`, title));
+      Module.FS.writeFile(`/assets/override/${pad(k - 1)}.bin`, await fetchWithProgress(`lev/${map}_free${suffix}.vrm`, title));
     }
-    const jpg = await fetchWithProgress(base + meta.atlas.image, 'Textures');
+    Module.ctrRename = { 0: title };
+    const jpg = await fetchWithProgress(`lev/${meta.atlas.image}`, 'Textures');
     const bitmap = await createImageBitmap(new Blob([jpg], { type: 'image/jpeg' }));
     const { width, height } = bitmap;
     const cv = new OffscreenCanvas(width, height);
@@ -293,7 +256,6 @@
     file.set(pixels, 12);
     Module.FS.mkdirTree('/assets/dust2');
     Module.FS.writeFile('/assets/dust2/atlas.rgba', file);
-    window.ctrDust2 = meta;
   }
 
   async function loadDisc(file) {
@@ -315,7 +277,7 @@
     onRuntimeInitialized() { runtimeReady(); },
   };
 
-  // choice: { tracks: { slot: 'dust2' | 'dust2_b' | 'dust2_free' } | null, boot: {level, mode, character, laps, players} | null }
+  // choice: { map: 'dust2' | ... | null (a CTR track), boot: { level, mode, character, laps, players } }
   // The memory card (/memcards, see engine/platform/native_memcard.c) lives in IndexedDB, so
   // records, ghosts and Adventure saves outlast the page.
   async function mountMemoryCard() {
@@ -338,20 +300,13 @@
 
   let choiceName = '';
   async function start(choice, discFile) {
-    choiceName = choice.tracks ? Object.values(choice.tracks).join('+') : '';
+    choiceName = choice.map ? `${choice.map}_free` : '';
     await runtimeReadyPromise;
     const disc = await loadDisc(discFile);
     await mountMemoryCard();
     Module.FS.mkdir('/assets');
     Module.FS.writeFile('/assets/ctr-u.bin', disc);
-    if (choice.tracks) await loadDust2(choice.tracks);
-    for (const extra of (params.get('files') || '').split(',').filter(Boolean)) {
-      // extra=SRC_URL:DEST_PATH, e.g. lev/dust2.lev:/assets/override/001.bin
-      const [src, dst] = extra.split(':');
-      const bytes = await fetchWithProgress(src, src);
-      Module.FS.mkdirTree(dst.slice(0, dst.lastIndexOf('/')));
-      Module.FS.writeFile(dst, bytes);
-    }
+    if (choice.map) await loadMap(choice.map);
     Module.ctrBoot = choice.boot;
     say('');
     launcher.hidden = true;
@@ -363,70 +318,46 @@
   // The engine suspends its game loop at each VBlank wait through JSPI.
   const hasJspi = typeof WebAssembly.Suspending === 'function' && typeof WebAssembly.promising === 'function';
 
-  // ?level=N&mode=0|1|2&character=N&laps=N&players=N[&dust2[=b|free|menus][&dust2slot=N]] boots
-  // straight away (tests, links);
-  // with no parameters the launcher asks.
+  // A map's free drive: one player in Time Trial (laps 99: it never ends), two to four in VS.
+  const freeDrive = (map, character, players) =>
+    ({ map, boot: { level: 0, mode: players === 1 ? 0 : 2, character, laps: 99, players } });
+
+  // ?map=dust2[&players=N][&character=N] drives a map straight away; ?level=N&mode=0|1|2[&laps=N]
+  // boots a CTR track (tests, links); with no parameters the launcher asks.
   if (!hasJspi) {
     launcher.hidden = false;
     document.getElementById('nojspi').hidden = false;
     document.getElementById('go').disabled = true;
-  } else if (params.has('level') || params.has('dust2') || params.has('auto')) {
-    const boot = params.has('level') ? {
-      level: Number(params.get('level')), mode: Number(params.get('mode') ?? 0),
-      character: Number(params.get('character') ?? 0), laps: Number(params.get('laps') ?? 3),
-      players: params.has('players') ? Number(params.get('players')) : undefined,
-    } : null;
-    const which = params.get('dust2');
-    const slot = Number(params.get('dust2slot') ?? 0);  // the level ID it takes
-    const map = params.get('map') || 'dust2';           // &map=aztec: Aztec (free drive only)
-    const tracks = !params.has('dust2') ? null
-      : which === 'menus' ? { 0: 'dust2', 1: 'dust2_b' }   // as the launcher's CTR menus mode
-      : map !== 'dust2' ? { [slot]: `${map}_free` }
-      : { [slot]: { free: 'dust2_free', b: 'dust2_b' }[which] || 'dust2' };
-    start({ tracks, boot }).catch((e) => { say(String(e)); console.error(e); });
+  } else if (params.has('map') || params.has('level')) {
+    const character = Number(params.get('character') ?? 0);
+    const players = params.has('players') ? Number(params.get('players')) : undefined;
+    const choice = params.has('map') ? freeDrive(params.get('map'), character, players ?? 1) : {
+      map: null,
+      boot: { level: Number(params.get('level')), mode: Number(params.get('mode') ?? 0), character,
+        laps: Number(params.get('laps') ?? 3), players },
+    };
+    start(choice).catch((e) => { say(String(e)); console.error(e); });
   } else {
     launcher.hidden = false;
-    let mode = 'race';
-    const modes = document.getElementById('modes');
-    const lapsBox = document.getElementById('lapsBox');
-    const trackBox = document.getElementById('trackBox');
-    const playersBox = document.getElementById('playersBox');
+    const mapSel = document.getElementById('map');
     const playersSel = document.getElementById('players');
-    const showPlayersNote = () => {
-      document.getElementById('playersNote').hidden = playersBox.classList.contains('off') || playersSel.value === '1';
-    };
-    playersSel.addEventListener('change', showPlayersNote);
-    modes.addEventListener('click', (e) => {
-      const b = e.target.closest('.mode');
-      if (!b) return;
-      mode = b.dataset.mode;
-      for (const m of modes.children) m.setAttribute('aria-pressed', String(m === b));
-      lapsBox.classList.toggle('off', !(mode === 'race' || mode === 'tt'));
-      trackBox.classList.toggle('off', !(mode === 'race' || mode === 'tt'));
-      document.getElementById('mapBox').classList.toggle('off', mode !== 'free');
-      playersBox.classList.toggle('off', !(mode === 'race' || mode === 'free'));
-      showPlayersNote();
+    mapList.then((maps) => {
+      for (const [map, title] of Object.entries(maps)) mapSel.add(new Option(title, map));
+      document.getElementById('nomaps').hidden = mapSel.options.length > 0;
+      document.getElementById('go').disabled = mapSel.options.length === 0;
+    });
+    playersSel.addEventListener('change', () => {
+      document.getElementById('playersNote').hidden = playersSel.value === '1';
     });
     // the disc is served by tools/serve.mjs; if it isn't, ask for it
     fetch('game-data/ctr-u.bin', { method: 'HEAD' }).then((r) => {
       if (!r.ok) document.getElementById('discpick').classList.add('show');
     }).catch(() => document.getElementById('discpick').classList.add('show'));
     document.getElementById('go').addEventListener('click', () => {
-      const character = Number(document.getElementById('character').value);
-      const laps = Number(document.getElementById('laps').value);
-      const track = document.getElementById('track').value;
-      const players = Number(playersSel.value);
+      const choice = freeDrive(mapSel.value, Number(document.getElementById('character').value), Number(playersSel.value));
       const discFile = document.getElementById('discfile').files[0] || null;
-      const boots = {
-        // Arcade takes one or two players (with AI racers), VS two to four; Time Trial one
-        race: { tracks: { 0: track }, boot: { level: 0, mode: players <= 2 ? 1 : 2, character, laps, players } },
-        tt: { tracks: { 0: track }, boot: { level: 0, mode: 0, character, laps } },
-        free: { tracks: { 0: `${document.getElementById('map').value}_free` }, boot: { level: 0, mode: players === 1 ? 0 : 2, character, laps: 99, players } },
-        // the whole game: Dust 2 in Dingo Canyon's place, Dust 2 Tunnels in Dragon Mines'
-        menus: { tracks: { 0: 'dust2', 1: 'dust2_b' }, boot: null },
-      };
       document.getElementById('go').disabled = true;
-      start(boots[mode], discFile).catch((e) => { say(String(e)); console.error(e); document.getElementById('go').disabled = false; });
+      start(choice, discFile).catch((e) => { say(String(e)); console.error(e); document.getElementById('go').disabled = false; });
     });
   }
 </script>

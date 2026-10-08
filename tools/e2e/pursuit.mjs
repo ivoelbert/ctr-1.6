@@ -1,7 +1,7 @@
-// Drives a planned route (tools/route.py's json: a dense CTR path) by pure pursuit, in step
-// with the game, and reports how far round the kart got and where it got stuck.
-//   node tools/e2e/pursuit.mjs ROUTE.json [max frames] [look-ahead units]   OUT=trace.txt SHOT=end.png
-//   MODE=1 (Arcade) LAPS=3 NO_TELEPORT=1 (start from the grid) DUST2=free (the free-drive level)
+// Drives a map's free-drive route (build/lev/MAP_free_route.json: a dense CTR path, and the AI's
+// lines) by pure pursuit, in step with the game, and reports how far the kart got and where it
+// got stuck.
+//   node tools/e2e/pursuit.mjs MAP [max frames] [look-ahead units]   OUT=trace.txt SHOT=end.png
 //   OFFSET=n (drive n units right of the route, negative: left). Reports SNAGs: the speed
 //   falling by 40% in 8 frames with the gas held (a wall or an obstacle hit).
 //   CONTINUE=1: when stuck, report it and carry on from further along (a tour of the map).
@@ -9,11 +9,10 @@
 import fs from 'node:fs';
 import { launch } from './lib.mjs';
 
-const routeFile = process.argv[2];
+const map = process.argv[2] ?? 'dust2';
 const maxFrames = Number(process.argv[3] ?? 12000);
 const lookahead = Number(process.argv[4] ?? 640);
-const route = JSON.parse(fs.readFileSync(routeFile, 'utf8'));
-const laps = Number(process.env.LAPS ?? 1);
+const route = JSON.parse(fs.readFileSync(`build/lev/${map}_free_route.json`, 'utf8'));
 // the line to follow: the AI's middle racing line (smoothed, clear of corners) when the route
 // has one, densified to a point every 64 units; LINE=path for the raw grid path
 function densify(points, step = 64) {
@@ -26,9 +25,8 @@ function densify(points, step = 64) {
   return out;
 }
 const line = route.ai && process.env.LINE !== 'path' ? densify(route.ai[0]) : route.path;
-// start where the route starts (the AI line begins at its first frame, near the start line)
-let path = [];
-for (let l = 0; l < laps; l++) path = path.concat(line.map(([x, y, z]) => [x, y, z]));
+// start where the route starts (the AI line begins at its first frame, near the start)
+let path = line.map(([x, y, z]) => [x, y, z]);
 // OFFSET=n drives n units to the right of the route (negative: left), to rub along walls
 const offset = Number(process.env.OFFSET ?? 0);
 if (offset) {
@@ -39,16 +37,11 @@ if (offset) {
     return [x + (dz / len) * offset, y, z - (dx / len) * offset];
   });
 }
-// and on past the line, so the last lap counts
-if (process.env.LAPS) path = path.concat(line.slice(1, 40));
-const noTeleport = process.env.NO_TELEPORT === '1';
-
-const mode = Number(process.env.MODE ?? 0);
-const { browser, page } = await launch({ query: `?level=0&mode=${mode}&dust2=${process.env.DUST2 ?? 1}`, log: !!process.env.LOG });
+const { browser, page } = await launch({ query: `?map=${map}`, log: !!process.env.LOG });
 await page.waitForFunction(() => window.ctr && Module._NativeWeb_GetState, { timeout: 120000 });
 if (process.env.SHOTS_DIR) await page.evaluate(() => { window.__noTurbo = true; });
 if (process.env.CONTINUE) await page.evaluate(() => { window.__continue = true; });
-await page.evaluate((path, maxFrames, lookahead, noTeleport) => {
+await page.evaluate((path, maxFrames, lookahead) => {
   const TAU = 4096;
   const wrap = (a) => ((a % TAU) + TAU + TAU / 2) % TAU - TAU / 2;
   window.__trace = [];
@@ -72,22 +65,14 @@ await page.evaluate((path, maxFrames, lookahead, noTeleport) => {
     if (start === null) {
       if (s.eventTime <= 0) { ctr.hold('cross'); return; }
       start = n;
-      if (!noTeleport) {
-        const [x0, y0, z0] = path[0];
-        const [x1, , z1] = path[Math.min(8, path.length - 1)];
-        ctr.teleport(x0, y0 + 100, z0, Math.round((Math.atan2(x1 - x0, z1 - z0) / (2 * Math.PI)) * TAU) & 4095);
-      }
-      window.__lap = s.kart.lap;
+      const [x0, y0, z0] = path[0];
+      const [x1, , z1] = path[Math.min(8, path.length - 1)];
+      ctr.teleport(x0, y0 + 100, z0, Math.round((Math.atan2(x1 - x0, z1 - z0) / (2 * Math.PI)) * TAU) & 4095);
       return;
     }
     if (s.kart.item !== window.__item || s.kart.wumpa !== window.__wumpa) {
-      window.__events.push(`t=${n - start} item ${s.kart.item} wumpa ${s.kart.wumpa} rank ${s.kart.rank}`);
+      window.__events.push(`t=${n - start} item ${s.kart.item} wumpa ${s.kart.wumpa}`);
       window.__item = s.kart.item; window.__wumpa = s.kart.wumpa;
-    }
-    if (s.kart.lap !== window.__lap) { window.__events.push(`t=${n - start} lap ${s.kart.lap} (race time ${s.eventTime})`); window.__lap = s.kart.lap; }
-    if ((s.kart.actions & 0x2000000) && !window.__finished) {
-      window.__finished = true;
-      window.__events.push(`t=${n - start} race finished, rank ${s.kart.rank + 1} (END_OF_RACE ${(s.gameMode1 & 0x200000) !== 0})`);
     }
     const t = n - start;
     const k = s.kart;
@@ -134,19 +119,7 @@ await page.evaluate((path, maxFrames, lookahead, noTeleport) => {
     if (diff > 48) held.push('left');
     else if (diff < -48) held.push('right');
     ctr.hold(...held);
-    if (t % 15 === 0) window.__trace.push([t, k.x | 0, k.y | 0, k.z | 0, k.speed, k.angle, k.quad, idx, k.checkpoint, k.distToFinish, k.lap]);
-    // the AI racers: any that stops getting anywhere for 5 s
-    if (t % 60 === 0) {
-      const ds = ctr.drivers();
-      window.__ai = window.__ai || {};
-      ds.forEach((d, i) => {
-        if (i === 0 || d.actions & 0x2000000) return;
-        const a = (window.__ai[i] = window.__ai[i] || { x: d.x, z: d.z, since: t, reported: false });
-        if (Math.hypot(d.x - a.x, d.z - a.z) > 300) { a.x = d.x; a.z = d.z; a.since = t; a.reported = false; }
-        else if (t - a.since > 300 && !a.reported) { a.reported = true; window.__events.push(`t=${t} AI ${i} STUCK at ${d.x},${d.y},${d.z} (lap ${d.lap})`); }
-        a.lap = d.lap;
-      });
-    }
+    if (t % 15 === 0) window.__trace.push([t, k.x | 0, k.y | 0, k.z | 0, k.speed, k.angle, k.quad, idx, k.checkpoint]);
     if (Math.abs(k.speed) < 1500 && t > 60) {
       if (stuckSince === null) stuckSince = t;
       else if (t - stuckSince > 240) {
@@ -163,7 +136,7 @@ await page.evaluate((path, maxFrames, lookahead, noTeleport) => {
     } else stuckSince = null;
     if (t > maxFrames) finish(`t=${t} out of time at path ${idx}/${path.length}`);
   };
-}, path, maxFrames, lookahead, noTeleport);
+}, path, maxFrames, lookahead);
 if (process.env.SHOTS_DIR) {
   // screenshots every few seconds of real time while it drives (turbo off so frames show)
   fs.mkdirSync(process.env.SHOTS_DIR, { recursive: true });
@@ -175,8 +148,6 @@ if (process.env.SHOTS_DIR) {
 }
 await page.waitForFunction(() => window.__done, { timeout: 900000, polling: 500 });
 const { trace, events } = await page.evaluate(() => ({ trace: window.__trace, events: window.__events }));
-const ai = await page.evaluate(() => ctr.drivers().map((d, i) => `${i}: lap ${d.lap} rank ${d.rank + 1}${d.actions & 0x2000000 ? ' finished' : ''}`));
-events.push('drivers at the end: ' + ai.join(', '));
 if (process.env.SHOT) await page.screenshot({ path: process.env.SHOT });
 await browser.close();
 for (const e of events) console.log(e);

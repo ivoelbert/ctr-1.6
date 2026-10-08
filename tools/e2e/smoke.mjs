@@ -1,4 +1,5 @@
 // Boots the game and screenshots it every few seconds: node tools/e2e/smoke.mjs [seconds] [query]
+//   query: ?map=dust2[&players=2] (free drive), ?level=N&mode=0 (a CTR track)
 //   OUT=dir   HOLD=cross,right   (pad 1 buttons held once the race clock runs)
 //   PADS=n    n fake gamepads (lib.mjs); PAD_GAS=1 holds A (cross) on each
 import { launch, sleep } from './lib.mjs';

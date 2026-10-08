@@ -12,6 +12,7 @@ Paths are A* over drivable cell-floors, penalized near walls so they keep to the
 import heapq
 import math
 import struct
+from collections import deque
 
 import numpy as np
 
@@ -194,6 +195,18 @@ class NavGrid:
             if best:
                 return best[1]
         return None
+
+    def reachable(self, start):
+        """Node ids a kart can drive to from node `start` (breadth first over the links)."""
+        seen = {start}
+        todo = deque([start])
+        while todo:
+            n = todo.popleft()
+            for m, _ in self.neighbours(n):
+                if m not in seen:
+                    seen.add(m)
+                    todo.append(m)
+        return seen
 
     def neighbours(self, nid):
         x, y, z = self.pos[nid]

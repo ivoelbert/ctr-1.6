@@ -7,9 +7,9 @@ a map built without -wadinclude leaves them in WAD files, see Wad) and the baked
 a grid of RGB samples every 16 texels over the face's texture extent, one grid per light style.
 The entities lump is the editor's key/value text ({"classname" "func_wall" "model" "*3" ...}).
 
-bake() turns faces into what tools/build_dust2.py's pipeline takes: every face gets its own
+bake() turns faces into what the track pipeline (tools/track.py) takes: every face gets its own
 chart in 1024 x 1024 atlas layers, filled with its texture times its light, as the game draws
-it, so the level carries CS 1.6's lighting the way the Dust 2 model's baked textures did.
+it, so the level carries Counter-Strike's lighting.
 """
 import math
 import re
@@ -186,6 +186,24 @@ class Bsp:
                 break
             light += self.lighting[o:o + size].reshape(h, w, 3)
         return light, s0, t0
+
+
+def clip_polygon(poly, axis, c, keep_below):
+    """The part of a convex polygon (n, 3) on one side of the plane p[axis] = c, or None."""
+    out = []
+    n = len(poly)
+    for i in range(n):
+        a, b = poly[i], poly[(i + 1) % n]
+        da, db = a[axis] - c, b[axis] - c
+        ina = da <= 1e-6 if keep_below else da >= -1e-6
+        inb = db <= 1e-6 if keep_below else db >= -1e-6
+        if ina:
+            out.append(a)
+        if ina != inb and abs(da - db) > 1e-12:
+            f = da / (da - db)
+            if 1e-9 < f < 1 - 1e-9:
+                out.append(a + (b - a) * f)
+    return np.array(out) if len(out) >= 3 else None
 
 
 def _sample_light(light, s0, t0, s, t):

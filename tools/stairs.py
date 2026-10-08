@@ -1,4 +1,4 @@
-"""Finds the steps and staircases of the Dust 2 model, in Hammer units.
+"""Finds a map's steps and staircases, in map (Hammer) units.
 
 A riser is a vertical face at most MAX_RISE tall; risers in one plane at the same heights
 merge into a segment. Segments chain into a staircase when each next riser starts at the

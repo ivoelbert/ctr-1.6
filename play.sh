@@ -3,24 +3,20 @@
 #
 #   ./play.sh
 #
-#   CTR_DISC=...     your NTSC-U CTR disc image, MODE2/2352 .bin
-#                    (default: ~/Documents/CTRDUST2/CTR - Crash Team Racing/CTR - Crash Team Racing.bin)
-#   DUST2_ZIP=...    the "De_Dust 2 with real light" download from Sketchfab
-#                    (default: ~/Documents/CTRDUST2/dust-2-cs-16.zip)
-#   DUST2_MODEL=...  or its de_dust_2_with_real_light.glb directly
-#   CSTRIKE=...      a Counter-Strike 1.6 install's cstrike folder: the maps read from it (Aztec)
-#                    (default: Steam's, ~/Library/Application Support/Steam/steamapps/common/Half-Life/cstrike)
+#   CTR_DISC=...  your NTSC-U CTR disc image, MODE2/2352 .bin
+#                 (default: ~/Documents/CTRDUST2/CTR - Crash Team Racing/CTR - Crash Team Racing.bin)
+#   CSTRIKE=...   a Counter-Strike 1.6 install's cstrike folder, where the maps come from
+#                 (default: Steam's, ~/Library/Application Support/Steam/steamapps/common/Half-Life/cstrike)
 #   PORT=8642
-#   NO_OPEN=1        serve without opening a browser
+#   NO_OPEN=1     serve without opening a browser
 #
-# The levels it writes (build/lev) hold data from your disc (and from Counter-Strike's map
-# files): keep them to yourself.
+# The levels it writes (build/lev) hold data from your disc and from Counter-Strike's map
+# files: keep them to yourself.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
 
 DISC="${CTR_DISC:-$HOME/Documents/CTRDUST2/CTR - Crash Team Racing/CTR - Crash Team Racing.bin}"
-ZIP="${DUST2_ZIP:-$HOME/Documents/CTRDUST2/dust-2-cs-16.zip}"
 CSTRIKE="${CSTRIKE:-$HOME/Library/Application Support/Steam/steamapps/common/Half-Life/cstrike}"
 PORT="${PORT:-8642}"
 URL="http://localhost:$PORT/"
@@ -28,37 +24,26 @@ URL="http://localhost:$PORT/"
 die() { echo "play.sh: $*" >&2; exit 1; }
 
 [ -f "$DISC" ] || die "no CTR disc image at '$DISC' (set CTR_DISC)"
+[ -d "$CSTRIKE/maps" ] || die "no Counter-Strike 1.6 at '$CSTRIKE' (set CSTRIKE)"
 command -v node >/dev/null || die "needs Node.js (https://nodejs.org)"
 command -v python3 >/dev/null || die "needs Python 3"
 python3 -I -c 'import numpy, PIL' 2>/dev/null || die "needs numpy and Pillow: python3 -m pip install numpy pillow"
 
-# The model: the Sketchfab zip has it inside a second zip.
-MODEL="${DUST2_MODEL:-$ROOT/work/model/de_dust_2_with_real_light.glb}"
-if [ ! -f "$MODEL" ]; then
-  [ -z "${DUST2_MODEL:-}" ] || die "no model at '$MODEL'"
-  [ -f "$ZIP" ] || die "no Dust 2 model at '$ZIP' (set DUST2_ZIP or DUST2_MODEL)"
-  echo "Unpacking the Dust 2 model..."
-  mkdir -p "$ROOT/work/model"
-  unzip -p "$ZIP" source/zone9_real_light.zip > "$ROOT/work/model/zone9_real_light.zip"
-  unzip -o -q "$ROOT/work/model/zone9_real_light.zip" de_dust_2_with_real_light.glb -d "$ROOT/work/model"
-  rm "$ROOT/work/model/zone9_real_light.zip"
-fi
-
-# The track, when it's missing or older than the tools that write it.
-LEV="$ROOT/build/lev/dust2.lev"
-if [ ! -f "$LEV" ] || [ -n "$(find tools -maxdepth 1 -name '*.py' -newer "$LEV" | head -1)" ]; then
-  echo "Building the Dust 2 track (a few minutes)..."
-  python3 -I tools/build_dust2.py "$MODEL" "$DISC" "$ROOT/build/lev"
-fi
-
-# Aztec, from Counter-Strike 1.6's own map file, when the game is installed.
-AZTEC="$ROOT/build/lev/aztec_free.lev"
-if [ -f "$CSTRIKE/maps/de_aztec.bsp" ]; then
-  if [ ! -f "$AZTEC" ] || [ -n "$(find tools -maxdepth 1 -name '*.py' -newer "$AZTEC" | head -1)" ]; then
-    echo "Building Aztec from Counter-Strike's map (a few minutes)..."
-    python3 -I tools/build_aztec.py "$CSTRIKE" "$DISC" "$ROOT/build/lev"
+# Each map in tools/maps/ that the install has, when its level is missing or older than the
+# tools that write it.
+for cfg in tools/maps/de_*.py tools/maps/cs_*.py; do
+  [ -f "$cfg" ] || continue
+  map="$(basename "$cfg" .py)"
+  if [ ! -f "$CSTRIKE/maps/$map.bsp" ]; then
+    echo "Skipping $map: it isn't in $CSTRIKE/maps"
+    continue
   fi
-fi
+  lev="$ROOT/build/lev/${map#*_}_free.lev"
+  if [ ! -f "$lev" ] || [ "$cfg" -nt "$lev" ] || [ -n "$(find tools -maxdepth 1 -name '*.py' -newer "$lev" | head -1)" ]; then
+    echo "Building $map from Counter-Strike's map file (a minute or two)..."
+    python3 -I tools/build_map.py "$map" "$CSTRIKE" "$DISC" "$ROOT/build/lev"
+  fi
+done
 
 # The game, when it's missing or older than its sources.
 WASM="$ROOT/build/web/ctr.wasm"
