@@ -45,6 +45,15 @@ DENSITY_WATER = 0.15    # the water texture is a small, uniform tile
 WATER_Z = -528          # the river's surface: faces wholly under it are hidden by it, left out
 DENSITY_TOPS = 0.25     # the wall tops, barely seen
 # Alpha-tested textures ('{': vines, ladder rungs) aren't drawn yet (the atlas has no alpha).
+# The rope bridge over the river is decor (func_illusionary): CS players walk on clip brushes
+# under its planks, and clip fills its rails down to the deck. Here an invisible floor along the
+# planks' tops, in the three planes of the beams under them (map x, z), across its width (map y);
+# and invisible walls, facing the deck, under its rails (map y of the rail's inner side, x from
+# and to, z of the rail's top). Where the rails are broken, the river is a long way down.
+BRIDGE_DECK = [(-1024, -192), (-832, -208), (-480, -208), (-256, -192)]
+BRIDGE_Y = (640, 768)
+BRIDGE_RAILS = [(644, -1008, -892, -163), (644, -818, -590, -180), (764, -596, -480, -176)]
+RAIL_ABOVE = 16         # map units over the rail's top: a hopping kart doesn't clear it
 
 # Places on the map (map x, y, z near the floor, compass heading: 0 = north, 90 = east)
 LANDMARKS_H = {
@@ -237,6 +246,51 @@ def floor_cells(pts):
     return polys
 
 
+def deck_z(x):
+    """The bridge deck's height (map units) at map x."""
+    xs, zs = zip(*BRIDGE_DECK)
+    return float(np.interp(x, xs, zs))
+
+
+def add_bridge(bsp, sel, charts, out):
+    """The bridge's invisible deck and rail walls (see BRIDGE_DECK), as stair ramps are made. The
+    deck takes the light on the planks for the kart's shade."""
+    y0, y1 = BRIDGE_Y
+    first = len(out)
+    for (xa, za), (xb, zb) in zip(BRIDGE_DECK, BRIDGE_DECK[1:]):
+        d2.emit_ramp([(xa, y0, za), (xa, y1, za), (xb, y1, zb), (xb, y0, zb)], out)
+    deck = out[first:]
+    for y, xa, xb, top in BRIDGE_RAILS:
+        bottom = min(deck_z(xa), deck_z(xb)) - 8
+        quad = [(xa, y, bottom), (xb, y, bottom), (xb, y, top + RAIL_ABOVE), (xa, y, top + RAIL_ABOVE)]
+        # emit_ramp faces (B - A) x (D - A), map -y when x grows along A B: turned to the deck
+        if (y < (y0 + y1) / 2) == (xb > xa):
+            quad = quad[::-1]
+        d2.emit_ramp(quad, out)
+    planks = []
+    for fi, kind in sel:
+        p = bsp.face_points(fi)
+        lo, hi = p.min(axis=0), p.max(axis=0)
+        if (kind == 'decor' and fi in charts and bsp.face_normal(fi)[2] > 0.7 and lo[0] >= BRIDGE_DECK[0][0]
+                and hi[0] <= BRIDGE_DECK[-1][0] and lo[1] >= y0 and hi[1] <= y1
+                and abs(p[:, 2].mean() - deck_z(p[:, 0].mean())) < 4):
+            planks.append((fi, lo, hi))
+    if not planks:
+        raise SystemExit('no bridge planks: has the map changed?')
+    centers = np.array([(lo[:2] + hi[:2]) / 2 for _, lo, hi in planks])
+    for q in deck:
+        q.color = []
+        for x, _, z in q.pos:
+            hx, hy = x / d2.SCALE + d2.CENTER[0], -z / d2.SCALE + d2.CENTER[1]
+            fi, lo, hi = planks[int(np.argmin(np.abs(centers - (hx, hy)).sum(axis=1)))]
+            n = bsp.face_normal(fi)
+            p0 = bsp.face_points(fi)[0]
+            px, py = np.clip(hx, lo[0] + 1, hi[0] - 1), np.clip(hy, lo[1] + 1, hi[1] - 1)
+            pz = p0[2] - (n[0] * (px - p0[0]) + n[1] * (py - p0[1])) / n[2]
+            q.color.append(d2.floor_shade(charts[fi].layer, charts[fi].uv(bsp, fi, [(px, py, pz)])[0]))
+    print(f'the bridge: {len(deck)} deck and {len(out) - first - len(deck)} rail quadblocks, on {len(planks)} planks')
+
+
 def spawn_points(bsp):
     pts = {}
     for cls in ('info_player_deathmatch', 'info_player_start'):
@@ -309,6 +363,7 @@ def main(cstrike, disc, outdir):
     tris = make_tris(bsp, sel, charts, near=lambda p: False)
     ramps = []
     d2.add_stair_ramps(tris, ramps)
+    add_bridge(bsp, sel, charts, ramps)
     g = NavGrid([(q.flags, q.pos, q.triangle) for q in d2.emit_level(tris, ramps)])
     landmarks = landmark_positions(tris)
     s = landmarks[FREE_ROUTE[0]]
@@ -317,6 +372,7 @@ def main(cstrike, disc, outdir):
     tri_near = lambda t: near(t.p)   # noqa: E731 (d2's floor grid: leave the far floors whole)
     ramps = []
     d2.add_stair_ramps(tris, ramps)
+    add_bridge(bsp, sel, charts, ramps)
     out = d2.emit_level(tris, ramps, near=tri_near)
     print(f'{len(out)} quadblocks, {d2.vertex_count(out)} vertices')
     g = NavGrid([(q.flags, q.pos, q.triangle) for q in out])
