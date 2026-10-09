@@ -891,6 +891,8 @@ void COLL_FIXED_TRIANGL_GetNormVec(struct ScratchpadStruct *sps, struct BspSearc
 }
 
 
+int gLevVertexBanks;
+
 global_variable struct LevVertex *sCollFixedLoadScratchpadVertsVertexArray;
 global_variable struct QuadBlock *sCollFixedLoadScratchpadVertsQuad;
 
@@ -900,6 +902,7 @@ internal void COLL_FIXED_QUADBLK_SetLoadScratchpadVertsContext(struct Scratchpad
 	// Native records that register state explicitly before calling the loader.
 	sCollFixedLoadScratchpadVertsVertexArray = sps->ptr_mesh_info->ptrVertexArray;
 	sCollFixedLoadScratchpadVertsQuad = quad;
+	LEV_VERTEX_BANKS_USE(sps->ptr_mesh_info);
 }
 
 void COLL_FIXED_QUADBLK_LoadScratchpadVerts(struct ScratchpadStruct *sps)
@@ -911,9 +914,9 @@ void COLL_FIXED_QUADBLK_LoadScratchpadVerts(struct ScratchpadStruct *sps)
 	sps->quadSecondTriIndexA = ptrQuad->index[2];
 	sps->quadSecondTriIndexB = ptrQuad->index[3];
 
-	for (const u16 *index = &ptrQuad->index[0]; index < &ptrQuad->index[9]; index++, bsv++)
+	for (int k = 0; k < 9; k++, bsv++)
 	{
-		struct LevVertex *vertCurr = &ptrVert[*index];
+		struct LevVertex *vertCurr = LEV_QUAD_VERTEX(ptrVert, ptrQuad, k);
 		bsv->pLevelVertex = vertCurr;
 		bsv->pos = vertCurr->pos;
 		bsv->normalAxis = (CollNormalAxis)vertCurr->flags;

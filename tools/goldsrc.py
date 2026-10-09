@@ -349,6 +349,8 @@ class Packer:
             self.x, self.y, self.row_h = 0, self.y + self.row_h, 0
         if self.y + h > self.size:
             self.layer += 1
+            if self.layer == 15:
+                self.layer += 1     # the atlas shader never draws layer 15 (collision-only quadblocks)
             self.x = self.y = self.row_h = 0
         at = (self.layer, self.x, self.y)
         self.x += w

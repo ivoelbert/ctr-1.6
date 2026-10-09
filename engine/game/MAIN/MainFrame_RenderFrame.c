@@ -412,7 +412,8 @@ void RainLogic(struct GameTracker *gGT)
 
 		gGT->rainBuffer[i].numParticles_max = (camQB->weather_intensity << 2) / numPlyrCurrGame;
 
-		gGT->rainBuffer[i].vanishRate = (camQB->weather_vanishRate << 2) / numPlyrCurrGame;
+		// NOTE(ctr-dust2): with vertex banks weather_vanishRate holds the quadblock's bank
+		gGT->rainBuffer[i].vanishRate = gLevVertexBanks ? 0 : (camQB->weather_vanishRate << 2) / numPlyrCurrGame;
 	}
 }
 

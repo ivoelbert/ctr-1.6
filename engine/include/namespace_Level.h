@@ -270,6 +270,16 @@ struct QuadBlock
 };
 
 CTR_STATIC_ASSERT(sizeof(struct QuadBlock) == 0x5c);
+
+// NOTE(ctr-dust2): vertex banks. A custom level can hold more than 65536 vertices: when its
+// mesh_info.unk2 is LEV_VERTEX_BANKS, a quadblock's nine indices count from 65536 times its
+// weather_vanishRate (custom levels have no rain, and the rain reads it only where it rains).
+// gLevVertexBanks follows the mesh in use (LEV_VERTEX_BANKS_USE); retail levels never set it.
+#define LEV_VERTEX_BANKS 0x4b4e4142u
+extern int gLevVertexBanks;
+#define LEV_VERTEX_BANKS_USE(mesh) (gLevVertexBanks = ((u32)(mesh)->unk2 == LEV_VERTEX_BANKS))
+#define LEV_QUAD_VERTEX_INDEX(quad, k) ((u32)(quad)->index[(k)] + (gLevVertexBanks ? ((u32)(quad)->weather_vanishRate << 16) : 0u))
+#define LEV_QUAD_VERTEX(vertices, quad, k) (&(vertices)[LEV_QUAD_VERTEX_INDEX((quad), (k))])
 CTR_STATIC_ASSERT(offsetof(struct QuadBlock, index) == 0x0);
 CTR_STATIC_ASSERT(sizeof(((struct QuadBlock *)0)->index[0]) == 0x2);
 CTR_STATIC_ASSERT(sizeof(QuadBlockFlags) == 0x2);

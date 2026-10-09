@@ -8,6 +8,8 @@ tools/maps/__init__.py). The map goes through tools/goldsrc.py (its faces, textu
 light) and then the track pipeline, tools/track.py. Each map is a free drive for now: NAME_free.lev
 and its 2P, 4P and Time Trial versions, their VRMs, NAME.json and NAME_atlas.jpg, where NAME is
 the map's name without its prefix (dust2); OUTDIR/maps.json lists the maps built there.
+Experiments: DENSITY=texels per unit (the atlas has 63 layers), VERTICES=the painter's budget
+(past 65,536: vertex banks), NAME=another name for the files.
 
 The level holds data from your CTR disc (it is grafted onto Dingo Canyon's) and from
 Counter-Strike's map: keep it to yourself.
@@ -135,11 +137,11 @@ def load_map(cstrike, map_name, cfg):
         return density_by_texture.get(bsp.face_texture(fi)[0].lower())
 
     t0 = time.time()
-    charts, layers, light, _ = goldsrc.bake(bsp, [fi for fi, _ in sel], density=getattr(cfg, 'DENSITY', 0.45),
+    charts, layers, light, _ = goldsrc.bake(bsp, [fi for fi, _ in sel], density=float(os.environ.get('DENSITY', getattr(cfg, 'DENSITY', 0.45))),
                                             density_of=density_of, fullbright=WATER_BRIGHTNESS)
     print(f'baked {len(charts)} faces into {len(layers)} atlas layers ({time.time() - t0:.0f} s)')
-    if max(layers) > 14:
-        raise SystemExit(f'{max(layers)} atlas layers: the renderer has 14 (lower the map\'s DENSITY)')
+    if max(layers) > 63:
+        raise SystemExit(f'{max(layers)} atlas layers: the renderer has 63 (lower the map\'s DENSITY)')
     # one encoded image per layer from 1; no texel quite black: build_atlas spreads colour into
     # the black gaps between charts
     imgs = []
@@ -278,7 +280,8 @@ def main(map_name, cstrike, disc, outdir):
     from navgrid import NavGrid
     t_start = time.time()
     cfg = importlib.import_module('maps.' + map_name)
-    name = map_name.split('_', 1)[-1]
+    name = os.environ.get('NAME', map_name.split('_', 1)[-1])
+    track.VERTEX_BUDGET = int(os.environ.get('VERTICES', track.VERTEX_BUDGET))
     os.makedirs(outdir, exist_ok=True)
     track.SCALE = SCALE
     # a map with water has its surface at CTR y 0: karts on water terrain are drawn only above

@@ -153,7 +153,12 @@ def block_id(qi):
     backwards (index 0 is 31, index 31 is 0, index 32 is 63): the renderer starts a BSP leaf's
     visibility bit at 31 - (blockID & 31) and steps up a bit per quadblock, so the face list
     holds index i at bit (i & 31) of word i >> 5."""
-    return (qi & ~31) | (31 - (qi & 31))
+    return ((qi & ~31) | (31 - (qi & 31))) & 0x7FFF   # s16: past 32768 it wraps (the bits used stay)
+
+
+def leaf_size(nq, max_leaf=6):
+    """Quadblocks per BSP leaf: retail's 6, more for big levels (node IDs stop at 0x4000)."""
+    return max(max_leaf, -(-nq // 4000))
 
 
 def _cross(a, b):
@@ -265,30 +270,49 @@ def write_level(lv: Level):
         hdr = b.alloc(LEVEL_SIZE)
 
     # BSP first: it fixes the quadblock order
-    nodes, order = lv.bsp if lv.bsp else build_bsp(lv.quads, lv.max_leaf_quads)
+    nodes, order = lv.bsp if lv.bsp else build_bsp(lv.quads, leaf_size(len(lv.quads), lv.max_leaf_quads))
     quads = [lv.quads[i] for i in order]
     nq = len(quads)
     nn = len(nodes)
     assert nn < 0x4000, 'too many BSP nodes'
 
-    # vertices: 9 per quadblock (duplicates are fine, the format indexes them)
-    verts = []
-    vindex = {}
-    quad_vidx = []
-    for q in quads:
+    # vertices: 9 per quadblock (duplicates are fine, the format indexes them). Indices are
+    # 16-bit: past 65536 vertices, the engine's vertex banks (LEV_VERTEX_BANKS) take over: the
+    # vertices come in banks of 65536, a quadblock's indices count from the start of its bank
+    # (its weather_vanishRate), and each bank holds every vertex its quadblocks use (quadblocks
+    # go in BSP order, so neighbours share a bank).
+    def vertex_keys(q):
         colors = q.color or [(0x80, 0x80, 0x80)] * 9
-        ids = []
+        keys = []
         for k in range(9):
             c = colors[k]
             if len(c) == 3:
                 c = (c[0], c[1], c[2], 0, c[0], c[1], c[2], 0)
-            key = (tuple(q.pos[k]), tuple(c))
+            keys.append((tuple(q.pos[k]), tuple(c)))
+        return keys
+
+    all_keys = [vertex_keys(q) for q in quads]
+    banked = len({k for ks in all_keys for k in ks}) >= 0x10000
+    verts = []
+    vindex = {}
+    bank_start = 0
+    quad_vidx, quad_bank = [], []
+    for keys in all_keys:
+        new = len({k for k in keys if k not in vindex})
+        if len(verts) - bank_start + new > 0x10000:
+            assert banked
+            verts += [verts[-1]] * (bank_start + 0x10000 - len(verts))   # pad the bank full
+            bank_start = len(verts)
+            vindex = {}
+        ids = []
+        for key in keys:
             if key not in vindex:
-                vindex[key] = len(verts)
+                vindex[key] = len(verts) - bank_start
                 verts.append(key)
             ids.append(vindex[key])
         quad_vidx.append(ids)
-    assert len(verts) < 0x10000, 'too many vertices'
+        quad_bank.append(bank_start >> 16)
+    assert quad_bank[-1] < 0x100, 'too many vertices'
 
     mesh = b.alloc(0x20)
     quad_off = b.alloc(QUAD_SIZE * nq)
@@ -380,7 +404,7 @@ def write_level(lv: Level):
         for f in range(4):
             b.ptr(o + 0x1C + 4 * f, layout_off(q.faces[f]))
         b.put(o + 0x2C, '6h', *bbox(q.pos))
-        b.put(o + 0x38, 'BBBb', q.terrain, 0, 0, 0)
+        b.put(o + 0x38, 'BBBb', q.terrain, 0, quad_bank[qi], 0)
         b.put(o + 0x3C, 'hBb', block_id(qi), q.checkpoint, 0)
         tl = layout_off(q.low)
         if tl is not None:
@@ -442,7 +466,7 @@ def write_level(lv: Level):
     b.put(mesh, 'III', nq, len(verts), 0)
     b.ptr(mesh + 0x0C, quad_off)
     b.ptr(mesh + 0x10, vert_off)
-    b.put(mesh + 0x14, 'I', 0)
+    b.put(mesh + 0x14, 'I', 0x4B4E4142 if banked else 0)   # LEV_VERTEX_BANKS
     b.ptr(mesh + 0x18, bsp_off)
     b.put(mesh + 0x1C, 'I', nn)
 
@@ -574,5 +598,5 @@ def write_level(lv: Level):
     b.ptr(hdr + 0x188, nav_table)
     b.ptr(hdr + 0x190, vismem)
 
-    info = dict(quads=nq, verts=len(verts), bsp_nodes=nn, depth=tree_depth(nodes), layouts=len(layouts))
+    info = dict(quads=nq, verts=len(verts), banks=quad_bank[-1] + 1 if quad_bank else 1, bsp_nodes=nn, depth=tree_depth(nodes), layouts=len(layouts))
     return b.finish(), info

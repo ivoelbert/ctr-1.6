@@ -6,7 +6,7 @@ int MainDB_GetClipSize(u32 levelID, int numPlyrCurrGame)
 	// NOTE(ctr-dust2): see LOAD_IsCustomLevel.
 	if (LOAD_IsCustomLevel(levelID))
 	{
-		return 64000;
+		return 512000;
 	}
 #endif
 

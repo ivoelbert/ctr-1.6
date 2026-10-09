@@ -17,7 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 
-from levwriter import build_bsp
+from levwriter import build_bsp, leaf_size
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FACE_CORNERS = [(0, 4, 5, 6), (4, 1, 6, 7), (5, 6, 2, 8), (6, 7, 8, 3)]
@@ -83,7 +83,7 @@ def audit(quads, views, build_dir, visible, near_first=False, max_leaf=6):
     camera was inside something. near_first: the BSP walked near side first. The views are
     shared out among a painter process per CPU (every count is a sum over views)."""
     faces = level_faces(quads, visible)
-    nodes, order = build_bsp(quads, max_leaf)
+    nodes, order = build_bsp(quads, leaf_size(len(quads), max_leaf))
     turn = np.empty(len(quads), dtype=np.int64)
     turn[np.array(order)] = np.arange(len(order))
     body = bytearray()

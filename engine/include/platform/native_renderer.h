@@ -46,4 +46,10 @@ void NativeRenderer_PopDebugLabel(void);
 int NativeRenderer_LoadVirtualAtlas(const char *path);
 TextureID NativeRenderer_GetVirtualAtlasTexture(void);
 
+// NOTE(ctr-dust2): render scale (see native_renderer.c)
+void NativeRenderer_SetRenderScale(int scale);
+int NativeRenderer_GetRenderScale(void);
+void NativeRenderer_PresentMainTarget(void);
+
 #endif
+
