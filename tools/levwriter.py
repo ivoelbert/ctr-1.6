@@ -100,6 +100,7 @@ class Level:
     # Graft onto a retail level: its data stays (models, skybox, textures, animated textures)
     # and the header is repointed at this level's mesh, checkpoints, AI paths and instances.
     base: object = None          # a ctrlev.Lev
+    keep_sky: bool = True        # grafted: keep the base's skybox and clear colours (else none, and clear_colors)
     instances: list = field(default_factory=list)  # dicts: src (index in base InstDefs), pos, rot
     # pickups the karts touch through BSP leaf hitbox lists: dicts inst (index in instances),
     # radius, lift (hitbox centre above the instance), flags
@@ -556,6 +557,11 @@ def write_level(lv: Level):
         b.ptr(hdr + 0x170, None)
         b.put(hdr + 0x174, 'I', 0)       # numSCVert
         b.ptr(hdr + 0x178, None)
+        if not lv.keep_sky:
+            b.ptr(hdr + 0x04, None)      # no skybox: the clear colours' gradient
+            b.put(hdr + 0xDC, 'I', lv.base.u32(0xDC) & ~1)   # nor its glow
+            for i, (r, g, bb, en) in enumerate(lv.clear_colors):
+                b.buf[hdr + 0x160 + 4 * i:hdr + 0x164 + 4 * i] = bytes([r, g, bb, en])
     spawns = (lv.spawns + [((0, 0, 0), (0, 0, 0))] * 8)[:8]
     for i, (p, r) in enumerate(spawns):
         b.put(hdr + 0x6C + 12 * i, '6h', p[0], p[1], p[2], r[0], r[1], r[2])
