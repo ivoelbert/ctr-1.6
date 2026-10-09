@@ -1,8 +1,8 @@
 # Notes
 
-What was learned putting Counter-Strike 1.6's maps into CTR, and what's left. The code has the
-details; this is the map. (The project began with Dust 2 from a Sketchfab model of it, then
-moved every map to Counter-Strike's own map files.)
+What was learned putting Counter-Strike 1.6's maps, and Need for Speed: Underground 2's city,
+into CTR, and what's left. The code has the details; this is the map. (The project began with
+Dust 2 from a Sketchfab model of it, then moved every map to Counter-Strike's own map files.)
 
 ## The engine (engine/, ctr-native fc3fa26 + changes)
 
@@ -14,7 +14,14 @@ moved every map to Counter-Strike's own map files.)
   - `platform/native_cd.c`: `assets/override/NNN.bin` replaces BIGFILE entry NNN.
   - `platform/native_memory.c`: 32 MiB heap (`CTR_DUST2_EXPANDED_MEMPACK`).
   - `platform/native_renderer.c` + `native_gpu.c`: `TF_VIRTUAL_ATLAS`, tpage colour mode 3
-    samples `/assets/dust2/atlas.rgba`; CLUT = layer << 10 | (y / 32) << 5 | (x / 32).
+    samples `/assets/dust2/atlas.rgba`; CLUT = layer << 10 | (y / 32) << 5 | (x / 32). A
+    "CTRA" atlas has the light baked in (Counter-Strike's maps); a "CTRV" atlas (Bayview) is
+    textures lit by the vertex colours (0x80 = 1), alpha-tested, that repeat inside their
+    rectangle like the PS1's texture window: tpage bits 0-4 = 16 | log2(w / 32) |
+    log2(h / 32) << 2 (the bits are the page base, which atlas primitives don't use), and
+    CLUT bits 14-15 scale the UVs by 1-8 before they wrap (the CLUT arrives as a signed short).
+    The repeats are sampled with the unwrapped UVs' gradients (`textureGrad`), so the mipmap
+    doesn't jump at the seams.
   - `LOAD_IsCustomLevel`: overridden levels get 2.5 MB of primitive memory and a 64000-word
     clip buffer (everything is visible from everywhere, unlike retail's PVS).
 
@@ -184,16 +191,71 @@ in place of the canyon's.
   grid, walls up to 1200; 12,600 quadblocks, 54,500 vertices before the painter's cuts, which
   then take the worst offenders that fit under 64,000.
 
+## Bayview: Need for Speed: Underground 2's city (tools/nfsu2/, tools/build_bayview.py)
+
+From the PS2 disc (NTSC-U, SLUS-21065), read straight from the image:
+
+- Files: `NFSUNDER/ZDIR.BIN` indexes `ZZDATA0-3.BIN`, 24 bytes an entry (EA's bStringHash of
+  the path, archive, sector in it, a disc sector, size, checksum). The city is
+  `TRACKS\L4RA.BUN` (the section table, chunk 0x34110: name, offset and size in the stream,
+  middle and radius) and `TRACKS\STREAML4RA.BUN` (130 MB of sections). Sections A-R are the
+  city; X hold the props every section places (and the sky), Y texture packs. Chunks are EA's
+  bChunks (id, size; nested when bit 31 is set), padded with 0x11 bytes.
+- Meshes (0x80134010 solids): world coordinates in metres, z up. A batch is one VIF packet for
+  the vector unit: vertex count and group count at VU address 0, strip flags at 1, bounding
+  box at 2, positions at 5 (groups of four vertices, x0-3 y0-3 z0-3, 16-bit in 1/256 m from an
+  origin in whole metres the packet doesn't hold: at or one below the box's corner; floats in
+  batches over 256 m), uvs at 29 (two quadwords per group, s0 t0 t1 s1 / s2 t2 t3 s3, 4096 =
+  1), colours at 45 (0x80 = 1: the night's light, baked per vertex). The vertices are triangle
+  strips; the flag bit per vertex that starts a strip comes from words 0, 2 and 3 of address 1
+  by a layout that depends on the group count (mesh.strip_skip): worked out by testing every
+  layout against each batch's triangle count in the batch table, then checked on all 102,005
+  batches of the city.
+- Winding: roads and terrain face up; buildings and props face either way (the PS2 doesn't
+  cull). Walls are turned to face the route and drawn from both sides; ground that faces down
+  is turned up.
+- Textures (0xB3300000 packs): 4- and 8-bit palettized, stored as the GS holds them: 8-bit ones
+  uploaded as 32-bit pixels, 4-bit ones as 16-bit (gs.write_read writes them back and reads
+  indices); 256-colour palettes in CSM1 order; alpha 0x80 = opaque. Roads and pavements have
+  alpha too, but it's how much they reflect: textures are cutouts only when their alpha is
+  all but on or off, and ground textures never are.
+- Scenery (0x80034100): kinds (name, solid hashes of its levels of detail A, B, Z) and
+  instances (bounding box, kind, position, rotation as 16-bit 3x3, 8192 = 1, applied as
+  point @ rotation). Props take their simplest level that's still the model (some Z levels are
+  a flat LOD_ stand-in). Left out: race barriers, the panoramas (PAN_: skylines and hills for
+  far away, a shell over the streets), light glows and shafts (additive), props under 3 m.
+
+The budget: 65,536 vertices a level. The city is about 1.2 million triangles; downtown has
+5,000-10,000 per 200 m square. So a level is a loop of streets (waypoints, joined by A* on the
+drivable grid, kept on roads, each leg avoiding the last), and what's along it: buildings and
+the city's own terrain within 60 m, props within 18 m, floors within 30 m (an invisible wall
+where a floor is cut off). Cutting faces where their textures repeat used to double the
+triangles: with the atlas's repeating textures and uv scale, a face is cut only past 2,040
+texels. Coplanar merging saves almost nothing on NFSU2's meshes (2%). The 2 m drivable grid
+(navgrid.CELL 128 here) keeps the route planning to seconds.
+
+- City Core: 1.7 km round the west of City Core (the pink castle, the KONOPA store).
+- Coal Harbor: 1.8 km between the warehouses (chimneys, the truss bridge).
+- Jackson Heights: 2.9 km of the hill roads (villas, palms, guard rails).
+- 64 CTR units a metre: streets about as wide, to a kart, as Dust 2's.
+- All three run at 60 fps and the autopilot drives each loop round.
+
 ## Tools
 
 - `tools/navgrid.py`: the drivable grid (from the level's own collision data), A*, what's
   reachable from where.
+- `tools/visibility.py` + `visible.c`: which triangles a chase camera sees from the drivable
+  floor (a depth-buffered render of the views): Bayview leaves the rest out.
 - `tools/e2e`: `launcher.mjs` (the launcher, then a map from it), `smoke.mjs` (boots and
   screenshots; fake gamepads for split screen), `shots.mjs` (screenshots at places on a map),
   `pursuit.mjs` (an autopilot along a map's free-drive route: snags and stuck spots).
 - `tools/roundtrip.py` rebuilds a retail level with levwriter (a test of the writer).
 
 ## Left to do
+
+- Bayview: more of the city (the downtown towers, the airport, Beacon Hill) as more loops; the
+  panoramas as a skyline that doesn't collide; the glows and light shafts (additive); the decal
+  textures (soft alpha) are drawn alpha-tested.
 
 - Races, the same way for every map: a loop through landmarks, Time Trial, CTR's own menus with
   the maps in retail tracks' places. (Dust 2 had two loops from its model: long A, CT spawn,

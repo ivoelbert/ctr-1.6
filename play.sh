@@ -7,10 +7,12 @@
 #                 (default: ~/Documents/CTRDUST2/CTR - Crash Team Racing/CTR - Crash Team Racing.bin)
 #   CSTRIKE=...   a Counter-Strike 1.6 install's cstrike folder, where the maps come from
 #                 (default: Steam's, ~/Library/Application Support/Steam/steamapps/common/Half-Life/cstrike)
+#   NFSU2_ISO=... your Need for Speed: Underground 2 disc image (PS2, NTSC-U), for Bayview
+#                 (default: ~/Documents/NFSU2/Need for Speed - Underground 2 (USA).iso; none, no Bayview)
 #   PORT=8642
 #   NO_OPEN=1     serve without opening a browser
 #
-# The levels it writes (build/lev) hold data from your disc and from Counter-Strike's map
+# The levels it writes (build/lev) hold data from your discs and from Counter-Strike's map
 # files: keep them to yourself.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
@@ -18,6 +20,7 @@ cd "$ROOT"
 
 DISC="${CTR_DISC:-$HOME/Documents/CTRDUST2/CTR - Crash Team Racing/CTR - Crash Team Racing.bin}"
 CSTRIKE="${CSTRIKE:-$HOME/Library/Application Support/Steam/steamapps/common/Half-Life/cstrike}"
+NFSU2_ISO="${NFSU2_ISO:-$HOME/Documents/NFSU2/Need for Speed - Underground 2 (USA).iso}"
 PORT="${PORT:-8642}"
 URL="http://localhost:$PORT/"
 
@@ -44,6 +47,17 @@ for cfg in tools/maps/de_*.py tools/maps/cs_*.py; do
     python3 -I tools/build_map.py "$map" "$CSTRIKE" "$DISC" "$ROOT/build/lev"
   fi
 done
+
+# Bayview's stretches, from Need for Speed: Underground 2's disc, the same way.
+if [ -f "$NFSU2_ISO" ]; then
+  for area in $(python3 -I tools/build_bayview.py --areas); do
+    lev="$ROOT/build/lev/${area}_free.lev"
+    if [ ! -f "$lev" ] || [ -n "$(find tools -maxdepth 2 -name '*.py' -newer "$lev" | head -1)" ]; then
+      echo "Building $area from Need for Speed: Underground 2 (a minute or two)..."
+      python3 -I tools/build_bayview.py "$NFSU2_ISO" "$DISC" "$ROOT/build/lev" "$area"
+    fi
+  done
+fi
 
 # The game, when it's missing or older than its sources.
 WASM="$ROOT/build/web/ctr.wasm"

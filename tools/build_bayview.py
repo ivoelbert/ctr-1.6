@@ -1,14 +1,18 @@
 """Builds part of Bayview, Need for Speed: Underground 2's city, as a CTR level, from your PS2 disc.
 
     python3 -I tools/build_bayview.py NFSU2.iso CTR_DISC.bin OUTDIR [AREA]
+    python3 -I tools/build_bayview.py --areas         (lists them)
 
 NFSU2.iso is your Need for Speed: Underground 2 disc image (PS2, NTSC-U, SLUS-21065); AREA is
-one of AREAS (a stretch of the city: a CTR level holds 65,536 vertices and is 65,536 units
-across). tools/nfsu2/ reads the city: its meshes, textures and the night's light, which NFSU2
-bakes into vertex colours. Here every texture goes into the atlas once, and the city's faces are
-cut where their textures repeat, so each piece maps into one copy; the pieces keep the vertex
-colours, which light them ("CTRV" atlas) and the karts. Then the track pipeline (tools/track.py)
-makes the level, as for Counter-Strike's maps: free drive, NAME_free.lev and the rest.
+one of AREAS. tools/nfsu2/ reads the city: its meshes, textures and the night's light, which
+NFSU2 bakes into vertex colours. A CTR level holds 65,536 vertices, so an area is a loop of
+streets through its waypoints and what's along it (buildings and terrain farther out than
+props). Every texture goes into the atlas once, repeating in place ("CTRV" atlas: the faces
+keep their uvs, lit by their vertex colours), and the track pipeline (tools/track.py) makes the
+level, as for Counter-Strike's maps: free drive, NAME_free.lev and the rest.
+
+DRY=1 stops before the painter's audit (to see the vertex count); VISIBILITY=0 keeps what the
+chase camera never sees.
 
 The level holds data from both discs: keep it to yourself.
 """
@@ -31,7 +35,9 @@ SCALE = 64.0            # CTR units per metre: streets about as wide, to a kart,
 # Stretches of the city (metres: x east, y north): a loop of streets through waypoints (free
 # drive starts at the first, facing the second), and what's along it.
 AREAS = {
-    'bayview': dict(title='Bayview', waypoints=[(-955, -335), (-700, -515), (-640, -250)]),
+    'citycore': dict(title='City Core', waypoints=[(-955, -335), (-700, -515), (-640, -250)]),
+    'coalharbor': dict(title='Coal Harbor', waypoints=[(-1300, -1652), (-940, -1550), (-1004, -1660), (-1232, -1832)]),
+    'jackson': dict(title='Jackson Heights', waypoints=[(-2230, 2190), (-1810, 2160), (-1790, 1920), (-2120, 1870)]),
 }
 NIGHT = [(8, 10, 24, 1), (40, 34, 60, 1), (14, 16, 34, 1)]
 # Left out: race barriers (only up during races), the panoramas (skylines and hills for far
@@ -53,6 +59,7 @@ BRIGHTNESS, GAMMA = 1.15, 0.8
 VIEW_EVERY = 2          # chase views on every other grid cell (128 CTR units), 8 headings each
 MIN_PIXELS = 4
 FLOOR_CELL = 1536.0     # CTR units
+LOW_WALL = 0.4          # metres
 
 
 def wrap_texture(im):
@@ -227,8 +234,10 @@ def make_tris(world, groups, rects, cutouts, near):
                 continue
             n /= np.linalg.norm(n)
             floor = n[2] > 0.7
-            # see-through walls (foliage, fences) are only drawn; floors always hold the kart
-            solid = floor or not cutout
+            # see-through walls (foliage, fences) are only drawn; floors always hold the kart;
+            # walls lower than a kerb's height are driven over, as NFSU2's cars do
+            low = np.ptp(P[k, :, 2]) < LOW_WALL
+            solid = floor or not (cutout or low)
             rows = np.concatenate([P[k], UV[k] * (sx, sy), light(C[k, :, :3])], axis=1)
             pieces = []
             for a in wrap_pieces(list(rows), 3, w):
@@ -446,6 +455,11 @@ def corridor(groups, route, reach):
     reach[kind] metres (kinds: nfsu2.world's, and FLOOR); and the floor edges the cut leaves
     open, as (a, b) points."""
     from scipy.spatial import cKDTree
+    dense = [route[0]]
+    for a, b in zip(route, route[1:]):
+        n = max(1, int(np.linalg.norm(b - a) / 2.0))
+        dense += [a + (b - a) * (i / n) for i in range(1, n + 1)]
+    route = np.array(dense)
     tree = cKDTree(route)
     out = {}
     kept_floor_edges, cut_floor_edges = {}, set()
@@ -458,6 +472,13 @@ def corridor(groups, route, reach):
         n = np.cross(P[:, 1] - P[:, 0], P[:, 2] - P[:, 0])
         floor = n[:, 2] > 0.7 * (np.linalg.norm(n, axis=1) + 1e-12)
         keep = d <= np.where(floor & (K == TERRAIN), reach[FLOOR], np.array([reach[k] for k in range(3)])[K])
+        # big triangles the route runs over, though their corners and middle are far from it
+        big = np.max([np.linalg.norm(P[:, a, :2] - P[:, b, :2], axis=1) for a, b in ((0, 1), (1, 2), (0, 2))], axis=0)
+        for k in np.nonzero(~keep & (big > 20.0))[0]:
+            for i in tree.query_ball_point(P[k].mean(axis=0)[:2], big[k]):
+                if point_in(P[k], *route[i]):
+                    keep[k] = True
+                    break
         for k in np.nonzero(floor)[0]:
             for e in range(3):
                 a, b = P[k, e], P[k, (e + 1) % 3]
@@ -493,22 +514,25 @@ def edge_walls(open_edges, out, height=4.0):
 
 
 def find_route(world, groups, cutouts, cfg, cache):
-    """The loop through the area's waypoints (map x, y points), from the cache when the
-    waypoints are the same."""
+    """The loop through the area's waypoints (map x, y, z points: z the floor's), from the
+    cache when the waypoints are the same."""
     from navgrid import NavGrid
     if os.path.exists(cache) and json.load(open(cache))['waypoints'] == [list(w) for w in cfg['waypoints']]:
-        return np.array(json.load(open(cache))['route'])
+        route = np.array(json.load(open(cache))['route'])
+        if route.shape[1] == 3:
+            return route
     wps = np.array(cfg['waypoints'], dtype=float)
     g = NavGrid(nav_quads(groups, cutouts))
     wp_nodes = [street_node(g, groups, world, x, y) for x, y in wps]
     loop = plan_loop(g, wp_nodes, road_cells(g, groups, world))
-    route = np.array([[g.pos[n][0] / SCALE + track.CENTER[0], -g.pos[n][2] / SCALE + track.CENTER[1]] for n in loop])
+    route = np.array([[g.pos[n][0] / SCALE + track.CENTER[0], -g.pos[n][2] / SCALE + track.CENTER[1],
+                       g.pos[n][1] / SCALE + track.FLOOR_Z] for n in loop])
     os.makedirs(os.path.dirname(cache), exist_ok=True)
     json.dump(dict(waypoints=[list(w) for w in cfg['waypoints']], route=route.tolist()), open(cache, 'w'))
     return route
 
 
-def main(iso, disc, outdir, area='bayview'):
+def main(iso, disc, outdir, area='citycore'):
     import navgrid
     from navgrid import NavGrid
     # 2 m grid cells: a city is big, its streets wide
@@ -539,10 +563,10 @@ def main(iso, disc, outdir, area='bayview'):
     # the route: through the waypoints and back to the first, on the drivable grid
     cutouts = {h for h in groups if is_cutout(world.textures[h].rgba) and not world.textures[h].name.startswith(GROUND_TEXTURES)}
     route = find_route(world, groups, cutouts, cfg, os.path.join(outdir, '.tools', f'{area}_route.json'))
-    length = float(np.sum(np.linalg.norm(np.diff(route, axis=0), axis=1)))
+    length = float(np.sum(np.linalg.norm(np.diff(route[:, :2], axis=0), axis=1)))
     print(f'route: {len(wps)} waypoints, {length:.0f} m round')
-    groups, open_edges = corridor(groups, route, dict(CORRIDOR, **cfg.get('corridor', {})))
-    orient(groups, world, route)
+    groups, open_edges = corridor(groups, route[:, :2], dict(CORRIDOR, **cfg.get('corridor', {})))
+    orient(groups, world, route[:, :2])
     allp = np.concatenate([g[0].reshape(-1, 3) for g in groups.values()])
     kill_y = int((allp[:, 2].min() - track.FLOOR_Z) * SCALE) - 600
     print(f'{sum(len(g[0]) for g in groups.values())} triangles along it, {len(open_edges)} open floor edges')
@@ -566,17 +590,19 @@ def main(iso, disc, outdir, area='bayview'):
         return
     g = NavGrid([(q.flags, q.pos, q.triangle) for q in out])
     start = street_node(g, groups, world, *wps[0])
-    # the free route's landmarks: the loop every 150 m or so
+    # the free route's landmarks: the loop every 150 m or so, on the drivable cell nearest
+    # each point (at its height) that the start reaches
+    reach = g.reachable(start)
+    reach_pos = np.array([g.pos[n] for n in sorted(reach)])
     pts = [g.pos[start]]
     walked = 0.0
     for a, b in zip(route, route[1:]):
-        walked += float(np.linalg.norm(b - a))
+        walked += float(np.linalg.norm(b[:2] - a[:2]))
         if walked >= 150.0:
             walked = 0.0
-            c = track.to_ctr([b[0], b[1], 0.0])
-            nid = g.nearest(c[0], pts[-1][1], c[2])
-            if nid is not None:
-                pts.append(g.pos[nid])
+            c = track.to_ctr(b)
+            d = np.hypot(reach_pos[:, 0] - c[0], reach_pos[:, 2] - c[2]) + np.abs(reach_pos[:, 1] - c[1]) * 2
+            pts.append(tuple(reach_pos[int(np.argmin(d))]))
     names = [f'p{i}' for i in range(len(pts))]
     landmarks = {nm: [int(p[0]), int(p[1]), int(p[2]), 0] for nm, p in zip(names, pts)}
     p0, p1 = np.array(pts[0]), np.array(pts[1])
@@ -626,4 +652,7 @@ def main(iso, disc, outdir, area='bayview'):
 
 
 if __name__ == '__main__':
-    main(*sys.argv[1:5])
+    if sys.argv[1:] == ['--areas']:
+        print(' '.join(AREAS))
+    else:
+        main(*sys.argv[1:5])
