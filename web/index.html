@@ -229,8 +229,8 @@
   // The map takes Dingo Canyon's slot (level 0): its LEVs replace the 1P, 2P, 4P and Time Trial
   // files (BIGFILE entries 1, 3, 5, 7; each is grafted onto the one it replaces, to match that
   // mode's textures), its VRMs (those textures, with the map's minimap) entries 0, 2, 4, 6, and
-  // its textures go in the atlas the renderer samples for tpage mode 3 ("CTRA", width, height,
-  // RGBA). lev/maps.json lists the maps built: { dust2: 'Dust 2', ... }.
+  // its textures go in the atlas the renderer samples for tpage mode 3 ("CTRA" or "CTRV", width,
+  // height, RGBA). lev/maps.json lists the maps built: { dust2: 'Dust 2', ... }.
   const mapList = fetch('lev/maps.json', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : {})).catch(() => ({}));
   async function loadMap(map) {
     const title = (await mapList)[map] || map;
@@ -249,8 +249,17 @@
     const cx = cv.getContext('2d', { willReadFrequently: true });
     cx.drawImage(bitmap, 0, 0);
     const pixels = cx.getImageData(0, 0, width, height).data;
+    if (meta.atlas.mask) {
+      // the cutouts (foliage, fences): a grey image, the atlas's alpha
+      const mask = await createImageBitmap(new Blob([await fetchWithProgress(`lev/${meta.atlas.mask}`, 'Textures')], { type: 'image/png' }));
+      cx.clearRect(0, 0, width, height);
+      cx.drawImage(mask, 0, 0);
+      const alpha = cx.getImageData(0, 0, width, height).data;
+      for (let i = 3; i < pixels.length; i += 4) pixels[i] = alpha[i - 1];
+    }
     const file = new Uint8Array(12 + pixels.length);
-    new DataView(file.buffer).setUint32(0, 0x41525443, true);
+    // "CTRV": textures lit by the vertex colours, alpha tested; "CTRA": light baked in
+    new DataView(file.buffer).setUint32(0, meta.atlas.vertexColors ? 0x56525443 : 0x41525443, true);
     new DataView(file.buffer).setUint32(4, width, true);
     new DataView(file.buffer).setUint32(8, height, true);
     file.set(pixels, 12);

@@ -735,6 +735,8 @@ global_variable GTEShader s_gteShader16;
 global_variable GTEShader s_gteShader32Rgba;
 global_variable GTEShader s_gteShaderVirtualAtlas;
 global_variable GLint s_virtualAtlasSizeLoc = -1;
+global_variable GLint s_virtualAtlasVertexColorLoc = -1;
+global_variable int s_virtualAtlasVertexColor;
 global_variable TextureID s_virtualAtlasTexture = 0;
 global_variable int s_virtualAtlasWidth = 0;
 global_variable int s_virtualAtlasHeight = 0;
@@ -891,23 +893,43 @@ const char *gte_shader_32_rgba = "	uniform sampler2D s_texture;\n"
 // NOTE(ctr-dust2): Virtual atlas sampling. The standard PSX vertex shader packs
 // the CLUT into v_page_clut.zw; undo that, then
 //   layer = clut >> 10, origin = layer cell (4 per row, 1024 texels) + 32 * (clut & 31, (clut >> 5) & 31)
-// and sample the RGBA atlas at origin + the primitive's texel UV (mipmapped). The atlas
-// textures carry their own baked light: vertex colours are left out (a custom level's floor
-// colours only light the karts, COLL_FIXED_PlayerSearch_UpdateLighting). Layer 15 is never
-// drawn: collision-only quadblocks (stair ramps) use it.
+// and sample the RGBA atlas at origin + the primitive's texel UV (mipmapped). A "CTRA" atlas
+// carries its own baked light (Counter-Strike's light maps): vertex colours are left out (a
+// custom level's floor colours only light the karts, COLL_FIXED_PlayerSearch_UpdateLighting).
+// A "CTRV" atlas is tiled textures lit by the vertex colours, as the PS1 does (0x80 = 1), with
+// alpha-tested cutouts (foliage, fences); its primitives can repeat a texture, like the PS1's
+// texture window: tpage bit 4 set, the texture (at the page origin) is 32 << (tpage & 3) texels
+// wide and 32 << ((tpage >> 2) & 3) high, and the UVs wrap in it (sampled with the unwrapped
+// UVs' gradients, so the mipmap doesn't jump at the seams); CLUT bits 14-15 scale the UVs by
+// 1, 2, 4 or 8 first, so one primitive can span more than 255 texels of a repeating texture. Layer 15 is never drawn:
+// collision-only quadblocks (stair ramps) use it.
 const char *gte_shader_virtual_atlas = "	uniform sampler2D s_texture;\n"
                                        "	uniform int psxDrawMaskSet;\n"
                                        "	uniform vec2 atlasSize;\n"
+                                       "	uniform int atlasVertexColor;\n"
                                        "	void main() {\n"
                                        "		float clutLo = mod(floor(v_page_clut.z * 64.0 + 0.5), 64.0);\n"
                                        "		float clutHi = floor(v_page_clut.w * 512.0 + 0.5);\n"
                                        "		float clut = clutLo + clutHi * 64.0;\n"
+                                       "		if (clut < 0.0) clut += 65536.0;\n"
+                                       "		float uvScale = exp2(floor(clut / 16384.0));\n"
+                                       "		clut = mod(clut, 16384.0);\n"
                                        "		float layer = floor(clut / 1024.0);\n"
                                        "		if (layer > 14.5) discard;\n"
                                        "		float cell = mod(clut, 1024.0);\n"
                                        "		vec2 origin = vec2(mod(layer, 4.0) * 1024.0 + mod(cell, 32.0) * 32.0,\n"
                                        "		                   floor(layer / 4.0) * 1024.0 + floor(cell / 32.0) * 32.0);\n"
-                                       "		vec4 color = texture2D(s_texture, (origin + v_texcoord.xy) / atlasSize);\n"
+                                       "		vec2 uv = v_texcoord.xy * uvScale;\n"
+                                       "		vec2 gx = dFdx(uv) / atlasSize, gy = dFdy(uv) / atlasSize;\n"
+                                       "		float page = floor(v_page_clut.x / 64.0 + 0.5) + floor(v_page_clut.y / 256.0 + 0.5) * 16.0;\n"
+                                       "		if (atlasVertexColor != 0 && page > 15.5) {\n"
+                                       "			uv = mod(uv, vec2(32.0 * exp2(mod(page, 4.0)), 32.0 * exp2(floor(mod(page, 16.0) / 4.0))));\n"
+                                       "		}\n"
+                                       "		vec4 color = textureGrad(s_texture, (origin + uv) / atlasSize, gx, gy);\n"
+                                       "		if (atlasVertexColor != 0) {\n"
+                                       "			if (color.a < 0.5) discard;\n"
+                                       "			color.rgb *= v_color.rgb;\n"
+                                       "		}\n"
                                        "		fragColor = dither(vec4(color.rgb, v_color.a));\n"
                                        "		fragColor.a = float(psxDrawMaskSet);\n"
                                        "	}\n";
@@ -1137,6 +1159,7 @@ internal void NativeRenderer_InitialisePSXShaders(void)
 	NativeRenderer_CompilePSXShader(&s_gteShader32Rgba, gte_shader_32_rgba);
 	NativeRenderer_CompilePSXShader(&s_gteShaderVirtualAtlas, gte_shader_virtual_atlas);
 	s_virtualAtlasSizeLoc = glGetUniformLocation(s_gteShaderVirtualAtlas.shader, "atlasSize");
+	s_virtualAtlasVertexColorLoc = glGetUniformLocation(s_gteShaderVirtualAtlas.shader, "atlasVertexColor");
 	{
 		GLint offsetLoc = glGetUniformLocation(s_gteShaderVirtualAtlas.shader, "u_extraOffsetScale");
 		if (offsetLoc >= 0)
@@ -1148,8 +1171,9 @@ internal void NativeRenderer_InitialisePSXShaders(void)
 	}
 }
 
-// NOTE(ctr-dust2): Loads a custom level's texture atlas: "CTRA", u32 width,
-// u32 height, then width * height RGBA8 texels. Returns 1 when loaded.
+// NOTE(ctr-dust2): Loads a custom level's texture atlas: "CTRA" (baked light) or "CTRV"
+// (lit by vertex colours, alpha tested), u32 width, u32 height, then width * height RGBA8
+// texels. Returns 1 when loaded.
 int NativeRenderer_LoadVirtualAtlas(const char *path)
 {
 	FILE *file = fopen(path, "rb");
@@ -1160,8 +1184,8 @@ int NativeRenderer_LoadVirtualAtlas(const char *path)
 		return 0;
 	}
 
-	if ((fread(header, sizeof(u32), 3, file) != 3) || (header[0] != 0x41525443u) || (header[1] == 0) || (header[2] == 0) || (header[1] > 16384) ||
-	    (header[2] > 16384))
+	if ((fread(header, sizeof(u32), 3, file) != 3) || ((header[0] != 0x41525443u) && (header[0] != 0x56525443u)) || (header[1] == 0) ||
+	    (header[2] == 0) || (header[1] > 16384) || (header[2] > 16384))
 	{
 		fclose(file);
 		NATIVE_RENDERER_ERROR("%s: not an atlas\n", path);
@@ -1195,6 +1219,7 @@ int NativeRenderer_LoadVirtualAtlas(const char *path)
 	s_lastBoundTexture = (TextureID)-1;
 	free(texels);
 
+	s_virtualAtlasVertexColor = header[0] == 0x56525443u;
 	s_virtualAtlasWidth = (int)header[1];
 	s_virtualAtlasHeight = (int)header[2];
 	NATIVE_RENDERER_LOG("virtual atlas %s: %dx%d\n", path, s_virtualAtlasWidth, s_virtualAtlasHeight);
@@ -1534,6 +1559,10 @@ void NativeRenderer_SetTexture(TextureID texture, TexFormat texFormat)
 		if (s_virtualAtlasSizeLoc >= 0)
 		{
 			glUniform2f(s_virtualAtlasSizeLoc, (float)s_virtualAtlasWidth, (float)s_virtualAtlasHeight);
+		}
+		if (s_virtualAtlasVertexColorLoc >= 0)
+		{
+			glUniform1i(s_virtualAtlasVertexColorLoc, s_virtualAtlasVertexColor);
 		}
 		break;
 	case TF_32_BIT_RGBA:

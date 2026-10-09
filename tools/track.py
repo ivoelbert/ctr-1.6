@@ -67,18 +67,21 @@ def dir_to_ctr(n):
     return np.stack([n[..., 0], n[..., 2], -n[..., 1]], axis=-1)
 
 
+DOUBLE_SIDED = 0x100   # on a Tri's terrain: drawn from both sides (foliage, fences)
+
+
 class Tri:
     __slots__ = ('p', 'uv', 'layer', 'n', 'ph', 'nh', 'solid', 'terrain')
 
     def __init__(self, p, uv, layer, n, ph, nh):
         self.p = p        # (3,3) CTR space
-        self.uv = uv      # (3,2) texels in the layer
+        self.uv = uv      # (3,2) texels in the layer; (3,5) with the vertex colours (r, g, b)
         self.layer = layer
         self.n = n        # unit normal, CTR space (the side that faces the player)
         self.ph = ph      # (3,3) Hammer space
         self.nh = nh      # unit normal, Hammer space
         self.solid = True  # False: drawn but not collided with (stair risers under a ramp)
-        self.terrain = 0   # CTR terrain type (enum TerrainType): 0 asphalt, 4 water...
+        self.terrain = 0   # CTR terrain type (enum TerrainType): 0 asphalt, 4 water...; | DOUBLE_SIDED
 
 
 def pair_quads(tris):
@@ -109,21 +112,35 @@ def pair_quads(tris):
                 u = tris[tj]
                 if u.layer != t.layer or np.dot(u.n, t.n) < 0.9999 or u.solid != t.solid or u.terrain != t.terrain:
                     continue
+                uuv = u.uv
+                if len(t.uv[0]) >= WRAP_CHANNELS:
+                    # a repeating texture: u's uvs may be whole repeats off t's
+                    if np.abs(uuv[0][5:9] - t.uv[0][5:9]).max() > 0.01:
+                        continue
+                    code = int(round(t.uv[0][7]))
+                    size = np.array([32 << (code & 3), 32 << ((code >> 2) & 3)], dtype=float)
+                    shift = np.round((t.uv[(e + 1) % 3][:2] - uuv[f][:2]) / size) * size
+                    if shift.any():
+                        uuv = uuv.copy()
+                        uuv[:, :2] += shift
+                        local = (uuv[:, :2] - uuv[0][5:7]) / uv_scale(uuv[0])
+                        if local.min() < 0 or local.max() > 255:
+                            continue
                 # cyclic quad: t = (A, B, C) with shared edge A->B (index e), u has B->A
                 A, B, C = t.p[e], t.p[(e + 1) % 3], t.p[(e + 2) % 3]
                 D = u.p[(f + 2) % 3]
                 uA, uB, uC = t.uv[e], t.uv[(e + 1) % 3], t.uv[(e + 2) % 3]
-                uD = u.uv[(f + 2) % 3]
+                uD = uuv[(f + 2) % 3]
                 if abs(np.dot(D - A, t.n)) > 0.5:
                     continue
                 # same texture mapping on both sides of the edge
-                if np.abs(u.uv[f] - uB).max() > 0.75 or np.abs(u.uv[(f + 1) % 3] - uA).max() > 0.75:
+                if np.abs(uuv[f][:2] - uB[:2]).max() > 0.75 or np.abs(uuv[(f + 1) % 3][:2] - uA[:2]).max() > 0.75:
                     continue
                 # predict D's uv from t's affine map
                 M = np.array([B - A, C - A]).T  # 3x2
                 coef, *_ = np.linalg.lstsq(M, D - A, rcond=None)
                 pred = uA + coef[0] * (uB - uA) + coef[1] * (uC - uA)
-                if np.abs(pred - uD).max() > 0.75:
+                if np.abs(pred[:2] - uD[:2]).max() > 0.75:
                     continue
                 if t.n[1] > 0.7:
                     # floors stay inside their grid cell (see grid_cut_floors)
@@ -156,18 +173,30 @@ def pair_quads(tris):
 
 def page_for(uvs):
     """32-aligned page origin holding all uvs, or None if they span too much."""
-    lo = np.floor(uvs.min(axis=0) / PAGE_ALIGN) * PAGE_ALIGN
+    lo = np.floor(uvs[:, :2].min(axis=0) / PAGE_ALIGN) * PAGE_ALIGN
     lo = np.clip(lo, 0, LAYER_SIZE - PAGE_ALIGN)
-    hi = uvs.max(axis=0)
+    hi = uvs[:, :2].max(axis=0)
     if (hi - lo).max() > 255:
         return None
     return lo
 
 
-def layout(uv4, layer, origin):
-    rel = np.clip(np.round(uv4 - origin), 0, 255).astype(int)
-    clut = (layer << 10) | ((int(origin[1]) // PAGE_ALIGN) << 5) | (int(origin[0]) // PAGE_ALIGN)
-    return TexLayout(uv=tuple((int(u), int(v)) for u, v in rel), clut=clut, tpage=TPAGE_ATLAS)
+def layout(uv4, layer, origin, wrap=0, shift=0):
+    rel = np.clip(np.round((uv4[:, :2] - origin) / (1 << shift)), 0, 255).astype(int)
+    clut = (shift << 14) | (layer << 10) | ((int(origin[1]) // PAGE_ALIGN) << 5) | (int(origin[0]) // PAGE_ALIGN)
+    return TexLayout(uv=tuple((int(u), int(v)) for u, v in rel), clut=clut, tpage=TPAGE_ATLAS | wrap)
+
+
+# A repeating texture ("CTRV" atlas): uv carries, after the colours, the texture's origin in the
+# layer (32-aligned), its wrap code for the atlas shader (tpage bits 0-4: 16 | log2(w / 32)
+# | log2(h / 32) << 2) and a uv scale's log2 (CLUT bits 14-15), and the uvs count from that
+# origin, up to 255 texels times the scale.
+WRAP_CHANNELS = 9
+
+
+def uv_scale(uv):
+    """The texels one uv unit stands for (see WRAP_CHANNELS)."""
+    return 1 << int(round(uv[8])) if len(uv) >= WRAP_CHANNELS else 1
 
 
 FACE_CORNERS = [(0, 4, 5, 6), (4, 1, 6, 7), (5, 6, 2, 8), (6, 7, 8, 3)]
@@ -204,18 +233,32 @@ def quad_block(P9, UV9, layer, n, triangle, solid=True, terrain=0):
     front = np.cross(P9[2] - P9[0], P9[1] - P9[0])
     if np.dot(front, n) < 0:
         raise ValueError('wrong winding')
-    origin = page_for(np.array(UV9))
-    if origin is None:
-        return None
-    faces = [layout(np.array([UV9[c] for c in fc]), layer, origin) for fc in FACE_CORNERS]
-    low = layout(np.array([UV9[c] for c in (0, 1, 2, 3)]), layer, origin)
+    wrap = shift = 0
+    if len(UV9[0]) >= WRAP_CHANNELS:
+        origin = np.round(np.asarray(UV9[0][5:7], dtype=float))
+        wrap = int(round(UV9[0][7]))
+        shift = int(round(UV9[0][8]))
+        rel = (np.array([uv[:2] for uv in UV9], dtype=float) - origin) / (1 << shift)
+        if rel.min() < -0.5 or rel.max() > 255.5:
+            return None
+    else:
+        origin = page_for(np.array(UV9))
+        if origin is None:
+            return None
+    faces = [layout(np.array([UV9[c] for c in fc]), layer, origin, wrap, shift) for fc in FACE_CORNERS]
+    low = layout(np.array([UV9[c] for c in (0, 1, 2, 3)]), layer, origin, wrap, shift)
     flags, _ = surface_flags(n, solid)
+    double = bool(terrain & DOUBLE_SIDED)
+    terrain &= 0xFF
     pos = [tuple(int(round(v)) for v in p) for p in P9]
     color = None
-    if flags & FLAG_GROUND and light_maps is not None:
+    if len(UV9[0]) > 2:
+        # vertex colours: they light the textures (a "CTRV" atlas) and, on floors, the karts
+        color = [tuple(int(min(max(round(c), 0), 255)) for c in uv[2:5]) for uv in UV9]
+    elif flags & FLAG_GROUND and light_maps is not None:
         color = [floor_shade(layer, uv) for uv in UV9]
     return Quad(pos=pos, faces=faces, low=low, flags=flags, terrain=terrain, triangle=triangle,
-                color=color)
+                color=color, double_sided=double)
 
 
 def floor_shade(layer, uv):
@@ -267,8 +310,9 @@ def emit_quad(pts, uvs, layer, n, out, depth=0, solid=True, cut=None, terrain=0)
         ucorners = [uA, uB, uD, uC]
     len_s = max(np.linalg.norm(corners[1] - corners[0]), np.linalg.norm(corners[3] - corners[2]))
     len_t = max(np.linalg.norm(corners[2] - corners[0]), np.linalg.norm(corners[3] - corners[1]))
-    uv_s = max(np.abs(ucorners[1] - ucorners[0]).max(), np.abs(ucorners[3] - ucorners[2]).max())
-    uv_t = max(np.abs(ucorners[2] - ucorners[0]).max(), np.abs(ucorners[3] - ucorners[1]).max())
+    scale = uv_scale(ucorners[0])
+    uv_s = max(np.abs(ucorners[1][:2] - ucorners[0][:2]).max(), np.abs(ucorners[3][:2] - ucorners[2][:2]).max()) / scale
+    uv_t = max(np.abs(ucorners[2][:2] - ucorners[0][:2]).max(), np.abs(ucorners[3][:2] - ucorners[1][:2]).max()) / scale
     ns = max(1, math.ceil(len_s / max_edge(n)), math.ceil(uv_s / MAX_UV_SPAN * 1.0001))
     nt = max(1, math.ceil(len_t / max_edge(n)), math.ceil(uv_t / MAX_UV_SPAN * 1.0001))
     if cut:
@@ -312,7 +356,7 @@ def emit_triangle(p, uv, layer, n, out, solid=True, cut=None, terrain=0):
     a, b, c = p
     ua, ub, uc = uv
     longest = max(np.linalg.norm(b - a), np.linalg.norm(c - a), np.linalg.norm(c - b))
-    uvlong = max(np.abs(ub - ua).max(), np.abs(uc - ua).max(), np.abs(uc - ub).max())
+    uvlong = max(np.abs(ub[:2] - ua[:2]).max(), np.abs(uc[:2] - ua[:2]).max(), np.abs(uc[:2] - ub[:2]).max()) / uv_scale(ua)
     k = max(1, math.ceil(longest / max_edge(n)), math.ceil(uvlong / MAX_UV_SPAN * 1.0001))
     if cut:
         k = max(k, math.ceil(max(hlen(b, a), hlen(c, a), hlen(c, b)) / cut - 1e-6))
@@ -936,7 +980,7 @@ def place_pickups(route, g, by_model):
     return out
 
 
-def write_modes(outdir, name, out, nodes, spawns, nav, route, g, bases, vrms, minimap, build_name, clear_colors):
+def write_modes(outdir, name, out, nodes, spawns, nav, route, g, bases, vrms, minimap, build_name, clear_colors, keep_sky=True):
     """The track as one LEV per mode, each grafted onto that mode's Dingo Canyon level, and that
     mode's texture file with the track's minimap drawn in."""
     hitbox_of = {'crate_question': (76, 48), 'crate_fruit': (76, 48), 'fruit': (64, 64)}
@@ -957,7 +1001,7 @@ def write_modes(outdir, name, out, nodes, spawns, nav, route, g, bases, vrms, mi
                 hitboxes.append(dict(inst=k, radius=r, lift=lift, flags=0x4C0))
         lv = Level(quads=out, nodes=nodes, spawns=spawns,
                    clear_colors=clear_colors,
-                   build_name=build_name, nav_paths=nav, base=base, instances=pickups, hitboxes=hitboxes,
+                   build_name=build_name, nav_paths=nav, base=base, keep_sky=keep_sky, instances=pickups, hitboxes=hitboxes,
                    flyin=base_flyin(base), minimap=minimap_placement(window))
         data, mode_info = write_level(lv)
         data += b'\0' * ((-len(data)) % 2048)
