@@ -106,6 +106,21 @@ struct NativeRenderTarget
 };
 
 global_variable struct NativeRenderTarget s_mainRenderTarget;
+// NOTE(ctr-dust2): render scale. The frame is drawn S times the PS1's display size (its
+// draws are in display coordinates, so they rasterize S times sharper) and presented from
+// that render target; VRAM still gets the frame packed down at its own size, for the game's
+// screen-copy effects. Scissors and clears on the main target are scaled to match.
+global_variable int s_renderScale = 1;
+
+void NativeRenderer_SetRenderScale(int scale)
+{
+	s_renderScale = scale < 1 ? 1 : (scale > 8 ? 8 : scale);
+}
+
+internal int NativeRenderer_TargetScale(void)
+{
+	return s_previousOffscreenState ? 1 : s_renderScale;
+}
 global_variable struct NativeRenderTarget s_offscreenRenderTarget;
 
 global_variable TextureID s_whiteTexture = (TextureID)-1;
@@ -591,7 +606,7 @@ internal void NativeRenderer_BindMainRenderTarget(void)
 		height = activeDrawEnv.clip.h;
 	}
 
-	NativeRenderer_EnsureRenderTarget(&s_mainRenderTarget, width, height);
+	NativeRenderer_EnsureRenderTarget(&s_mainRenderTarget, width * s_renderScale, height * s_renderScale);
 	glBindFramebuffer(GL_FRAMEBUFFER, s_mainRenderTarget.framebuffer);
 }
 
@@ -618,7 +633,10 @@ internal void NativeRenderer_LoadRenderTargetFromVRAM(struct NativeRenderTarget 
 	glDisable(GL_SCISSOR_TEST);
 	glDisable(GL_STENCIL_TEST);
 	glViewport(0, 0, target->width, target->height);
-	NativeRenderer_DrawVRAMRegion(x, y, target->width, target->height);
+	{
+		const int scale = target == &s_mainRenderTarget ? s_renderScale : 1;
+		NativeRenderer_DrawVRAMRegion(x, y, target->width / scale, target->height / scale);
+	}
 	glClear(GL_STENCIL_BUFFER_BIT);
 	glEnable(GL_STENCIL_TEST);
 
@@ -901,7 +919,9 @@ const char *gte_shader_32_rgba = "	uniform sampler2D s_texture;\n"
 // texture window: tpage bit 4 set, the texture (at the page origin) is 32 << (tpage & 3) texels
 // wide and 32 << ((tpage >> 2) & 3) high, and the UVs wrap in it (sampled with the unwrapped
 // UVs' gradients, so the mipmap doesn't jump at the seams); CLUT bits 14-15 scale the UVs by
-// 1, 2, 4 or 8 first, so one primitive can span more than 255 texels of a repeating texture. Layer 15 is never drawn:
+// 1, 2, 4 or 8 first, so one primitive can span more than 255 texels of a repeating texture.
+// In a "CTRA" atlas those two bits are the layer's high bits instead: up to 63 layers (15 is
+// never drawn), 4 to a row of the atlas. Layer 15 is never drawn:
 // collision-only quadblocks (stair ramps) use it.
 const char *gte_shader_virtual_atlas = "	uniform sampler2D s_texture;\n"
                                        "	uniform int psxDrawMaskSet;\n"
@@ -912,10 +932,13 @@ const char *gte_shader_virtual_atlas = "	uniform sampler2D s_texture;\n"
                                        "		float clutHi = floor(v_page_clut.w * 512.0 + 0.5);\n"
                                        "		float clut = clutLo + clutHi * 64.0;\n"
                                        "		if (clut < 0.0) clut += 65536.0;\n"
-                                       "		float uvScale = exp2(floor(clut / 16384.0));\n"
-                                       "		clut = mod(clut, 16384.0);\n"
+                                       "		float uvScale = 1.0;\n"
+                                       "		if (atlasVertexColor != 0) {\n"
+                                       "			uvScale = exp2(floor(clut / 16384.0));\n"
+                                       "			clut = mod(clut, 16384.0);\n"
+                                       "		}\n"
                                        "		float layer = floor(clut / 1024.0);\n"
-                                       "		if (layer > 14.5) discard;\n"
+                                       "		if (abs(layer - 15.0) < 0.5) discard;\n"
                                        "		float cell = mod(clut, 1024.0);\n"
                                        "		vec2 origin = vec2(mod(layer, 4.0) * 1024.0 + mod(cell, 32.0) * 32.0,\n"
                                        "		                   floor(layer / 4.0) * 1024.0 + floor(cell / 32.0) * 32.0);\n"
@@ -1503,7 +1526,8 @@ void NativeRenderer_SetupClipMode(const RECT16 *rect, const DISPENV *displayEnv,
 	const float crw = clipRectW * viewportW;
 	const float crh = clipRectH * viewportH;
 
-	glScissor(crx, flipOffset - cry, crw, crh);
+	const float scale = (float)NativeRenderer_TargetScale();
+	glScissor(crx * scale, (flipOffset - cry) * scale, crw * scale, crh * scale);
 }
 
 internal void NativeRenderer_SetShader(const ShaderID shader)
@@ -1890,7 +1914,10 @@ void NativeRenderer_Clear(int x, int y, int w, int h, u8 r, u8 g, u8 b)
 	glGetIntegerv(GL_SCISSOR_BOX, previousScissorBox);
 
 	glEnable(GL_SCISSOR_TEST);
-	glScissor(scissorX, scissorY, scissorW, scissorH);
+	{
+		const int scale = NativeRenderer_TargetScale();
+		glScissor(scissorX * scale, scissorY * scale, scissorW * scale, scissorH * scale);
+	}
 	glClearColor(NativeRenderer_PSXColorComponentFloat(r), NativeRenderer_PSXColorComponentFloat(g), NativeRenderer_PSXColorComponentFloat(b), 0.0f);
 	glClear(GL_COLOR_BUFFER_BIT);
 
@@ -2308,6 +2335,27 @@ void NativeRenderer_PresentVRAMRect(int displayX, int displayY, int displayW, in
 
 	s_previousShader = (ShaderID)-1;
 	s_lastBoundTexture = (TextureID)-1;
+}
+
+// NOTE(ctr-dust2): the frame just drawn, from the main render target at the render scale.
+void NativeRenderer_PresentMainTarget(void)
+{
+	if ((s_mainRenderTarget.width <= 0) || (s_mainRenderTarget.height <= 0))
+	{
+		return;
+	}
+
+	NativeRenderer_SetScissorState(0);
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, s_mainRenderTarget.framebuffer);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+	glBlitFramebuffer(0, 0, s_mainRenderTarget.width, s_mainRenderTarget.height, s_presentViewport.x, s_presentViewport.y,
+	                  s_presentViewport.x + s_presentViewport.w, s_presentViewport.y + s_presentViewport.h, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+int NativeRenderer_GetRenderScale(void)
+{
+	return s_renderScale;
 }
 
 void NativeRenderer_PresentVRAMDisplay(void)

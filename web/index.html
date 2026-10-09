@@ -321,6 +321,9 @@
     launcher.hidden = true;
     canvas.focus();
     installHooks();
+    // ?scale=N: the frame drawn N times the PS1's resolution (1: as the PS1 drew it)
+    const scale = Number(params.get('scale') ?? 1);
+    if (scale > 1) Module._NativeWeb_SetRenderScale(Math.min(8, Math.floor(scale)));
     Module.callMain([]);
   }
 

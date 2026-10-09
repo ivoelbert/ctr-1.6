@@ -1032,9 +1032,9 @@ static void DrawLevelOvr1P_StoreProjectedDepthWord(struct DrawLevelOvr1PScratchV
 static void Ovr226_800a0f78_ProjectVertexTripleFullDepth(struct LevVertex *vertices, const struct QuadBlock *block,
                                                          struct DrawLevelOvr1PScratchVertex *projected, int index0, int index1, int index2)
 {
-	struct LevVertex *vertex0 = &vertices[block->index[index0]];
-	struct LevVertex *vertex1 = &vertices[block->index[index1]];
-	struct LevVertex *vertex2 = &vertices[block->index[index2]];
+	struct LevVertex *vertex0 = LEV_QUAD_VERTEX(vertices, block, index0);
+	struct LevVertex *vertex1 = LEV_QUAD_VERTEX(vertices, block, index1);
+	struct LevVertex *vertex2 = LEV_QUAD_VERTEX(vertices, block, index2);
 	u32 depth0;
 	u32 depth1;
 	u32 depth2;
@@ -1056,7 +1056,7 @@ static void Ovr226_800a0f78_ProjectVertexTripleFullDepth(struct LevVertex *verti
 static void Ovr226_800a1024_ProjectFullDynamicLowFourth(struct LevVertex *vertices, const struct QuadBlock *block,
                                                         struct DrawLevelOvr1PScratchVertex *projected)
 {
-	struct LevVertex *vertex = &vertices[block->index[3]];
+	struct LevVertex *vertex = LEV_QUAD_VERTEX(vertices, block, 3);
 	u32 depth;
 
 	DrawLevelOvr1P_CopySourceVertex(&projected[3], vertex);
@@ -1117,9 +1117,9 @@ static void DrawLevelOvr1P_CopyProjectedSource(struct LevVertex *vertex, struct 
 static int DrawLevelOvr1P_ProjectListVertexTriple(struct LevVertex *vertices, const struct QuadBlock *block, struct DrawLevelOvr1PScratchVertex *projected,
                                                   int index0, int index1, int index2, enum DrawLevelOvr1PProjectedSource source)
 {
-	struct LevVertex *vertex0 = &vertices[block->index[index0]];
-	struct LevVertex *vertex1 = &vertices[block->index[index1]];
-	struct LevVertex *vertex2 = &vertices[block->index[index2]];
+	struct LevVertex *vertex0 = LEV_QUAD_VERTEX(vertices, block, index0);
+	struct LevVertex *vertex1 = LEV_QUAD_VERTEX(vertices, block, index1);
+	struct LevVertex *vertex2 = LEV_QUAD_VERTEX(vertices, block, index2);
 	u32 depth0;
 	u32 depth1;
 	u32 depth2;
@@ -1190,9 +1190,9 @@ static int DrawLevelOvr1P_ProjectListGrid(struct LevVertex *vertices, const stru
 static void DrawLevelOvr1P_ProjectRenderedVertexTriple(struct LevVertex *vertices, const struct QuadBlock *block, struct DrawLevelOvr1PScratchVertex *projected,
                                                        int index0, int index1, int index2, enum DrawLevelOvr1PProjectedSource source)
 {
-	struct LevVertex *vertex0 = &vertices[block->index[index0]];
-	struct LevVertex *vertex1 = &vertices[block->index[index1]];
-	struct LevVertex *vertex2 = &vertices[block->index[index2]];
+	struct LevVertex *vertex0 = LEV_QUAD_VERTEX(vertices, block, index0);
+	struct LevVertex *vertex1 = LEV_QUAD_VERTEX(vertices, block, index1);
+	struct LevVertex *vertex2 = LEV_QUAD_VERTEX(vertices, block, index2);
 	u32 depth0;
 	u32 depth1;
 	u32 depth2;
@@ -2247,7 +2247,7 @@ static void Ovr226_800a1408_AdjustFullDynamicMidVertex(struct DrawLevelOvr1PScra
 	struct DrawLevelOvr1PScratchVertex *mid = &projected[midIndex];
 	const struct DrawLevelOvr1PScratchVertex *endpointA = &projected[endpointAIndex];
 	const struct DrawLevelOvr1PScratchVertex *endpointB = &projected[endpointBIndex];
-	const struct LevVertex *levMid = &vertices[block->index[midIndex]];
+	const struct LevVertex *levMid = LEV_QUAD_VERTEX(vertices, block, midIndex);
 	s16 midpoint[3];
 
 	s32 factor = (s32)((DrawLevelOvr1P_ReadWord(mid, 0x10) - DrawLevelOvr1P_RenderScratch()->fullDynamicFadeDepthStart) << 2);
@@ -7931,8 +7931,8 @@ static int Ovr226_800a1338_DispatchFullDynamicLowDirect(struct PushBuffer *pb, s
 
 static void Ovr226_800a11e0_ProjectFullDynamicLastPair(struct LevVertex *vertices, const struct QuadBlock *block, struct DrawLevelOvr1PScratchVertex *projected)
 {
-	struct LevVertex *vertex7 = &vertices[block->index[7]];
-	struct LevVertex *vertex8 = &vertices[block->index[8]];
+	struct LevVertex *vertex7 = LEV_QUAD_VERTEX(vertices, block, 7);
+	struct LevVertex *vertex8 = LEV_QUAD_VERTEX(vertices, block, 8);
 	s16 unusedSxy[2];
 	u32 depth7;
 	u32 depth8;
@@ -8025,6 +8025,7 @@ static int Ovr226_800a0ef4_DrawFullDynamicBspList(struct VisMemBspListNode *slot
                                                   const int *visFaceList)
 {
 	struct LevVertex *vertices = mesh->ptrVertexArray;
+	LEV_VERTEX_BANKS_USE(mesh);
 
 	while (slot != NULL)
 	{
@@ -8101,6 +8102,7 @@ static int DrawLevelOvr1P_ProjectSplitGroundListATransitionGrid(struct LevVertex
 static int DrawLevelOvr1P_EmitSplitGroundListAQuadBlock(struct PushBuffer *pb, struct PrimMem *primMem, struct mesh_info *mesh, struct QuadBlock *block)
 {
 	struct LevVertex *vertices = mesh->ptrVertexArray;
+	LEV_VERTEX_BANKS_USE(mesh);
 	struct DrawLevelOvr1PScratchVertex *projected = DrawLevelOvr1P_GetScratchVertices();
 
 	if (DrawLevelOvr1P_ProjectSplitGroundListALowGrid(vertices, block, projected))
@@ -8172,6 +8174,7 @@ static int DrawLevelOvr1P_DrawSplitGroundListABspList(struct VisMemBspListNode *
 static int Ovr226_800a3738_EmitGround4x1ListQuadBlock(struct PushBuffer *pb, struct PrimMem *primMem, struct mesh_info *mesh, struct QuadBlock *block)
 {
 	struct LevVertex *vertices = mesh->ptrVertexArray;
+	LEV_VERTEX_BANKS_USE(mesh);
 	struct DrawLevelOvr1PScratchVertex *projected = DrawLevelOvr1P_GetScratchVertices();
 
 	if (DrawLevelOvr1P_ProjectListGrid(vertices, block, projected, DRAW_LEVEL_OVR1P_PROJECTED_SOURCE_POS_FLAGS, DRAW_LEVEL_OVR1P_GRID_SLOT_FACE))
@@ -8257,6 +8260,7 @@ static int DrawLevelOvr1P_DrawNonWaterRenderedList(struct QuadBlock **renderedLi
                                                    int role)
 {
 	struct LevVertex *vertices = mesh->ptrVertexArray;
+	LEV_VERTEX_BANKS_USE(mesh);
 	struct DrawLevelOvr1PScratchVertex *projected = DrawLevelOvr1P_GetScratchVertices();
 	u32 reserve = DrawLevelOvr1P_GetNonWaterRenderedListReserve(role);
 	enum DrawLevelOvr1PGridSlotMode slotMode = DrawLevelOvr1P_GetNonWaterRenderedListSlotMode(role);
@@ -8298,6 +8302,7 @@ static int DrawLevelOvr1P_DrawNonWaterRenderedList(struct QuadBlock **renderedLi
 static int Ovr226_800a5030_EmitGround4x2ListQuadBlock(struct PushBuffer *pb, struct PrimMem *primMem, struct mesh_info *mesh, struct QuadBlock *block)
 {
 	struct LevVertex *vertices = mesh->ptrVertexArray;
+	LEV_VERTEX_BANKS_USE(mesh);
 	struct DrawLevelOvr1PScratchVertex *projected = DrawLevelOvr1P_GetScratchVertices();
 
 	if (DrawLevelOvr1P_ProjectListGrid(vertices, block, projected, DRAW_LEVEL_OVR1P_PROJECTED_SOURCE_POS_FLAGS, DRAW_LEVEL_OVR1P_GRID_SLOT_FACE))
@@ -8320,6 +8325,7 @@ static int Ovr226_800a5030_EmitGround4x2ListQuadBlock(struct PushBuffer *pb, str
 static int Ovr226_800a6fd0_EmitDynamicListQuadBlock(struct PushBuffer *pb, struct PrimMem *primMem, struct mesh_info *mesh, struct QuadBlock *block)
 {
 	struct LevVertex *vertices = mesh->ptrVertexArray;
+	LEV_VERTEX_BANKS_USE(mesh);
 	struct DrawLevelOvr1PScratchVertex *projected = DrawLevelOvr1P_GetScratchVertices();
 
 	if (DrawLevelOvr1P_ProjectListGrid(vertices, block, projected, DRAW_LEVEL_OVR1P_PROJECTED_SOURCE_POS_FLAGS, DRAW_LEVEL_OVR1P_GRID_SLOT_WORD))
@@ -8342,6 +8348,7 @@ static int Ovr226_800a6fd0_EmitDynamicListQuadBlock(struct PushBuffer *pb, struc
 static int Ovr226_800a8bf0_EmitWideDynamicQuadBlock(struct PushBuffer *pb, struct PrimMem *primMem, struct mesh_info *mesh, struct QuadBlock *block)
 {
 	struct LevVertex *vertices = mesh->ptrVertexArray;
+	LEV_VERTEX_BANKS_USE(mesh);
 	struct DrawLevelOvr1PScratchVertex *projected = DrawLevelOvr1P_GetScratchVertices();
 
 	if (DrawLevelOvr1P_ProjectListGrid(vertices, block, projected, DRAW_LEVEL_OVR1P_PROJECTED_SOURCE_POS_FLAGS, DRAW_LEVEL_OVR1P_GRID_SLOT_WORD))
@@ -9050,6 +9057,7 @@ static int Ovr226_800a1eb0_ConsumeWaterVisibilityBit(void)
 static int Ovr226_800a1ee0_EmitWaterListQuadBlock(struct PushBuffer *pb, struct PrimMem *primMem, struct mesh_info *mesh, struct QuadBlock *block)
 {
 	struct LevVertex *vertices = mesh->ptrVertexArray;
+	LEV_VERTEX_BANKS_USE(mesh);
 	struct DrawLevelOvr1PScratchVertex *projected = DrawLevelOvr1P_GetScratchVertices();
 
 	if (DrawLevelOvr1P_ProjectListGrid(vertices, block, projected, DRAW_LEVEL_OVR1P_PROJECTED_SOURCE_WATER_COLOR_LO_FLAGS, DRAW_LEVEL_OVR1P_GRID_SLOT_FACE))
@@ -9536,6 +9544,7 @@ static int DrawLevelOvr1P_DrawRenderedWaterQuadBlockWithDefaultHandler(struct Pu
                                                                        struct QuadBlock *block, DrawLevelOvrRetailLabel defaultHandlerAddress)
 {
 	struct LevVertex *vertices = mesh->ptrVertexArray;
+	LEV_VERTEX_BANKS_USE(mesh);
 	struct DrawLevelOvr1PScratchVertex *projected = DrawLevelOvr1P_GetScratchVertices();
 
 	DrawLevelOvr1P_ProjectRenderedGrid(vertices, block, projected, DRAW_LEVEL_OVR1P_PROJECTED_SOURCE_WATER_COLOR_LO_FLAGS, DRAW_LEVEL_OVR1P_GRID_SLOT_NONE);

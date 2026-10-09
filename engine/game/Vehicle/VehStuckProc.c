@@ -361,15 +361,15 @@ fallback:
 
 	fallbackTracker = GAME_TRACKER;
 	CTR_PSX_KEEP_VALUE(fallbackTracker);
-	driver->posCurr.x = CTR_MipsSll(CTR_MipsAddLo(fallbackTracker->level1->ptr_mesh_info->ptrVertexArray[(s16)sourceQuad->index[0]].pos.x,
-	                                              fallbackTracker->level1->ptr_mesh_info->ptrVertexArray[(s16)sourceQuad->index[3]].pos.x),
+	driver->posCurr.x = CTR_MipsSll(CTR_MipsAddLo(LEV_QUAD_VERTEX(fallbackTracker->level1->ptr_mesh_info->ptrVertexArray, sourceQuad, 0)[0].pos.x,
+	                                              LEV_QUAD_VERTEX(fallbackTracker->level1->ptr_mesh_info->ptrVertexArray, sourceQuad, 3)[0].pos.x),
 	                                7);
-	driver->posCurr.y = CTR_MipsSll(CTR_MipsAddLo(CTR_MipsAddLo(fallbackTracker->level1->ptr_mesh_info->ptrVertexArray[(s16)sourceQuad->index[0]].pos.y,
-	                                                            fallbackTracker->level1->ptr_mesh_info->ptrVertexArray[(s16)sourceQuad->index[3]].pos.y),
+	driver->posCurr.y = CTR_MipsSll(CTR_MipsAddLo(CTR_MipsAddLo(LEV_QUAD_VERTEX(fallbackTracker->level1->ptr_mesh_info->ptrVertexArray, sourceQuad, 0)[0].pos.y,
+	                                                            LEV_QUAD_VERTEX(fallbackTracker->level1->ptr_mesh_info->ptrVertexArray, sourceQuad, 3)[0].pos.y),
 	                                              VEH_STUCK_RESPAWN_Y_OFFSET),
 	                                7);
-	driver->posCurr.z = CTR_MipsSll(CTR_MipsAddLo(fallbackTracker->level1->ptr_mesh_info->ptrVertexArray[(s16)sourceQuad->index[0]].pos.z,
-	                                              fallbackTracker->level1->ptr_mesh_info->ptrVertexArray[(s16)sourceQuad->index[3]].pos.z),
+	driver->posCurr.z = CTR_MipsSll(CTR_MipsAddLo(LEV_QUAD_VERTEX(fallbackTracker->level1->ptr_mesh_info->ptrVertexArray, sourceQuad, 0)[0].pos.z,
+	                                              LEV_QUAD_VERTEX(fallbackTracker->level1->ptr_mesh_info->ptrVertexArray, sourceQuad, 3)[0].pos.z),
 	                                7);
 }
 

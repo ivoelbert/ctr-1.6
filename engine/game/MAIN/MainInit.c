@@ -78,7 +78,7 @@ void MainInit_RainBuffer(struct GameTracker *gGT)
 	}
 }
 
-#define CTR_CUSTOM_LEVEL_PRIM_MEM_SIZE 0x280000
+#define CTR_CUSTOM_LEVEL_PRIM_MEM_SIZE 0x700000
 
 static int MainInit_GetPrimMemSize(struct GameTracker *gGT)
 {
@@ -87,7 +87,8 @@ static int MainInit_GetPrimMemSize(struct GameTracker *gGT)
 #if defined(CTR_NATIVE)
 	// NOTE(ctr-dust2): A custom level (an overridden LEV) sees everything from
 	// everywhere instead of retail's precomputed visibility: give it room for
-	// many more primitives per frame.
+	// many more primitives per frame (7 MiB: both frames' buffers and OTs share the
+	// GPU links' 15 MiB of tokens, native_gpu_links.c).
 	if (((gGT->gameMode1 & MAIN_MENU) == 0) && LOAD_IsCustomLevel(gGT->levelID))
 	{
 		return CTR_CUSTOM_LEVEL_PRIM_MEM_SIZE;

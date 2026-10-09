@@ -73,6 +73,12 @@ extern int g_nativeWebHeldButtons;
 
 // Test hooks for the page (window.ctr in web/index.html).
 
+// NOTE(ctr-dust2): ?scale=N draws the frame N times the PS1's resolution
+EMSCRIPTEN_KEEPALIVE void NativeWeb_SetRenderScale(int scale)
+{
+	NativeRenderer_SetRenderScale(scale);
+}
+
 EMSCRIPTEN_KEEPALIVE void NativeWeb_SetButtons(int mask)
 {
 	g_nativeWebHeldButtons = mask & 0xffff;
