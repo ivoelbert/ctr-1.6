@@ -738,6 +738,33 @@ internal bool NativeGpu_IsAtlasTPage(int tpage)
 	return (((tpage >> 7) & 0x3) == 3) && (NativeRenderer_GetVirtualAtlasTexture() != 0);
 }
 
+// NOTE(ctr-dust2): exact positions and depths for a custom level's polygon (native_precise.h),
+// from its vertices' words (xy, in the order of v). Without a depth for every vertex the
+// polygon is textured affinely.
+internal void NativeGpu_ApplyPrecise(GrVertex *v, const VERTTYPE *const *xy, int n)
+{
+	float z[4], zmax = 0.0f;
+	int found = 0;
+
+	for (int i = 0; i < n; i++)
+	{
+		if (NativePrecise_Get(xy[i], &v[i].px, &v[i].py, &z[i]))
+		{
+			found++;
+			zmax = fmaxf(zmax, z[i]);
+		}
+		else
+		{
+			v[i].px = v[i].py = 0.0f;
+			z[i] = 0.0f;
+		}
+	}
+	for (int i = 0; i < n; i++)
+	{
+		v[i].pw = (found == n && zmax > 0.0f) ? z[i] / zmax : 0.0f;
+	}
+}
+
 internal void NativeGpu_DilateAtlasPolygon(GrVertex *v, int n)
 {
 	float area2 = 0.0f;
@@ -745,7 +772,7 @@ internal void NativeGpu_DilateAtlasPolygon(GrVertex *v, int n)
 	{
 		const GrVertex *a = &v[i];
 		const GrVertex *b = &v[(i + 1) % n];
-		area2 += (float)a->x * (float)b->y - (float)b->x * (float)a->y;
+		area2 += ((float)a->x + a->px) * ((float)b->y + b->py) - ((float)b->x + b->px) * ((float)a->y + a->py);
 	}
 	if (area2 == 0.0f)
 	{
@@ -758,19 +785,19 @@ internal void NativeGpu_DilateAtlasPolygon(GrVertex *v, int n)
 		const GrVertex *p = &v[(i + n - 1) % n];
 		GrVertex *c = &v[i];
 		const GrVertex *q = &v[(i + 1) % n];
-		float e1x = (float)(c->x - p->x), e1y = (float)(c->y - p->y);
-		float e2x = (float)(q->x - c->x), e2y = (float)(q->y - c->y);
+		float e1x = (float)(c->x - p->x) + c->px - p->px, e1y = (float)(c->y - p->y) + c->py - p->py;
+		float e2x = (float)(q->x - c->x) + q->px - c->px, e2y = (float)(q->y - c->y) + q->py - c->py;
 		float l1 = sqrtf(e1x * e1x + e1y * e1y);
 		float l2 = sqrtf(e2x * e2x + e2y * e2y);
-		if ((l1 < 0.5f) && (l2 < 0.5f))
+		if ((l1 < 0.05f) && (l2 < 0.05f))
 		{
 			continue;
 		}
-		if (l1 < 0.5f)
+		if (l1 < 0.05f)
 		{
 			e1x = e2x, e1y = e2y, l1 = l2;
 		}
-		if (l2 < 0.5f)
+		if (l2 < 0.05f)
 		{
 			e2x = e1x, e2y = e1y, l2 = l1;
 		}
@@ -799,6 +826,14 @@ internal void NativeGpu_DilateAtlasPolygon(GrVertex *v, int n)
 		c->_p0 = (s8)lroundf(ox * 32.0f);
 		c->_p1 = (s8)lroundf(oy * 32.0f);
 	}
+}
+
+// NOTE(ctr-dust2): an atlas polygon's exact positions and depths (native_precise.h), then its
+// edges pushed out (on the exact positions: whole pixels lined T-junctions up, exact ones don't)
+internal void NativeGpu_PrepareAtlasPolygon(GrVertex *v, const VERTTYPE *const *xy, int n)
+{
+	NativeGpu_ApplyPrecise(v, xy, n);
+	NativeGpu_DilateAtlasPolygon(v, n);
 }
 
 void TriangulateQuad()
@@ -1498,7 +1533,7 @@ internal int ProcessFlatPoly(P_TAG *polyTag)
 			MakeColourTriangle(firstVertex, shadeTexOn, &poly->r0, &poly->r0, &poly->r0);
 			if (NativeGpu_IsAtlasTPage(poly->tpage))
 			{
-				NativeGpu_DilateAtlasPolygon(firstVertex, 3);
+				NativeGpu_PrepareAtlasPolygon(firstVertex, (const VERTTYPE *const[]){&poly->x0, &poly->x1, &poly->x2}, 3);
 			}
 
 			s_gpu.vertexIndex += 3;
@@ -1535,7 +1570,7 @@ internal int ProcessFlatPoly(P_TAG *polyTag)
 		MakeColourQuad(firstVertex, shadeTexOn, &poly->r0, &poly->r0, &poly->r0, &poly->r0);
 		if (NativeGpu_IsAtlasTPage(poly->tpage))
 		{
-			NativeGpu_DilateAtlasPolygon(firstVertex, 4);
+			NativeGpu_PrepareAtlasPolygon(firstVertex, (const VERTTYPE *const[]){&poly->x0, &poly->x1, &poly->x3, &poly->x2}, 4);
 		}
 
 		TriangulateQuad();
@@ -1584,7 +1619,7 @@ internal int ProcessGouraudPoly(P_TAG *polyTag)
 		MakeColourTriangle(firstVertex, shadeTexOn, &poly->r0, &poly->r1, &poly->r2);
 		if (NativeGpu_IsAtlasTPage(poly->tpage))
 		{
-			NativeGpu_DilateAtlasPolygon(firstVertex, 3);
+			NativeGpu_PrepareAtlasPolygon(firstVertex, (const VERTTYPE *const[]){&poly->x0, &poly->x1, &poly->x2}, 3);
 		}
 
 		s_gpu.vertexIndex += 3;
@@ -1622,7 +1657,7 @@ internal int ProcessGouraudPoly(P_TAG *polyTag)
 		MakeColourQuad(firstVertex, shadeTexOn, &poly->r0, &poly->r1, &poly->r3, &poly->r2);
 		if (NativeGpu_IsAtlasTPage(poly->tpage))
 		{
-			NativeGpu_DilateAtlasPolygon(firstVertex, 4);
+			NativeGpu_PrepareAtlasPolygon(firstVertex, (const VERTTYPE *const[]){&poly->x0, &poly->x1, &poly->x3, &poly->x2}, 4);
 		}
 
 		TriangulateQuad();

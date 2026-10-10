@@ -953,20 +953,26 @@ const char *gte_shader_virtual_atlas = "	uniform sampler2D s_texture;\n"
                                        "			if (color.a < 0.5) discard;\n"
                                        "			color.rgb *= v_color.rgb;\n"
                                        "		}\n"
-                                       "		fragColor = dither(vec4(color.rgb, v_color.a));\n"
+                                       "		ivec2 dc = ivec2(mod(floor(gl_FragCoord.xy), 4.0));\n"
+                                       "		fragColor = vec4(color.rgb + vec3(c_dither[dc.x][dc.y] * v_texcoord.w), v_color.a);\n"
                                        "		fragColor.a = float(psxDrawMaskSet);\n"
                                        "	}\n";
 
 // NOTE(ctr-dust2): a_extra.zw is an outward nudge (1/32 pixel units) that native_gpu.c gives
 // custom-level atlas polygons so neighbours overlap instead of leaving pixel cracks; only the
 // atlas program sets u_extraOffsetScale (the others leave it 0).
-#define GTE_PERSPECTIVE_CORRECTION "	gl_Position = Projection * vec4(a_position.xy + a_extra.zw * u_extraOffsetScale, 0.0, 1.0);\n"
+// a_precise (native_precise.h): xy moves the vertex to its exact position; z, when set, is its
+// relative depth, and scaling the clip position by it makes the interpolation perspective-correct.
+#define GTE_PERSPECTIVE_CORRECTION                                                                                                        \
+	"	gl_Position = Projection * vec4(a_position.xy + a_precise.xy + a_extra.zw * u_extraOffsetScale, 0.0, 1.0);\n"                       \
+	"	if (a_precise.z > 0.0) gl_Position *= a_precise.z;\n"
 
 #define GTE_VERTEX_SHADER                                                                                          \
 	"	attribute vec4 a_position;\n"                                                                                \
 	"	attribute vec4 a_texcoord; // uv, color multiplier, dither\n"                                                \
 	"	attribute vec4 a_color;\n"                                                                                   \
 	"	attribute vec4 a_extra; // texcoord.xy ofs, unused.xy\n"                                                     \
+	"	attribute vec3 a_precise;\n"                                                                                \
 	"	uniform mat4 Projection;\n"                                                                                  \
 	"	uniform float u_extraOffsetScale;\n"                                                                         \
 	"	const vec2 c_UVFudge = vec2(0.00025, 0.00025);\n"                                                            \
@@ -1110,6 +1116,7 @@ internal ShaderID NativeRenderer_Shader_Compile(const char *source, bool isPsxSh
 	glBindAttribLocation(program, a_texcoord, "a_texcoord");
 	glBindAttribLocation(program, a_color, "a_color");
 	glBindAttribLocation(program, a_extra, "a_extra");
+	glBindAttribLocation(program, a_precise, "a_precise");
 
 	glLinkProgram(program);
 	if (NativeRenderer_Shader_CheckProgramStatus(program) == 0)
@@ -1434,6 +1441,8 @@ int NativeRenderer_InitialisePSX(void)
 			glVertexAttribPointer(a_texcoord, 4, GL_UNSIGNED_BYTE, GL_FALSE, sizeof(GrVertex), &((GrVertex *)NULL)->u);
 			glVertexAttribPointer(a_color, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(GrVertex), &((GrVertex *)NULL)->r);
 			glVertexAttribPointer(a_extra, 4, GL_BYTE, GL_FALSE, sizeof(GrVertex), &((GrVertex *)NULL)->tcx);
+			glEnableVertexAttribArray(a_precise);
+			glVertexAttribPointer(a_precise, 3, GL_FLOAT, GL_FALSE, sizeof(GrVertex), &((GrVertex *)NULL)->px);
 		}
 
 		glBindVertexArray(0);

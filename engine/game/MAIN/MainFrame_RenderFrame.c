@@ -940,8 +940,15 @@ void RenderAllLevelGeometry(struct GameTracker *gGT, struct Level *level1, struc
 		                                           gGT->visMem1->bspList[0], numPlyrCurrGame);
 
 		// 226-229
+#ifdef CTR_NATIVE
+		// NOTE(ctr-dust2): exact projections of the level's vertices (native_precise.h)
+		NativePrecise_BeginLevel(LOAD_IsCustomLevel(gGT->levelID));
+#endif
 		DrawLevelOvr1P(&gGT->LevRenderLists[0], pushBuffer, (struct BSP *)ptr_mesh_info, &gGT->backBuffer->primMem, gGT->visMem1->visFaceList[0],
 		               level1->ptr_tex_waterEnvMap); // waterEnvMap?
+#ifdef CTR_NATIVE
+		NativePrecise_EndLevel();
+#endif
 
 		DrawSky_Full(level1->ptr_skybox, pushBuffer, &gGT->backBuffer->primMem);
 

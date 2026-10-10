@@ -464,12 +464,26 @@ static int DrawLevelOvr1P_IsNativeLevelSpan(u32 ptr, u32 size)
 
 #endif
 
+#ifdef CTR_NATIVE
+// NOTE(ctr-dust2): set per frame by DrawLevelOvr1P (LOAD_IsCustomLevel)
+static int sDrawLevelOvr1P_CustomLevel;
+#endif
+
 static int DrawLevelOvr1P_IsNativeLevelTexturePointer(u32 value)
 {
 #ifdef CTR_NATIVE
 	// NOTE(aalhendi): Native classifies host-rebased level texture pointers at
 	// the data boundary; renderer control flow still follows retail sign tests.
 	u32 ptr = (u32)value;
+
+	// NOTE(ctr-dust2): a custom level has no mosaic textures: the word after a face's three
+	// layouts is the first word of a fourth copy (u, v, clut), which can look like an address
+	// inside the heap. Followed as one, it gave faces garbage UVs (black and sky-coloured
+	// floors near the camera, more of them the bigger the heap).
+	if (sDrawLevelOvr1P_CustomLevel)
+	{
+		return 0;
+	}
 
 	if (!DrawLevelOvr1P_IsNativeLevelSpan(ptr, sizeof(struct TextureLayout)))
 	{
@@ -580,17 +594,19 @@ static s8 DrawLevelOvr1P_ReadRetailQuadBlockByte(const struct QuadBlock *block, 
 		u32 hostWord = DrawLevelOvr1P_ReadPackedWord((const u8 *)block + pointerWordOffset);
 		u32 psxWord;
 
+		// NOTE(ctr-dust2): for a custom level these bytes are texture pointers' bytes, not
+		// draw orders (they moved faces by up to 128 OT slots): draw them where they are.
+		if (sDrawLevelOvr1P_CustomLevel)
+		{
+			return 0;
+		}
+
 		// NOTE(aalhendi): Retail reads raw post-ptrmap PSX pointer bytes here;
 		// native level pointer words are host-rebased, so reconstruct that byte.
 		if (DrawLevelOvr1P_TryConvertNativeMempackPointerToPsxWord(hostWord, &psxWord))
 		{
 			return (s8)((psxWord >> ((byteOffset & 3u) * 8)) & 0xff);
 		}
-
-		// NOTE(ctr-dust2): a custom level lies outside the retail 2 MiB window; the host
-		// pointer's own bytes moved faces by up to 128 OT slots (near floors behind the sky
-		// with a bigger heap). Such a level draws them where they are.
-		return 0;
 	}
 #endif
 
@@ -1008,6 +1024,9 @@ static void DrawLevelOvr1P_CopyProjectedScreenDepth(struct DrawLevelOvr1PScratch
 {
 	dst->posScreen[0] = src->posScreen[0];
 	dst->posScreen[1] = src->posScreen[1];
+#ifdef CTR_NATIVE
+	NativePrecise_Copy(&dst->posScreen[0], &src->posScreen[0]);
+#endif
 	dst->depth = src->depth;
 	dst->clipNear = src->clipNear;
 	dst->clipHalfNear = src->clipHalfNear;
@@ -1342,6 +1361,30 @@ static int DrawLevelOvr1P_NclipProjected(const struct DrawLevelOvr1PScratchVerte
 	u32 sxy2;
 	s32 nclip;
 
+#ifdef CTR_NATIVE
+	// NOTE(ctr-dust2): with exact projections (native_precise.h) a face is culled by its exact
+	// winding: on whole pixels thin faces fold to nothing, and leave holes once drawn exactly
+	{
+		float dx[3], dy[3], z;
+		const struct DrawLevelOvr1PScratchVertex *v[3] = {vertex0, vertex1, vertex2};
+		int k;
+
+		for (k = 0; k < 3 && NativePrecise_Get(&v[k]->posScreen[0], &dx[k], &dy[k], &z); k++)
+		{
+		}
+		if (k == 3)
+		{
+			float x[3], y[3];
+			for (k = 0; k < 3; k++)
+			{
+				x[k] = (float)v[k]->posScreen[0] + dx[k];
+				y[k] = (float)v[k]->posScreen[1] + dy[k];
+			}
+			float area = (x[1] - x[0]) * (y[2] - y[0]) - (x[2] - x[0]) * (y[1] - y[0]);
+			return (area > 0.0f) - (area < 0.0f);
+		}
+	}
+#endif
 	u32 sxy0 = (u16)vertex0->posScreen[0] | ((u32)(u16)vertex0->posScreen[1] << 16);
 	u32 sxy1 = (u16)vertex1->posScreen[0] | ((u32)(u16)vertex1->posScreen[1] << 16);
 	sxy2 = (u16)vertex2->posScreen[0] | ((u32)(u16)vertex2->posScreen[1] << 16);
@@ -1360,6 +1403,17 @@ static int DrawLevelOvr1P_NclipProjected(const struct DrawLevelOvr1PScratchVerte
 static u32 DrawLevelOvr1P_PackProjectedSxy(const struct DrawLevelOvr1PScratchVertex *projected)
 {
 	return (u16)projected->posScreen[0] | ((u32)(u16)projected->posScreen[1] << 16);
+}
+
+// NOTE(ctr-dust2): the vertex's exact projection goes with it into the polygon (native_precise.h)
+static void DrawLevelOvr1P_CopyPrecise(void *polyXy, const struct DrawLevelOvr1PScratchVertex *projected)
+{
+#ifdef CTR_NATIVE
+	NativePrecise_Copy(polyXy, &projected->posScreen[0]);
+#else
+	(void)polyXy;
+	(void)projected;
+#endif
 }
 
 static int DrawLevelOvr1P_IsProjectedPolyOffscreenPacked(const struct DrawLevelOvr1PScratchVertex *projected, const int *indices, int count)
@@ -2090,12 +2144,15 @@ static void DrawLevelOvr1P_WriteProjectedGT3(POLY_GT3 *poly, const struct DrawLe
 {
 	CtrGpu_WriteColorCode(&poly->r0, DrawLevelOvr1P_GetProjectedColorCode(&projected[indices[0]], code));
 	CtrGpu_WritePackedXY(&poly->x0, DrawLevelOvr1P_PackProjectedSxy(&projected[indices[0]]));
+	DrawLevelOvr1P_CopyPrecise(&poly->x0, &projected[indices[0]]);
 	CtrGpu_WritePackedUVWord(&poly->u0, uv0);
 	CtrGpu_WriteColorCode(&poly->r1, DrawLevelOvr1P_GetProjectedColorCode(&projected[indices[1]], 0));
 	CtrGpu_WritePackedXY(&poly->x1, DrawLevelOvr1P_PackProjectedSxy(&projected[indices[1]]));
+	DrawLevelOvr1P_CopyPrecise(&poly->x1, &projected[indices[1]]);
 	CtrGpu_WritePackedUVWord(&poly->u1, uv1);
 	CtrGpu_WriteColorCode(&poly->r2, DrawLevelOvr1P_GetProjectedColorCode(&projected[indices[2]], 0));
 	CtrGpu_WritePackedXY(&poly->x2, DrawLevelOvr1P_PackProjectedSxy(&projected[indices[2]]));
+	DrawLevelOvr1P_CopyPrecise(&poly->x2, &projected[indices[2]]);
 	CtrGpu_WritePackedUVWord(&poly->u2, uv2);
 }
 
@@ -2105,6 +2162,7 @@ static void DrawLevelOvr1P_WriteProjectedGT4(POLY_GT4 *poly, const struct DrawLe
 	DrawLevelOvr1P_WriteProjectedGT3((POLY_GT3 *)poly, projected, indices, code, uv0, uv1, uv2);
 	CtrGpu_WriteColorCode(&poly->r3, DrawLevelOvr1P_GetProjectedColorCode(&projected[indices[3]], 0));
 	CtrGpu_WritePackedXY(&poly->x3, DrawLevelOvr1P_PackProjectedSxy(&projected[indices[3]]));
+	DrawLevelOvr1P_CopyPrecise(&poly->x3, &projected[indices[3]]);
 	CtrGpu_WritePackedUVWord(&poly->u3, uv2 >> 16);
 }
 
@@ -2585,12 +2643,15 @@ static void DrawLevelOvr1P_WriteClipRecordGT3(POLY_GT3 *poly, const struct DrawL
 {
 	CtrGpu_WriteColorCode(&poly->r0, DrawLevelOvr1P_GetClipRecordColorCode(&emit[0], code));
 	CtrGpu_WritePackedXY(&poly->x0, DrawLevelOvr1P_PackProjectedSxy(&emit[0]));
+	DrawLevelOvr1P_CopyPrecise(&poly->x0, &emit[0]);
 	CtrGpu_WritePackedUVWord(&poly->u0, uv0);
 	CtrGpu_WriteColorCode(&poly->r1, DrawLevelOvr1P_GetClipRecordColorCode(&emit[1], 0));
 	CtrGpu_WritePackedXY(&poly->x1, DrawLevelOvr1P_PackProjectedSxy(&emit[1]));
+	DrawLevelOvr1P_CopyPrecise(&poly->x1, &emit[1]);
 	CtrGpu_WritePackedUVWord(&poly->u1, uv1);
 	CtrGpu_WriteColorCode(&poly->r2, DrawLevelOvr1P_GetClipRecordColorCode(&emit[2], 0));
 	CtrGpu_WritePackedXY(&poly->x2, DrawLevelOvr1P_PackProjectedSxy(&emit[2]));
+	DrawLevelOvr1P_CopyPrecise(&poly->x2, &emit[2]);
 	CtrGpu_WritePackedUVWord(&poly->u2, uv2);
 }
 
@@ -2599,6 +2660,7 @@ static void DrawLevelOvr1P_WriteClipRecordGT4(POLY_GT4 *poly, const struct DrawL
 	DrawLevelOvr1P_WriteClipRecordGT3((POLY_GT3 *)poly, emit, code, uv0, uv1, uv2);
 	CtrGpu_WriteColorCode(&poly->r3, DrawLevelOvr1P_GetClipRecordColorCode(&emit[3], 0));
 	CtrGpu_WritePackedXY(&poly->x3, DrawLevelOvr1P_PackProjectedSxy(&emit[3]));
+	DrawLevelOvr1P_CopyPrecise(&poly->x3, &emit[3]);
 	CtrGpu_WritePackedUVWord(&poly->u3, DrawLevelOvr1P_GetClipRecordSignedUvWord(&emit[3]));
 }
 
@@ -9770,6 +9832,10 @@ void DrawLevelOvr1P(void *LevRenderList, struct PushBuffer *pb, struct BSP *bspL
 	// restores it at 0x800a0eb8. Native records a stack anchor only so later
 	// scratch users see the same entry-owned word; the host ABI owns SP.
 	DrawLevelOvr1P_Scratch()->savedStackPtr32 = (u32)(u32)&hostStackAnchor;
+
+#ifdef CTR_NATIVE
+	sDrawLevelOvr1P_CustomLevel = LOAD_IsCustomLevel(sdata->gGT->levelID);
+#endif
 
 	DrawLevelOvr1P_Scratch()->primMemEndPtr32 = (u32)(u32)primMem->end;
 	DrawLevelOvr1P_Scratch()->visFaceListPtr32 = (u32)(u32)visFaceList;

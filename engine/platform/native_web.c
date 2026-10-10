@@ -74,6 +74,12 @@ extern int g_nativeWebHeldButtons;
 // Test hooks for the page (window.ctr in web/index.html).
 
 // NOTE(ctr-dust2): ?scale=N draws the frame N times the PS1's resolution
+// NOTE(ctr-dust2): ?exact=0 draws custom levels on whole pixels, affinely (native_precise.h)
+EMSCRIPTEN_KEEPALIVE void NativeWeb_SetExactVertices(int on)
+{
+	NativePrecise_Allow(on);
+}
+
 EMSCRIPTEN_KEEPALIVE void NativeWeb_SetRenderScale(int scale)
 {
 	NativeRenderer_SetRenderScale(scale);
