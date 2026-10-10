@@ -123,13 +123,13 @@ def main(iso, disc, outdir, name='bayworld'):
         data, _ = levwriter.write_level(levwriter.Level(quads=out, max_leaf_quads=max(LEAF_QUADS, -(-len(out) // TILE_LEAVES))))
         with open(os.path.join(tile_dir, f'T_{i}_{j}.lev'), 'wb') as f:
             f.write(data)
-        index.append((i, j))
+        index.append((i, j, len(data)))
         print(f'tile {i},{j}: {len(out)} quadblocks, {track.vertex_count(out)} vertices, {len(data) >> 10} KB ({time.time() - t0:.0f} s)')
-    # index.bin: 'WRLD', tile size (units), count, then (i, j) s16 pairs
+    # index.bin: 'WRLD', tile size (units), count, then per tile (i, j) s16 and its file's bytes
     with open(os.path.join(tile_dir, 'index.bin'), 'wb') as f:
         f.write(struct.pack('<4sii', b'WRLD', size, len(index)))
-        for i, j in index:
-            f.write(struct.pack('<hh', i, j))
+        for i, j, n in index:
+            f.write(struct.pack('<hhI', i, j, n))
     meta_path = os.path.join(outdir, f'{name}.json')
     meta = json.load(open(meta_path))
     meta['world'] = dict(tiles=f'{name}_tiles', tile=size, count=len(index))

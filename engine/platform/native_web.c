@@ -90,7 +90,8 @@ EMSCRIPTEN_KEEPALIVE void NativeWeb_GetOrigin(int *out)
 	NativeWorld_GetOrigin(out);
 }
 
-// out: active, centre tile i, j, quadblocks in the window, last assembly (microseconds), tiles
+// out: active, centre tile i, j, quadblocks in the window, last assembly (microseconds), tiles,
+// tiles loaded, last tile load (microseconds)
 EMSCRIPTEN_KEEPALIVE int NativeWeb_WorldInfo(int *out)
 {
 	return NativeWorld_Info(out);
