@@ -48,15 +48,14 @@ for cfg in tools/maps/de_*.py tools/maps/cs_*.py; do
   fi
 done
 
-# Bayview's stretches, from Need for Speed: Underground 2's disc, the same way.
+# Bayview, from Need for Speed: Underground 2's disc: the whole city, in tiles the game streams
+# as you drive (about 650 MB).
 if [ -f "$NFSU2_ISO" ]; then
-  for area in $(python3 -I tools/build_bayview.py --areas); do
-    lev="$ROOT/build/lev/${area}_free.lev"
-    if [ ! -f "$lev" ] || [ -n "$(find tools -maxdepth 2 -name '*.py' -newer "$lev" | head -1)" ]; then
-      echo "Building $area from Need for Speed: Underground 2 (a minute or two)..."
-      python3 -I tools/build_bayview.py "$NFSU2_ISO" "$DISC" "$ROOT/build/lev" "$area"
-    fi
-  done
+  index="$ROOT/build/lev/bayview_tiles/index.bin"
+  if [ ! -f "$index" ] || [ -n "$(find tools -maxdepth 2 -name '*.py' -newer "$index" | head -1)" ]; then
+    echo "Building Bayview from Need for Speed: Underground 2 (five to ten minutes)..."
+    python3 -I tools/build_world.py "$NFSU2_ISO" "$DISC" "$ROOT/build/lev" bayview
+  fi
 fi
 
 # The game, when it's missing or older than its sources.

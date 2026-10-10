@@ -2,9 +2,9 @@
 
 Crash Team Racing's kart, with the game's own driving code, on Counter-Strike 1.6's maps,
 built from the game's own map files: de_dust2, de_aztec and de_inferno so far. And on Bayview,
-Need for Speed: Underground 2's city, from its PS2 disc: three loops of its streets (City Core,
-Coal Harbor, Jackson Heights). For now every map is a free drive, no laps: pick one and drive
-it round. Races come next, the same way for every map.
+Need for Speed: Underground 2's city, from its PS2 disc: all of it, about five kilometres
+across, streamed in as you drive. For now every map is a free drive, no laps: pick one and
+drive it round. Races come next, the same way for every map.
 
 - `engine/` is [ctr-native](https://github.com/CTR-tools/ctr-native) (the CTR decompilation as a
   native port, GPL-3.0) with a WebAssembly platform layer: the kart physics, the collision and
@@ -95,10 +95,13 @@ lists what's been built.
 
 `tools/nfsu2/` reads Need for Speed: Underground 2's files from the disc image (its PS2 meshes,
 textures, the props' placing, the night's light baked into vertex colours) and
-`tools/build_bayview.py` makes a loop of streets a level: `python3 -I tools/build_bayview.py
-NFSU2.iso CTR_DISC.bin build/lev AREA` (`--areas` lists them). Each map is a stretch of
-the city along a loop, and what's by it, in up to 400,000 vertices. NOTES.md has
-how the PS2 data is laid out.
+`tools/build_bayview.py` makes a loop of streets a level (`--areas` lists them). A CTR level's
+positions are 16-bit, about a kilometre across, so `tools/build_world.py` builds the whole city
+as 256 m tiles (`python3 -I tools/build_world.py NFSU2.iso CTR_DISC.bin build/lev bayview`,
+which `play.sh` runs): the game puts the 3 x 3 round the kart together as the level, fetches
+the next ones as it drives, and moves everything back round the origin as it crosses into a
+new tile (`engine/platform/native_world.c`). It starts on City Core's loop. NOTES.md has how
+the PS2 data is laid out.
 
 ## Credits
 
