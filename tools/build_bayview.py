@@ -532,7 +532,12 @@ def find_route(world, groups, cutouts, cfg, cache):
     return route
 
 
-def main(iso, disc, outdir, area='citycore'):
+def main(iso, disc, outdir, area='citycore', world=None, name=None, center=None, floor_z=None, atlas=None,
+         quick=False):
+    """Builds AREA into OUTDIR. For tools/build_world.py, which makes the area a bigger world's
+    starting level: world (an open Bayview), name (the files'), center and floor_z (the world's
+    coordinates), atlas ((rects, layers) from pack_textures: the world's textures) and quick
+    (no visibility pruning or painter's audit: the world's tiles replace the level's mesh)."""
     import navgrid
     from navgrid import NavGrid
     # 2 m grid cells: a city is big, its streets wide
@@ -540,7 +545,7 @@ def main(iso, disc, outdir, area='citycore'):
     t_start = time.time()
     cfg = AREAS[area]
     os.makedirs(outdir, exist_ok=True)
-    world = Bayview(iso)
+    world = world or Bayview(iso)
     wps = np.array(cfg['waypoints'], dtype=float)
     margin = max(CORRIDOR.values()) + 20.0
     bounds = (wps[:, 0].min() - margin, wps[:, 1].min() - margin, wps[:, 0].max() + margin, wps[:, 1].max() + margin)
@@ -552,8 +557,8 @@ def main(iso, disc, outdir, area='citycore'):
     print(f'{sum(len(g[0]) for g in groups.values())} triangles round the waypoints, {len(groups)} textures')
     track.SCALE = SCALE
     allp = np.concatenate([g[0].reshape(-1, 3) for g in groups.values()])
-    track.CENTER = ((bounds[0] + bounds[2]) / 2, (bounds[1] + bounds[3]) / 2)
-    track.FLOOR_Z = float(np.percentile(allp[:, 2], 1))
+    track.CENTER = center or ((bounds[0] + bounds[2]) / 2, (bounds[1] + bounds[3]) / 2)
+    track.FLOOR_Z = float(np.percentile(allp[:, 2], 1)) if floor_z is None else floor_z
     print(f'centre {track.CENTER}, floor z {track.FLOOR_Z:.1f}')
     # NFSU2's floors are small (half the streets' triangles have sides under 10 m): the floor
     # grid only cuts its big terrain
@@ -573,12 +578,12 @@ def main(iso, disc, outdir, area='citycore'):
     kill_y = int((allp[:, 2].min() - track.FLOOR_Z) * SCALE) - 600
     print(f'{sum(len(g[0]) for g in groups.values())} triangles along it, {len(open_edges)} open floor edges')
 
-    rects, layers = pack_textures(world.textures, list(groups), cutouts)
+    rects, layers = atlas or pack_textures(world.textures, list(groups), cutouts)
     print(f'{len(rects)} textures in {len(layers)} atlas layers')
     g = NavGrid(nav_quads(groups, cutouts))
     start = street_node(g, groups, world, *wps[0])
     near = build_map.near_drivable(g, start)
-    if os.environ.get('VISIBILITY') != '0':
+    if os.environ.get('VISIBILITY') != '0' and not quick:
         groups = visible_only(groups, cutouts, g, start, outdir)
     tris = make_tris(world, groups, rects, cutouts, near)
     tri_near = lambda t: near(t.p)   # noqa: E731
@@ -609,13 +614,14 @@ def main(iso, disc, outdir, area='citycore'):
     landmarks = {nm: [int(p[0]), int(p[1]), int(p[2]), 0] for nm, p in zip(names, pts)}
     p0, p1 = np.array(pts[0]), np.array(pts[1])
     landmarks['p0'][3] = int(round(math.atan2(p1[0] - p0[0], p1[2] - p0[2]) / (2 * math.pi) * 4096)) % 4096
-    out = track.painter_cuts(tris, ramps, g, start, area, near=tri_near, polygons=polygons)
+    if not quick:
+        out = track.painter_cuts(tris, ramps, g, start, area, near=tri_near, polygons=polygons)
     print(f'{len(out)} quadblocks')
     track.kill_plane(out, y=kill_y)
     bases, vrms = track.base_levels(disc)
     cells = track.drivable_cells(g, start)
     window = track.minimap_window(cells)
-    name = area
+    name = name or area
     nodes, spawns, route_info, nav = track.race_setup(out, g, landmarks, names + ['p0'])
     free_nodes, free_cp = track.free_setup(out, g)
     for qi, q in enumerate(out):

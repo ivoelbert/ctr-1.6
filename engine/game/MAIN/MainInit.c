@@ -476,6 +476,11 @@ void MainInit_FinalizeInit(struct GameTracker *gGT)
 		gGT->trackLength_x_numLaps_x_8 = lev1->ptr_restart_points[0].distToFinish * gGT->numLaps * 8;
 	}
 
+#ifdef CTR_NATIVE
+	// NOTE(ctr-dust2): a tiled world's mesh in place of the level's (native_world.h)
+	NativeWorld_LevelStart(gGT);
+#endif
+
 	MainInit_Drivers(gGT);
 
 	// assume 1P fov
@@ -603,6 +608,10 @@ void MainInit_FinalizeInit(struct GameTracker *gGT)
 	}
 
 	MainInit_VisMem(gGT);
+
+#ifdef CTR_NATIVE
+	NativeWorld_LevelReady(gGT);
+#endif
 
 	MainInit_RainBuffer(gGT);
 
