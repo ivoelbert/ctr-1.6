@@ -321,11 +321,11 @@
     launcher.hidden = true;
     canvas.focus();
     installHooks();
-    // ?scale=N: the frame drawn N times the PS1's resolution (1: as the PS1 drew it)
-    const scale = Number(params.get('scale') ?? 1);
-    if (scale > 1) Module._NativeWeb_SetRenderScale(Math.min(8, Math.floor(scale)));
-    // ?exact=0: a custom level's vertices on whole pixels, textures mapped affinely, as the PS1 drew them
-    if (params.get('exact') === '0') Module._NativeWeb_SetExactVertices(0);
+    // the frame drawn as many times the PS1's resolution (512 x 240) as the screen shows, up to 4
+    const fitScale = () => Module._NativeWeb_SetRenderScale(
+      Math.min(4, Math.max(1, Math.ceil(canvas.clientHeight * (window.devicePixelRatio || 1) / 240))));
+    fitScale();
+    window.addEventListener('resize', fitScale);
     Module.callMain([]);
   }
 

@@ -16,7 +16,7 @@ Dust 2 from a Sketchfab model of it, then moved every map to Counter-Strike's ow
   - `platform/native_precise.c` (PGXP-style): while a custom level draws, each GTE projection's
     exact position and depth follow its whole-pixel word into the polygons, which are drawn at
     sub-pixel positions with perspective-correct textures and culled by their exact winding
-    (whole pixels fold thin faces to nothing: holes once drawn exactly). `?exact=0` turns it off.
+    (whole pixels fold thin faces to nothing: holes once drawn exactly).
   - `platform/native_renderer.c` + `native_gpu.c`: `TF_VIRTUAL_ATLAS`, tpage colour mode 3
     samples `/assets/dust2/atlas.rgba`; CLUT = layer << 10 | (y / 32) << 5 | (x / 32). A
     "CTRA" atlas has the light baked in (Counter-Strike's maps); a "CTRV" atlas (Bayview) is
