@@ -156,14 +156,22 @@ def floor_at(floors, x, y, z, tol=1.0):
 def drivable_stairs(tris):
     """Staircases with a floor at the foot of the first riser and on top of the last one."""
     floors = [P for P, n in tris if n[2] > 0.99]
-    out = []
-    for st in chain(find_risers(tris)):
+
+    def drivable(st):
         first, last = st[0], st[-1]
         mid_a = (first.a + first.b) / 2
         mid_b = (last.a + last.b) / 2
-        if not floor_at(floors, *(mid_a + first.n * 6), first.z0):
-            continue
-        if not floor_at(floors, *(mid_b - last.n * 6), last.z1):
-            continue
-        out.append(st)
+        return (floor_at(floors, *(mid_a + first.n * 6), first.z0)
+                and floor_at(floors, *(mid_b - last.n * 6), last.z1))
+
+    # A chain can run on into something that isn't a step (Inferno's banana: its bottom step
+    # chained to a crate's ledge beside it): the longest drivable run from its foot, and the
+    # rest of the chain is tried the same way.
+    out = []
+    for st in chain(find_risers(tris)):
+        while st:
+            k = next((k for k in range(len(st), 0, -1) if drivable(st[:k])), 0)
+            if k:
+                out.append(st[:k])
+            st = st[max(k, 1):]
     return out
