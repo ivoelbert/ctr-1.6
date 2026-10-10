@@ -63,6 +63,9 @@ global_variable b32 s_gpuTimerActive;
 
 global_variable BlendMode s_previousBlendMode = BM_NONE;
 global_variable int s_previousDepthMode = 0;
+global_variable u32 s_depthFrame = 1; // NOTE(ctr-dust2): frames swapped (NativeRenderer_SetDepthMode)
+global_variable u32 s_depthClearedFrame;
+global_variable RECT16 s_depthClearedClip;
 global_variable int s_previousStencilMode = 0;
 global_variable int s_previousScissorState = 0;
 global_variable int s_previousOffscreenState = 0;
@@ -544,13 +547,14 @@ internal void NativeRenderer_InitRenderTarget(struct NativeRenderTarget *target)
 
 	glGenRenderbuffers(1, &target->stencilBuffer);
 	glBindRenderbuffer(GL_RENDERBUFFER, target->stencilBuffer);
-	glRenderbufferStorage(GL_RENDERBUFFER, GL_STENCIL_INDEX8, 1, 1);
+	// NOTE(ctr-dust2): depth too: a custom level's polygons are depth-tested (NativeRenderer_SetDepthMode)
+	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, 1, 1);
 	glBindRenderbuffer(GL_RENDERBUFFER, 0);
 
 	glGenFramebuffers(1, &target->framebuffer);
 	glBindFramebuffer(GL_FRAMEBUFFER, target->framebuffer);
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, target->texture, 0);
-	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_STENCIL_ATTACHMENT, GL_RENDERBUFFER, target->stencilBuffer);
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, target->stencilBuffer);
 	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
 	{
 		NATIVE_RENDERER_ERROR("%s\n", "failed to create RGBA/stencil render target");
@@ -588,7 +592,7 @@ internal void NativeRenderer_EnsureRenderTarget(struct NativeRenderTarget *targe
 	glBindTexture(GL_TEXTURE_2D, 0);
 
 	glBindRenderbuffer(GL_RENDERBUFFER, target->stencilBuffer);
-	glRenderbufferStorage(GL_RENDERBUFFER, GL_STENCIL_INDEX8, width, height);
+	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, width, height);
 	glBindRenderbuffer(GL_RENDERBUFFER, 0);
 
 	target->width = width;
@@ -975,6 +979,12 @@ const char *gte_shader_virtual_atlas = "	uniform sampler2D s_texture;\n"
 	"	gl_Position = Projection * vec4(a_position.xy + a_precise.xy + a_extra.zw * u_extraOffsetScale, 0.0, 1.0);\n"                       \
 	"	if (a_precise.z > 0.0) gl_Position *= a_precise.z;\n"
 
+// NOTE(ctr-dust2): a custom level's exact depth (a_precise.z: the vertex's z / 2^30, see
+// native_gpu.c) for the depth test its polygons get; the rest (depth test off) sits at the far end.
+#define GTE_EXACT_DEPTH                                                                                     \
+	"	if (a_precise.z > 0.0) gl_Position.z = (2.0 * min(a_precise.z, 1.0) - 1.0) * gl_Position.w;\n" \
+	"	else gl_Position.z = 0.999 * gl_Position.w;\n"
+
 #define GTE_VERTEX_SHADER                                                                                          \
 	"	attribute vec4 a_position;\n"                                                                                \
 	"	attribute vec4 a_texcoord; // uv, color multiplier, dither\n"                                                \
@@ -995,7 +1005,7 @@ const char *gte_shader_virtual_atlas = "	uniform sampler2D s_texture;\n"
 	"		v_page_clut.z = fract(a_position.w / 64.0);\n"                                                              \
 	"		v_page_clut.w = floor(a_position.w / 64.0) / 512.0;\n"                                                      \
 	"		v_page_clut.xy += c_UVFudge;\n"                                                                             \
-	"		v_page_clut.zw += c_UVFudge;\n" GTE_PERSPECTIVE_CORRECTION "		v_z = (gl_Position.z - 40.0) * 0.005;\n" \
+	"		v_page_clut.zw += c_UVFudge;\n" GTE_PERSPECTIVE_CORRECTION "		v_z = (gl_Position.z - 40.0) * 0.005;\n" GTE_EXACT_DEPTH \
 	"	}\n"
 
 internal int NativeRenderer_Shader_CheckShaderStatus(GLuint shader)
@@ -2388,6 +2398,7 @@ void NativeRenderer_SwapWindow(void)
 {
 	NativePerf_BeginScope(NATIVE_PERF_BUCKET_SWAP_WINDOW);
 	SDL_GL_SwapWindow(g_window);
+	s_depthFrame++;
 	NativePerf_EndScope(NATIVE_PERF_BUCKET_SWAP_WINDOW);
 }
 
@@ -2401,6 +2412,47 @@ internal void NativeRenderer_EnableDepth(int enable)
 	s_previousDepthMode = enable;
 
 	glDisable(GL_DEPTH_TEST);
+}
+
+// NOTE(ctr-dust2): CTR has no depth buffer: it paints each frame's faces far to near, a level face
+// filed by its farthest corner (a metre to a slot on a city). Long overlapping faces (a highway
+// over a street) come out in the wrong order. A custom level's faces carry their exact depths
+// (native_precise.h), so they are depth-tested against each other; everything else (karts,
+// effects, the sky, the HUD) is painted in CTR's order as before. The depth is cleared at a
+// frame's first level face in each viewport.
+global_variable int s_levelDepth = 1;
+
+void NativeRenderer_SetLevelDepth(int on)
+{
+	s_levelDepth = on;
+}
+
+void NativeRenderer_SetDepthMode(int enable, const RECT16 *clip)
+{
+	enable = enable && s_levelDepth;
+	if (enable && (s_depthClearedFrame != s_depthFrame || s_depthClearedClip.x != clip->x || s_depthClearedClip.y != clip->y ||
+	               s_depthClearedClip.w != clip->w || s_depthClearedClip.h != clip->h))
+	{
+		s_depthClearedFrame = s_depthFrame;
+		s_depthClearedClip = *clip;
+		glDepthMask(GL_TRUE);
+		glClear(GL_DEPTH_BUFFER_BIT);
+	}
+	if (s_previousDepthMode == enable)
+	{
+		return;
+	}
+	s_previousDepthMode = enable;
+	if (enable)
+	{
+		glEnable(GL_DEPTH_TEST);
+		glDepthMask(GL_TRUE);
+	}
+	else
+	{
+		glDisable(GL_DEPTH_TEST);
+		glDepthMask(GL_FALSE);
+	}
 }
 
 void NativeRenderer_SetStencilMode(int drawPrim)

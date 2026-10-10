@@ -97,6 +97,22 @@ EMSCRIPTEN_KEEPALIVE int NativeWeb_WorldInfo(int *out)
 	return NativeWorld_Info(out);
 }
 
+// NOTE(ctr-dust2): ?depth=0 turns off a custom level's depth test (NativeRenderer_SetDepthMode)
+EMSCRIPTEN_KEEPALIVE void NativeWeb_SetLevelDepth(int on)
+{
+	NativeRenderer_SetLevelDepth(on);
+}
+
+extern int g_nativeGpuAtlasPolys, g_nativeGpuAtlasExact;
+// atlas polygons drawn since the last call, and how many had exact depths (and reset)
+EMSCRIPTEN_KEEPALIVE int NativeWeb_AtlasExact(int *out)
+{
+	out[0] = g_nativeGpuAtlasPolys;
+	out[1] = g_nativeGpuAtlasExact;
+	g_nativeGpuAtlasPolys = g_nativeGpuAtlasExact = 0;
+	return out[0];
+}
+
 EMSCRIPTEN_KEEPALIVE void NativeWeb_SetButtons(int mask)
 {
 	g_nativeWebHeldButtons = mask & 0xffff;

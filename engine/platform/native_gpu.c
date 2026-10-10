@@ -89,6 +89,7 @@ typedef struct
 	u16 numVerts;
 
 	const char *debugText;
+	bool exact; // NOTE(ctr-dust2): atlas polygons with exact depths: depth-tested (DrawSplit)
 } GPUDrawSplit;
 
 #define MAX_DRAW_SPLITS 4096
@@ -102,6 +103,7 @@ typedef struct
 
 	int drawPrimMode;
 	bool psxDrawMaskSet;
+	bool atlasExact; // NOTE(ctr-dust2): the next polygon's depths are exact (NativeGpu_PolyExact)
 	bool framebufferFeedbackRunActive;
 
 	GrVertex vertexBuffer[MAX_VERTEX_BUFFER_SIZE];
@@ -741,6 +743,9 @@ internal bool NativeGpu_IsAtlasTPage(int tpage)
 // NOTE(ctr-dust2): exact positions and depths for a custom level's polygon (native_precise.h),
 // from its vertices' words (xy, in the order of v). Without a depth for every vertex the
 // polygon is textured affinely.
+// NOTE(ctr-dust2): atlas polygons since the last read, and how many had exact depths (tests)
+int g_nativeGpuAtlasPolys, g_nativeGpuAtlasExact;
+
 internal void NativeGpu_ApplyPrecise(GrVertex *v, const VERTTYPE *const *xy, int n)
 {
 	float z[4], zmax = 0.0f;
@@ -759,9 +764,14 @@ internal void NativeGpu_ApplyPrecise(GrVertex *v, const VERTTYPE *const *xy, int
 			z[i] = 0.0f;
 		}
 	}
+	g_nativeGpuAtlasPolys++;
+	g_nativeGpuAtlasExact += (found == n && zmax > 0.0f);
 	for (int i = 0; i < n; i++)
 	{
-		v[i].pw = (found == n && zmax > 0.0f) ? z[i] / zmax : 0.0f;
+		// the depth on one scale for every face (perspective-correct texturing only needs it
+		// proportional within a face; the depth test, across faces): z / 2^30, 2^30 being
+		// 262144 units (z counts 4096 to the unit)
+		v[i].pw = (found == n && zmax > 0.0f) ? z[i] / 1073741824.0f : 0.0f;
 	}
 }
 
@@ -830,6 +840,25 @@ internal void NativeGpu_DilateAtlasPolygon(GrVertex *v, int n)
 
 // NOTE(ctr-dust2): an atlas polygon's exact positions and depths (native_precise.h), then its
 // edges pushed out (on the exact positions: whole pixels lined T-junctions up, exact ones don't)
+// Whether every corner of a polygon has its exact depth (its split is depth-tested; one without,
+// a few a frame, near the camera, is painted in CTR's order as before and writes no depth).
+internal bool NativeGpu_PolyExact(u16 tpage, const VERTTYPE *const *xy, int n)
+{
+	if (!NativeGpu_IsAtlasTPage(tpage))
+	{
+		return false;
+	}
+	for (int i = 0; i < n; i++)
+	{
+		float dx, dy, z;
+		if (!NativePrecise_Get(xy[i], &dx, &dy, &z) || z <= 0.0f)
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
 internal void NativeGpu_PrepareAtlasPolygon(GrVertex *v, const VERTTYPE *const *xy, int n)
 {
 	NativeGpu_ApplyPrecise(v, xy, n);
@@ -963,7 +992,7 @@ internal void AddSplit(bool semiTrans, bool textured, bool framebufferFeedback)
 	    curSplit->psxTextureOutputSTP == psxTextureOutputSTP && curSplit->psxDrawMaskSet == s_gpu.psxDrawMaskSet &&
 	    curSplit->drawenv.clip.x == activeDrawEnv.clip.x && curSplit->drawenv.clip.y == activeDrawEnv.clip.y &&
 	    curSplit->drawenv.clip.w == activeDrawEnv.clip.w && curSplit->drawenv.clip.h == activeDrawEnv.clip.h && curSplit->drawenv.dfe == activeDrawEnv.dfe &&
-	    curSplit->debugText == s_gpu.currentSplitDebugText)
+	    curSplit->debugText == s_gpu.currentSplitDebugText && curSplit->exact == (texFormat == TF_VIRTUAL_ATLAS && s_gpu.atlasExact))
 	{
 		return;
 	}
@@ -987,6 +1016,7 @@ internal void AddSplit(bool semiTrans, bool textured, bool framebufferFeedback)
 	split->drawenv = activeDrawEnv;
 	split->dispenv = activeDispEnv;
 	split->debugText = s_gpu.currentSplitDebugText;
+	split->exact = texFormat == TF_VIRTUAL_ATLAS && s_gpu.atlasExact;
 
 	split->drawenv.tw.w = s_gpu.overrideTextureWidth;
 	split->drawenv.tw.h = s_gpu.overrideTextureHeight;
@@ -1032,6 +1062,8 @@ void DrawSplit(const GPUDrawSplit *split)
 	NativeRenderer_SetupClipMode(&split->drawenv.clip, &split->dispenv, drawOnScreen);
 	NativeRenderer_SetOffscreenState(&split->drawenv.clip, !drawOnScreen);
 	NativeRenderer_SetProjection(&split->drawenv.clip, &split->dispenv, !drawOnScreen);
+	// NOTE(ctr-dust2): a custom level's faces are depth-tested (NativeRenderer_SetDepthMode)
+	NativeRenderer_SetDepthMode(split->exact && drawOnScreen, &split->drawenv.clip);
 
 	if (split->psxTexturedSemiTrans)
 	{
@@ -1524,6 +1556,7 @@ internal int ProcessFlatPoly(P_TAG *polyTag)
 		// It is an official hack from SCE devs to not use DR_TPAGE and instead use null polygon
 		if (!IsNull(poly))
 		{
+			s_gpu.atlasExact = NativeGpu_PolyExact(poly->tpage, (const VERTTYPE *const[]){&poly->x0, &poly->x1, &poly->x2}, 3);
 			AddSplit(semiTrans, true, NativeGpu_TPageOverlapsActiveDrawPage(poly->tpage));
 
 			GrVertex *firstVertex = &s_gpu.vertexBuffer[s_gpu.vertexIndex];
@@ -1561,6 +1594,7 @@ internal int ProcessFlatPoly(P_TAG *polyTag)
 		POLY_FT4 *poly = (POLY_FT4 *)polyTag;
 		activeDrawEnv.tpage = poly->tpage;
 
+		s_gpu.atlasExact = NativeGpu_PolyExact(poly->tpage, (const VERTTYPE *const[]){&poly->x0, &poly->x1, &poly->x3, &poly->x2}, 4);
 		AddSplit(semiTrans, true, NativeGpu_TPageOverlapsActiveDrawPage(poly->tpage));
 
 		GrVertex *firstVertex = &s_gpu.vertexBuffer[s_gpu.vertexIndex];
@@ -1611,6 +1645,7 @@ internal int ProcessGouraudPoly(P_TAG *polyTag)
 		POLY_GT3 *poly = (POLY_GT3 *)polyTag;
 		activeDrawEnv.tpage = poly->tpage;
 
+		s_gpu.atlasExact = NativeGpu_PolyExact(poly->tpage, (const VERTTYPE *const[]){&poly->x0, &poly->x1, &poly->x2}, 3);
 		AddSplit(semiTrans, true, NativeGpu_TPageOverlapsActiveDrawPage(poly->tpage));
 
 		GrVertex *firstVertex = &s_gpu.vertexBuffer[s_gpu.vertexIndex];
@@ -1648,6 +1683,7 @@ internal int ProcessGouraudPoly(P_TAG *polyTag)
 		POLY_GT4 *poly = (POLY_GT4 *)polyTag;
 		activeDrawEnv.tpage = poly->tpage;
 
+		s_gpu.atlasExact = NativeGpu_PolyExact(poly->tpage, (const VERTTYPE *const[]){&poly->x0, &poly->x1, &poly->x3, &poly->x2}, 4);
 		AddSplit(semiTrans, true, NativeGpu_TPageOverlapsActiveDrawPage(poly->tpage));
 
 		GrVertex *firstVertex = &s_gpu.vertexBuffer[s_gpu.vertexIndex];
