@@ -265,6 +265,8 @@
       const dir = `lev/${meta.world.tiles}`;
       const index = new Uint8Array(await (await fetch(`${dir}/index.bin`, { cache: 'no-store' })).arrayBuffer());
       Module.FS.writeFile('/assets/world/index.bin', index);
+      const map = await fetch(`${dir}/map.bin`, { cache: 'no-store' });
+      if (map.ok) Module.FS.writeFile('/assets/world/map.bin', new Uint8Array(await map.arrayBuffer()));
       const view = new DataView(index.buffer);
       const tiles = [];
       for (let k = 0; k < view.getInt32(8, true); k++) tiles.push([view.getInt16(12 + 8 * k, true), view.getInt16(14 + 8 * k, true)]);

@@ -20,5 +20,7 @@ void NativeWorld_LevelStart(struct GameTracker *gGT);
 void NativeWorld_LevelReady(struct GameTracker *gGT);
 int NativeWorld_OwnsSpan(unsigned int ptr, unsigned int size);
 int NativeWorld_Info(int *out);
+struct UIMap;
+int NativeWorld_MapIconPos(const struct UIMap *map, int *posX, int *posY);
 
 #endif

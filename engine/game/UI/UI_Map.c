@@ -161,6 +161,16 @@ void UI_Map_GetIconPos(struct UIMap *map, s32 *posX, s32 *posY)
 	s32 mode = map->mode;
 
 #ifdef CTR_NATIVE
+	// NOTE(ctr-dust2): a world's minimap scrolls with the kart (native_world.h)
+	if (NativeWorld_MapIconPos(map, posX, posY))
+	{
+		if (GAME_TRACKER->numPlyrCurrGame == 3)
+		{
+			*posX -= UI_MAP_3P_OFFSET_X;
+			*posY += UI_MAP_3P_OFFSET_Y;
+		}
+		return;
+	}
 	// NOTE(ctr-dust2): the map is placed in the level's own coordinates; with the origin moved
 	// (native_world.h), positions in play are back in those first
 	{
