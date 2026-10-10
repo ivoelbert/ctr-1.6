@@ -14,10 +14,12 @@
 
 #if defined(CTR_DUST2_EXPANDED_MEMPACK)
 // NOTE(ctr-dust2): Custom levels are several megabytes (tens, with vertex banks); the heap
-// keeps the retail start offset but runs to the end of a 128 MiB buffer. (Primitive links
+// keeps the retail start offset but runs to the end of a 64 MiB buffer. (At 128 MiB, floors
+// near the camera went missing: something in the level renderer breaks with addresses past
+// 64 MiB, not found yet.) (Primitive links
 // are 24-bit tokens for registered ranges, native_gpu_links.c, not raw addresses, so
 // the heap's size doesn't touch them.)
-#define CTR_NATIVE_MEMPACK_BUFFER_SIZE  0x8000000u
+#define CTR_NATIVE_MEMPACK_BUFFER_SIZE  0x4000000u
 #define CTR_NATIVE_MEMPACK_START_OFFSET 0xba9f0u
 #define CTR_NATIVE_MEMPACK_SIZE         (CTR_NATIVE_MEMPACK_BUFFER_SIZE - CTR_NATIVE_MEMPACK_START_OFFSET - MEMPACK_PS1_END_GUARD_SIZE)
 #else
