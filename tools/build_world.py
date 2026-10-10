@@ -1,4 +1,4 @@
-"""Builds a stretch of Bayview bigger than one CTR level holds, as tiles the engine streams.
+"""Builds Bayview bigger than one CTR level holds (all of it), as tiles the engine streams.
 
     python3 -I tools/build_world.py NFSU2.iso CTR_DISC.bin OUTDIR [WORLD]
 
@@ -29,8 +29,6 @@ from nfsu2.world import Bayview  # noqa: E402
 
 TILE = 256.0            # metres: 16384 units, 3 x 3 of them within 16-bit positions
 WORLDS = {
-    # City Core's loop to start, and Coal Harbor 1.3 km south of it
-    'bayworld': dict(title='Bayview (open)', start='citycore', bounds=(-1400.0, -1950.0, -200.0, 350.0)),
     # all of it: the city's sections reach x -3133 to 1830, y -2069 to 3450
     'bayview': dict(title='Bayview', start='citycore', bounds=(-3300.0, -2200.0, 2000.0, 3600.0)),
 }
@@ -146,7 +144,7 @@ def world_map(done, i0, j0, i1, j1, size, center):
     return out
 
 
-def main(iso, disc, outdir, name='bayworld'):
+def main(iso, disc, outdir, name='bayview'):
     t_start = time.time()
     cfg = WORLDS[name]
     world = Bayview(iso)
@@ -216,6 +214,8 @@ def main(iso, disc, outdir, name='bayworld'):
     listing = os.path.join(outdir, 'maps.json')
     built = json.load(open(listing))
     built[name] = cfg['title']
+    for area in bb.AREAS:  # the city holds them all: their own levels leave the list
+        built.pop(area, None)
     with open(listing, 'w') as f:
         json.dump(dict(sorted(built.items())), f, indent=1)
     print(f'{len(index)} tiles, {sum(d[3] for d in done if d) } quadblocks, {sum(d[2] for d in done if d) >> 20} MB; '
