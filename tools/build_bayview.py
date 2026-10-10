@@ -53,7 +53,7 @@ NAV_CELL = 128          # CTR units
 CORRIDOR = {TERRAIN: 150.0, BUILDING: 150.0, PROP: 60.0, FLOOR: 60.0}
 VERTICES = 400000
 PAD = 8                 # texels of each texture's wrap-around border in the atlas
-LAYERS = 14             # a "CTRV" atlas has 4 layer bits (layer 15 is never drawn); the disc's textures take 2-5
+LAYERS = 59             # a "CTRV" atlas's layers (track.layout); the whole city's textures take 21
 CUTOUT = 0.02           # cutouts are more than this much see-through (see is_cutout): drawn, not collided with
 BRIGHTNESS, GAMMA = 1.15, 0.8
 VIEW_EVERY = 2          # chase views on every other grid cell (128 CTR units), 8 headings each
@@ -63,13 +63,13 @@ LOW_WALL = 0.4          # metres
 
 
 def wrap_texture(im):
-    """A texture as the atlas shader can repeat it: power-of-two sides from 32 to 256 texels
-    (smaller ones repeated, bigger ones halved)."""
+    """A texture as the atlas shader can repeat it: power-of-two sides from 64 to 256 texels
+    (smaller ones repeated, bigger ones halved; 64: the atlas's origins are 64-aligned)."""
     h, w = im.shape[:2]
     while w > 256 or h > 256:
         im = np.asarray(Image.fromarray(im).resize((max(1, w // 2) if w > 256 else w, max(1, h // 2) if h > 256 else h), Image.LANCZOS))
         h, w = im.shape[:2]
-    return np.tile(im, (max(1, 32 // h), max(1, 32 // w), 1))
+    return np.tile(im, (max(1, track.CTRV_ALIGN // h), max(1, track.CTRV_ALIGN // w), 1))
 
 
 def pack_textures(textures, used, cutouts):
@@ -91,7 +91,7 @@ def pack_textures(textures, used, cutouts):
         layer, x, y, shelf = 1, 0, 0, 0
 
         def up(v):
-            return -(-v // track.PAGE_ALIGN) * track.PAGE_ALIGN
+            return -(-v // track.CTRV_ALIGN) * track.CTRV_ALIGN
 
         order = sorted(imgs, key=lambda h: (-imgs[h].shape[0], -imgs[h].shape[1]))
         ok = True
@@ -116,7 +116,7 @@ def pack_textures(textures, used, cutouts):
         if ok:
             return rects, layers
         biggest = max(im.shape[0] * im.shape[1] for im in imgs.values())
-        imgs = {h: (wrap_texture(np.asarray(Image.fromarray(im).resize((max(32, im.shape[1] // 2), max(32, im.shape[0] // 2)), Image.LANCZOS)))
+        imgs = {h: (wrap_texture(np.asarray(Image.fromarray(im).resize((max(64, im.shape[1] // 2), max(64, im.shape[0] // 2)), Image.LANCZOS)))
                     if im.shape[0] * im.shape[1] >= biggest // 2 else im) for h, im in imgs.items()}
     raise SystemExit('the textures never fit the atlas')
 
