@@ -130,19 +130,29 @@ static inline void CTR_GteLoadLVL(const s32 *v)
 	MTC2((u32)v[2], 11);
 }
 
+#ifdef CTR_NATIVE
+// NOTE(ctr-dust2): exact projections follow the stored words (native_precise.h)
+#define CTR_GTE_STORE_PRECISE(xy, reg) NativePrecise_StoreSXY((xy), (reg))
+#else
+#define CTR_GTE_STORE_PRECISE(xy, reg)
+#endif
+
 static inline void CTR_GteStoreSXY(void *xy)
 {
 	CTR_GteStoreU32(xy, MFC2(14));
+	CTR_GTE_STORE_PRECISE(xy, 2);
 }
 
 static inline void CTR_GteStoreSXY0(void *xy)
 {
 	CTR_GteStoreU32(xy, MFC2(12));
+	CTR_GTE_STORE_PRECISE(xy, 0);
 }
 
 static inline void CTR_GteStoreSXY1(void *xy)
 {
 	CTR_GteStoreU32(xy, MFC2(13));
+	CTR_GTE_STORE_PRECISE(xy, 1);
 }
 
 static inline void CTR_GteStoreSXY2(void *xy)
@@ -155,6 +165,9 @@ static inline void CTR_GteStoreSXY3(void *xy0, void *xy1, void *xy2)
 	CTR_GteStoreU32(xy0, MFC2(12));
 	CTR_GteStoreU32(xy1, MFC2(13));
 	CTR_GteStoreU32(xy2, MFC2(14));
+	CTR_GTE_STORE_PRECISE(xy0, 0);
+	CTR_GTE_STORE_PRECISE(xy1, 1);
+	CTR_GTE_STORE_PRECISE(xy2, 2);
 }
 
 static inline s32 CTR_GteReadMAC1(void)

@@ -12,7 +12,11 @@ Dust 2 from a Sketchfab model of it, then moved every map to Counter-Strike's ow
 - Our changes are marked `NOTE(web)` / `NOTE(ctr-dust2)`:
   - `platform/native_web.c`: boot override (`?level=&mode=`), test hooks (`window.ctr`).
   - `platform/native_cd.c`: `assets/override/NNN.bin` replaces BIGFILE entry NNN.
-  - `platform/native_memory.c`: 32 MiB heap (`CTR_DUST2_EXPANDED_MEMPACK`).
+  - `platform/native_memory.c`: 64 MiB heap (`CTR_DUST2_EXPANDED_MEMPACK`).
+  - `platform/native_precise.c` (PGXP-style): while a custom level draws, each GTE projection's
+    exact position and depth follow its whole-pixel word into the polygons, which are drawn at
+    sub-pixel positions with perspective-correct textures and culled by their exact winding
+    (whole pixels fold thin faces to nothing: holes once drawn exactly). `?exact=0` turns it off.
   - `platform/native_renderer.c` + `native_gpu.c`: `TF_VIRTUAL_ATLAS`, tpage colour mode 3
     samples `/assets/dust2/atlas.rgba`; CLUT = layer << 10 | (y / 32) << 5 | (x / 32). A
     "CTRA" atlas has the light baked in (Counter-Strike's maps); a "CTRV" atlas (Bayview) is
@@ -67,8 +71,9 @@ Dust 2 from a Sketchfab model of it, then moved every map to Counter-Strike's ow
   every bit is set (clearing one to hide a stair ramp hid three other quadblocks: holes in
   walls and floors), and collision-only quadblocks hide by their texture instead (layer 15).
 - Texture layouts: (u0v0, u1v1, u2v2, u3v3) = face corners (0,4,5,6), (4,1,6,7), (5,6,2,8),
-  (6,7,8,3) with face flags 0. The "mosaic" word (layout + 0x24) is tested as a heap pointer:
-  keep CLUTs >= 1024 (atlas cells start at 1).
+  (6,7,8,3) with face flags 0. Retail tests the "mosaic" word (layout + 0x24, our fourth copy's
+  u, v, CLUT) as a heap pointer; for a custom level the engine never does (a CLUT that looked
+  like an address in the heap gave floors garbage UVs, more of them the bigger the heap).
 - Must-haves: an AnimTex list that points to itself; SpawnType1 with 7 null slots after it
   (GhostReplay reads slots 4 and 5 regardless of count).
 - Time Trial and Relic load entry 8 * level + 7; 1P races + 1, 2P + 3, 4P + 5. Each mode

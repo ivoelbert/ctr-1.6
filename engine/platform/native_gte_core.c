@@ -317,6 +317,29 @@ internal int GTE_RotTransPers(int idx, int lm)
 	C2_SX2 = Lm_G1(F((s64)C2_OFX + ((s64)C2_IR1 * h_over_sz3)) >> 16);
 	C2_SY2 = Lm_G2(F((s64)C2_OFY + ((s64)C2_IR2 * h_over_sz3)) >> 16);
 
+	// NOTE(ctr-dust2): the exact projection, beside SXY2 (native_precise.h); only where it
+	// agrees with the whole pixels (not past the GTE's limits)
+	{
+		int valid = 0;
+		double dx = 0.0, dy = 0.0, z = 0.0;
+
+		if (m_sf)
+		{
+			double x = (double)((s64)((s64)C2_TRX << 12) + (C2_R11 * VX(idx)) + (C2_R12 * VY(idx)) + (C2_R13 * VZ(idx)));
+			double y = (double)((s64)((s64)C2_TRY << 12) + (C2_R21 * VX(idx)) + (C2_R22 * VY(idx)) + (C2_R23 * VZ(idx)));
+			double h = (double)(u16)C2_H;
+
+			z = (double)((s64)((s64)C2_TRZ << 12) + (C2_R31 * VX(idx)) + (C2_R32 * VY(idx)) + (C2_R33 * VZ(idx)));
+			if (z >= 4096.0 * 16.0)
+			{
+				dx = (double)C2_OFX / 65536.0 + x * h / z - (double)C2_SX2;
+				dy = (double)C2_OFY / 65536.0 + y * h / z - (double)C2_SY2;
+				valid = dx > -1.5 && dx < 2.5 && dy > -1.5 && dy < 2.5;
+			}
+		}
+		NativePrecise_PushProjection((u32)(u16)C2_SX2 | ((u32)(u16)C2_SY2 << 16), valid, (float)dx, (float)dy, (float)(z / 4096.0));
+	}
+
 	return h_over_sz3;
 }
 

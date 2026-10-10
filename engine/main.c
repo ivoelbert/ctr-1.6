@@ -22,6 +22,7 @@
 #include "platform/native_log.h"
 #include "platform/native_memory.h"
 #include "platform/native_perf.h"
+#include "platform/native_precise.h"
 #include "platform/native_replay_scheduler.h"
 #include "platform/native_savestate.h"
 
@@ -45,6 +46,7 @@
 #include "platform/native_gpu_links.c"
 #include "platform/native_gpu.c"
 #include "platform/native_gte_core.c"
+#include "platform/native_precise.c"
 #include "platform/native_glad.c"
 #include "platform/native_input.c"
 #include "platform/native_inline_c.c"

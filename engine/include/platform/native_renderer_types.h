@@ -30,9 +30,12 @@ typedef struct
 	u8 r, g, b, a;
 
 	s8 tcx, tcy, _p0, _p1;
+
+	// NOTE(ctr-dust2): sub-pixel offset and relative depth (0: affine), native_precise.h
+	float px, py, pw;
 } GrVertex;
 
-CTR_STATIC_ASSERT(sizeof(GrVertex) == 20);
+CTR_STATIC_ASSERT(sizeof(GrVertex) == 32);
 
 typedef enum
 {
@@ -40,6 +43,7 @@ typedef enum
 	a_texcoord,
 	a_color,
 	a_extra,
+	a_precise,
 } ShaderAttrib;
 
 typedef enum
