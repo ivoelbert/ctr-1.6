@@ -5,9 +5,9 @@
 
 NFSU2.iso is your Need for Speed: Underground 2 disc image (PS2, NTSC-U, SLUS-21065); AREA is
 one of AREAS. tools/nfsu2/ reads the city: its meshes, textures and the night's light, which
-NFSU2 bakes into vertex colours. A CTR level holds 65,536 vertices, so an area is a loop of
-streets through its waypoints and what's along it (buildings and terrain farther out than
-props). Every texture goes into the atlas once, repeating in place ("CTRV" atlas: the faces
+NFSU2 bakes into vertex colours. An area is a loop of streets through its waypoints and what's
+along it (buildings and terrain farther out than props), in up to VERTICES vertices (vertex
+banks of 65,536). Every texture goes into the atlas once, repeating in place ("CTRV" atlas: the faces
 keep their uvs, lit by their vertex colours), and the track pipeline (tools/track.py) makes the
 level, as for Counter-Strike's maps: free drive, NAME_free.lev and the rest.
 
@@ -39,10 +39,6 @@ AREAS = {
     'citycore': dict(title='City Core', waypoints=[(-955, -335), (-700, -515), (-640, -250)]),
     'coalharbor': dict(title='Coal Harbor', waypoints=[(-1300, -1652), (-940, -1550), (-1004, -1660), (-1232, -1832)]),
     'jackson': dict(title='Jackson Heights', waypoints=[(-2230, 2190), (-1810, 2160), (-1790, 1920), (-2120, 1870)]),
-    # experiments past 65,536 vertices (vertex banks): the same loop, far more round it
-    'citycorexl': dict(title='City Core XL', waypoints=[(-955, -335), (-700, -515), (-640, -250)],
-                       corridor={TERRAIN: 150.0, BUILDING: 150.0, PROP: 60.0, FLOOR: 60.0}, min_prop=0.0,
-                       full_detail=True, vertices=400000, experiment=True),
 }
 NIGHT = [(8, 10, 24, 1), (40, 34, 60, 1), (14, 16, 34, 1)]
 # Left out: race barriers (only up during races), the panoramas (skylines and hills for far
@@ -52,12 +48,12 @@ SKIP_SOLIDS = ('XO_TRACKBARRIER', 'PAN_', 'LIGHTMASK', 'SFXFLARE')
 SKIP_TEXTURES = ('SFX_', 'HEADLIGHTGLOW', 'LIGHTGLOW')
 GROUND_TEXTURES = ('RDP', 'TRN', 'ARC_SIDEWALK', 'ARC_CURB', 'ARC_PAVE')
 NAV_CELL = 128          # CTR units
-MIN_PROP = 3.0          # metres: props smaller than this (trash cans, bollards, little signs) go
 # metres either side of the route kept: buildings and the city's own walls and terrain (its
 # floors less: what's farther is seen, not driven on), props only by the road
-CORRIDOR = {TERRAIN: 60.0, BUILDING: 60.0, PROP: 18.0, FLOOR: 30.0}
+CORRIDOR = {TERRAIN: 150.0, BUILDING: 150.0, PROP: 60.0, FLOOR: 60.0}
+VERTICES = 400000
 PAD = 8                 # texels of each texture's wrap-around border in the atlas
-LAYERS = 14
+LAYERS = 14             # a "CTRV" atlas has 4 layer bits (layer 15 is never drawn); the disc's textures take 2-5
 CUTOUT = 0.02           # cutouts are more than this much see-through (see is_cutout): drawn, not collided with
 BRIGHTNESS, GAMMA = 1.15, 0.8
 VIEW_EVERY = 2          # chase views on every other grid cell (128 CTR units), 8 headings each
@@ -546,11 +542,11 @@ def main(iso, disc, outdir, area='citycore'):
     os.makedirs(outdir, exist_ok=True)
     world = Bayview(iso)
     wps = np.array(cfg['waypoints'], dtype=float)
-    margin = max(120.0, max({**CORRIDOR, **cfg.get('corridor', {})}.values()) + 20.0)
+    margin = max(CORRIDOR.values()) + 20.0
     bounds = (wps[:, 0].min() - margin, wps[:, 1].min() - margin, wps[:, 0].max() + margin, wps[:, 1].max() + margin)
-    world.low_detail = not cfg.get('full_detail', False)
-    track.VERTEX_BUDGET = cfg.get('vertices', 64000)
-    groups = world.triangles(bounds, SKIP_SOLIDS, cfg.get('min_prop', MIN_PROP))
+    world.low_detail = False
+    track.VERTEX_BUDGET = VERTICES
+    groups = world.triangles(bounds, SKIP_SOLIDS)
     # left out: untextured effects and the glows NFSU2 adds on top (their black is see-through)
     groups = {h: g for h, g in groups.items() if h in world.textures and not world.textures[h].name.startswith(SKIP_TEXTURES)}
     print(f'{sum(len(g[0]) for g in groups.values())} triangles round the waypoints, {len(groups)} textures')
@@ -571,7 +567,7 @@ def main(iso, disc, outdir, area='citycore'):
     route = find_route(world, groups, cutouts, cfg, os.path.join(outdir, '.tools', f'{area}_route.json'))
     length = float(np.sum(np.linalg.norm(np.diff(route[:, :2], axis=0), axis=1)))
     print(f'route: {len(wps)} waypoints, {length:.0f} m round')
-    groups, open_edges = corridor(groups, route[:, :2], {**CORRIDOR, **cfg.get('corridor', {})})
+    groups, open_edges = corridor(groups, route[:, :2], CORRIDOR)
     orient(groups, world, route[:, :2])
     allp = np.concatenate([g[0].reshape(-1, 3) for g in groups.values()])
     kill_y = int((allp[:, 2].min() - track.FLOOR_Z) * SCALE) - 600
@@ -659,6 +655,6 @@ def main(iso, disc, outdir, area='citycore'):
 
 if __name__ == '__main__':
     if sys.argv[1:] == ['--areas']:
-        print(' '.join(a for a, cfg in AREAS.items() if not cfg.get('experiment')))
+        print(' '.join(AREAS))
     else:
         main(*sys.argv[1:5])

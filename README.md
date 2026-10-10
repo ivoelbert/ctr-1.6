@@ -96,8 +96,8 @@ lists what's been built.
 `tools/nfsu2/` reads Need for Speed: Underground 2's files from the disc image (its PS2 meshes,
 textures, the props' placing, the night's light baked into vertex colours) and
 `tools/build_bayview.py` makes a loop of streets a level: `python3 -I tools/build_bayview.py
-NFSU2.iso CTR_DISC.bin build/lev AREA` (`--areas` lists them). A level holds 65,536
-vertices, so each map is a stretch of the city along a loop, and what's by it. NOTES.md has
+NFSU2.iso CTR_DISC.bin build/lev AREA` (`--areas` lists them). Each map is a stretch of
+the city along a loop, and what's by it, in up to 400,000 vertices. NOTES.md has
 how the PS2 data is laid out.
 
 ## Credits

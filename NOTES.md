@@ -226,14 +226,15 @@ From the PS2 disc (NTSC-U, SLUS-21065), read straight from the image:
   all but on or off, and ground textures never are.
 - Scenery (0x80034100): kinds (name, solid hashes of its levels of detail A, B, Z) and
   instances (bounding box, kind, position, rotation as 16-bit 3x3, 8192 = 1, applied as
-  point @ rotation). Props take their simplest level that's still the model (some Z levels are
-  a flat LOD_ stand-in). Left out: race barriers, the panoramas (PAN_: skylines and hills for
-  far away, a shell over the streets), light glows and shafts (additive), props under 3 m.
+  point @ rotation). Props take their most detailed level. Left out: race barriers, the
+  panoramas (PAN_: skylines and hills for far away, a shell over the streets), light glows and
+  shafts (additive).
 
-The budget: 65,536 vertices a level. The city is about 1.2 million triangles; downtown has
+The budget: 400,000 vertices a level (vertex banks of 65,536; it was 65,536 before them, with
+props' simplest levels, small props left out and a third of the corridor below). The city is about 1.2 million triangles; downtown has
 5,000-10,000 per 200 m square. So a level is a loop of streets (waypoints, joined by A* on the
 drivable grid, kept on roads, each leg avoiding the last), and what's along it: buildings and
-the city's own terrain within 60 m, props within 18 m, floors within 30 m (an invisible wall
+the city's own terrain within 150 m, props within 60 m, floors within 60 m (an invisible wall
 where a floor is cut off). Cutting faces where their textures repeat used to double the
 triangles: with the atlas's repeating textures and uv scale, a face is cut only past 2,040
 texels. Coplanar merging saves almost nothing on NFSU2's meshes (2%). The 2 m drivable grid
