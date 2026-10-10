@@ -162,6 +162,9 @@ static int s_worldActive;
 static struct Level *s_worldLevel;
 static void NativeWorld_Follow(struct GameTracker *gGT);
 static void NativeWorld_Stream(void);
+static void NativeWorld_UpdateMap(struct GameTracker *gGT);
+static void NativeWorld_LoadMap(void);
+static void NativeWorld_FindMapIcon(struct Level *lev);
 
 void NativeWorld_FrameStart(struct GameTracker *gGT)
 {
@@ -175,6 +178,7 @@ void NativeWorld_FrameStart(struct GameTracker *gGT)
 		s_worldShiftPending = 0;
 		NativeWorld_Follow(gGT);
 		NativeWorld_Stream();
+		NativeWorld_UpdateMap(gGT);
 		return;
 	}
 	if (!s_worldShiftPending)
@@ -808,6 +812,8 @@ void NativeWorld_LevelStart(struct GameTracker *gGT)
 	}
 	s_windowCur = 0;
 	lev->ptr_mesh_info = &s_windows[0].mesh;
+	NativeWorld_LoadMap();
+	NativeWorld_FindMapIcon(lev);
 	// MainInit_VisMem fills the VisMem's BSP lists for the mesh: the world's, sized for any window
 	lev->visMem = &s_worldVisMem;
 	printf("[CTR Native] world: window 0,0: %d tiles, %d quadblocks, %d BSP nodes (%.1f ms)\n", s_windows[0].count,
@@ -919,4 +925,134 @@ int NativeWorld_Info(int *out)
 	out[6] = s_tilesLoaded;
 	out[7] = (int)(s_lastLoadMs * 1000.0);
 	return s_worldActive;
+}
+
+// ---------------------------------------------------------------------------------------------
+// The minimap of a world. CTR draws a track's map from one 80 x 80 4-bit image in VRAM (two
+// 80 x 40 halves sharing texels: the top half's value in the high two bits, the bottom's in
+// the low two, each half through its palette; tools/track.py). A world's map is the whole
+// city (assets/world/map.bin: a byte a texel, the two-bit values), and the minimap shows the
+// 80 x 80 texels round the kart, rewritten in VRAM when the kart moves a texel; the racers'
+// icons go by that window (NativeWorld_MapIconPos).
+
+#define NATIVE_WORLD_MAP 80
+
+static u8 *s_map;
+static int s_mapUnits, s_mapX, s_mapZ, s_mapW, s_mapH;
+static int s_mapLeft = 1 << 30, s_mapTop = 1 << 30; // the window's corner texel
+static int s_mapVramX, s_mapVramY, s_mapFound;
+
+static void NativeWorld_LoadMap(void)
+{
+	char path[768];
+	u32 size;
+	free(s_map);
+	s_map = NULL;
+	s_mapFound = 0;
+	s_mapLeft = s_mapTop = 1 << 30;
+	snprintf(path, sizeof(path), "%s/world/map.bin", NativeAssets_GetAssetDir());
+	u8 *file = NativeWorld_ReadFile(path, &size);
+	if (file == NULL)
+	{
+		return;
+	}
+	int head[5];
+	if (size >= 24 && memcmp(file, "WMAP", 4) == 0)
+	{
+		memcpy(head, file + 4, sizeof(head));
+		if (head[3] > 0 && head[4] > 0 && size >= 24 + (u32)head[3] * (u32)head[4])
+		{
+			s_mapUnits = head[0];
+			s_mapX = head[1];
+			s_mapZ = head[2];
+			s_mapW = head[3];
+			s_mapH = head[4];
+			s_map = (u8 *)malloc((size_t)s_mapW * s_mapH);
+			memcpy(s_map, file + 24, (size_t)s_mapW * s_mapH);
+		}
+	}
+	free(file);
+}
+
+// Where the level's minimap image is in VRAM: its icon "map-proto8-01" (the top half).
+static void NativeWorld_FindMapIcon(struct Level *lev)
+{
+	struct LevTexLookup *lookup = lev->levTexLookup;
+	if (lookup == NULL || lookup->firstIcon == NULL)
+	{
+		return;
+	}
+	for (int k = 0; k < lookup->numIcon; k++)
+	{
+		struct Icon *icon = &lookup->firstIcon[k];
+		if (strncmp(icon->name, "map-proto8-01", sizeof(icon->name)) == 0)
+		{
+			struct TextureLayout *t = &icon->texLayout;
+			s_mapVramX = (t->tpage & 0xf) * 64 + t->u0 / 4;
+			s_mapVramY = ((t->tpage >> 4) & 1) * 256 + t->v0;
+			s_mapFound = (t->u0 % 4) == 0;
+			return;
+		}
+	}
+}
+
+static int NativeWorld_MapAt(int x, int z)
+{
+	return (x >= 0 && z >= 0 && x < s_mapW && z < s_mapH) ? (s_map[(size_t)z * s_mapW + x] & 3) : 0;
+}
+
+static void NativeWorld_UpdateMap(struct GameTracker *gGT)
+{
+	struct Driver *d = gGT->drivers[0];
+	if (s_map == NULL || !s_mapFound || d == NULL)
+	{
+		return;
+	}
+	int wx = (d->posCurr.x >> 8) + s_worldOrigin.x, wz = (d->posCurr.z >> 8) + s_worldOrigin.z;
+	int left = (int)floor((double)(wx - s_mapX) / s_mapUnits) - NATIVE_WORLD_MAP / 2;
+	int top = (int)floor((double)(wz - s_mapZ) / s_mapUnits) - NATIVE_WORLD_MAP / 2;
+	if (left == s_mapLeft && top == s_mapTop)
+	{
+		return;
+	}
+	s_mapLeft = left;
+	s_mapTop = top;
+	u16 words[NATIVE_WORLD_MAP / 4 * NATIVE_WORLD_MAP / 2];
+	for (int row = 0; row < NATIVE_WORLD_MAP / 2; row++)
+	{
+		for (int col = 0; col < NATIVE_WORLD_MAP; col += 4)
+		{
+			u16 word = 0;
+			for (int j = 0; j < 4; j++)
+			{
+				int hi = NativeWorld_MapAt(left + col + j, top + row);
+				int lo = NativeWorld_MapAt(left + col + j, top + row + NATIVE_WORLD_MAP / 2);
+				word |= (u16)(((hi << 2) | lo) << (4 * j));
+			}
+			words[row * (NATIVE_WORLD_MAP / 4) + col / 4] = word;
+		}
+	}
+	RECT16 r = {(s16)s_mapVramX, (s16)s_mapVramY, NATIVE_WORLD_MAP / 4, NATIVE_WORLD_MAP / 2};
+	LoadImage(&r, words);
+}
+
+// The racers' icons on a world's minimap: by the window of texels it shows. pos: x and z in
+// the level's coordinates (the window's); returns 0 when the world draws no map of its own.
+int NativeWorld_MapIconPos(const struct UIMap *map, s32 *posX, s32 *posY)
+{
+	if (!s_worldActive || s_map == NULL || !s_mapFound || s_mapLeft == (1 << 30))
+	{
+		return 0;
+	}
+	// the map image's corner on screen, from the level's own placement (its world rectangle)
+	s32 rangeX = map->worldEndX - map->worldStartX;
+	s32 rangeY = map->worldEndY - map->worldStartY;
+	s32 screenLeft = map->iconStartX + map->worldStartX * map->iconSizeX / rangeX;
+	s32 screenTop = map->iconStartY - UI_MAP_ICON_Y_OFFSET + map->worldStartY * map->iconSizeY * 2 / rangeY;
+	s32 side = NATIVE_WORLD_MAP * s_mapUnits;
+	s32 x = *posX + s_worldOrigin.x - (s_mapX + s_mapLeft * s_mapUnits);
+	s32 z = *posY + s_worldOrigin.z - (s_mapZ + s_mapTop * s_mapUnits);
+	*posX = screenLeft + x * map->iconSizeX / side;
+	*posY = screenTop + z * map->iconSizeY * 2 / side;
+	return 1;
 }

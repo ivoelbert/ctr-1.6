@@ -39,6 +39,8 @@ TILE_LEAVES = 512       # a window's BSP holds 16383 nodes: 9 tiles' (the kd-tre
                         # power of two leaves: 1023 nodes) and the top
 KILL_Y = -1600          # CTR units under the floor: a kart that falls this far is put back
 MAX_HEIGHT = 32000      # CTR units: 16-bit positions
+MAP_FINE = 2.0          # metres a texel of a tile's map raster
+MAP_TEXEL = 8.0         # metres a texel of the world's map (the minimap shows 80 of them across)
 
 
 def tile_kill_plane(out, half, y):
@@ -75,6 +77,7 @@ def build_tile(ij):
     groups = {h: g for h, g in groups.items() if h in rects}
     if not groups:
         return None
+    raster = tile_map(world, groups, center, i, j, size)
     t0 = time.time()
     tris = bb.make_tris(world, groups, rects, cutouts, lambda p: True)
     if not tris:
@@ -100,7 +103,47 @@ def build_tile(ij):
         f.write(data)
     print(f'tile {i},{j}: {len(out)} quadblocks, {track.vertex_count(out)} vertices, {len(data) >> 10} KB ({time.time() - t0:.0f} s)',
           flush=True)
-    return i, j, len(data), len(out)
+    return i, j, len(data), len(out), raster
+
+
+def tile_map(world, groups, center, i, j, size):
+    """The tile's ground from above, MAP_FINE metres a texel: 2 where roads are, 1 for the
+    pavements and the rest of the ground (uint8, rows along CTR z)."""
+    from PIL import Image, ImageDraw
+    n = int(round(size / bb.SCALE / MAP_FINE))
+    img = Image.new('L', (n, n), 0)
+    d = ImageDraw.Draw(img)
+    x0, z0 = i * size - size // 2, j * size - size // 2
+    k = 1.0 / (MAP_FINE * bb.SCALE)
+    for value, kinds in ((1, bb.GROUND_TEXTURES), (2, ('RDP',))):
+        for h, (P, _, _, _) in groups.items():
+            if not world.textures[h].name.startswith(kinds):
+                continue
+            nz = np.cross(P[:, 1] - P[:, 0], P[:, 2] - P[:, 0])[:, 2]
+            for tri in P[np.abs(nz) > 1e-9]:
+                pts = [(((x - center[0]) * bb.SCALE - x0) * k, (-(y - center[1]) * bb.SCALE - z0) * k) for x, y, _ in tri]
+                d.polygon(pts, fill=value)
+    return np.asarray(img, dtype=np.uint8)
+
+
+def world_map(done, i0, j0, i1, j1, size, center):
+    """The world's map: the tiles' rasters at MAP_TEXEL metres a texel, as the minimap's
+    two-bit values (track.MAP_FLOOR for roads, track.MAP_EDGE for the rest of the ground)."""
+    n = int(round(size / bb.SCALE / MAP_FINE))
+    fine = np.zeros(((j1 - j0 + 1) * n, (i1 - i0 + 1) * n), np.uint8)
+    for d in done:
+        if d is not None:
+            i, j = d[0], d[1]
+            fine[(j - j0) * n:(j - j0 + 1) * n, (i - i0) * n:(i - i0 + 1) * n] = d[4]
+    f = int(round(MAP_TEXEL / MAP_FINE))
+    h, w = fine.shape[0] // f, fine.shape[1] // f
+    blocks = fine[:h * f, :w * f].reshape(h, f, w, f)
+    road = (blocks == 2).mean(axis=(1, 3))
+    ground = (blocks >= 1).mean(axis=(1, 3))
+    out = np.full((h, w), track.MAP_CLEAR, np.uint8)
+    out[ground > 0.3] = track.MAP_EDGE
+    out[road > 0.2] = track.MAP_FLOOR
+    return out
 
 
 def main(iso, disc, outdir, name='bayworld'):
@@ -150,6 +193,16 @@ def main(iso, disc, outdir, name='bayworld'):
     else:
         done = [build_tile(c) for c in cells]
     index = [d[:3] for d in done if d is not None]
+    # map.bin: 'WMAP', units a texel, the corner texel (0, 0) starts at (x, z), width, height,
+    # then a byte a texel (the minimap's two-bit values), rows along z
+    grid = world_map(done, i0, j0, i1, j1, size, center)
+    with open(os.path.join(tile_dir, 'map.bin'), 'wb') as f:
+        f.write(struct.pack('<4siiiii', b'WMAP', int(MAP_TEXEL * bb.SCALE), i0 * size - size // 2, j0 * size - size // 2,
+                            grid.shape[1], grid.shape[0]))
+        f.write(grid.tobytes())
+    from PIL import Image
+    Image.fromarray((grid * 80).astype(np.uint8)).save(os.path.join(outdir, '.tools', f'{name}_map.png'))
+    print(f'map: {grid.shape[1]} x {grid.shape[0]} texels of {MAP_TEXEL:.0f} m')
     # index.bin: 'WRLD', tile size (units), count, then per tile (i, j) s16 and its file's bytes
     with open(os.path.join(tile_dir, 'index.bin'), 'wb') as f:
         f.write(struct.pack('<4sii', b'WRLD', size, len(index)))
