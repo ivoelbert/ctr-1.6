@@ -586,6 +586,11 @@ static s8 DrawLevelOvr1P_ReadRetailQuadBlockByte(const struct QuadBlock *block, 
 		{
 			return (s8)((psxWord >> ((byteOffset & 3u) * 8)) & 0xff);
 		}
+
+		// NOTE(ctr-dust2): a custom level lies outside the retail 2 MiB window; the host
+		// pointer's own bytes moved faces by up to 128 OT slots (near floors behind the sky
+		// with a bigger heap). Such a level draws them where they are.
+		return 0;
 	}
 #endif
 
