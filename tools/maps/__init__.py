@@ -3,7 +3,8 @@ maps/de_dust2.bsp): what tools/build_map.py needs to know about it. Every name i
 
 TITLE            the map's name in the launcher and on CTR's HUD
 SKY              CTR's clear colours, its background gradient: 3 (r, g, b, 1)
-DENSITY          atlas texels per map unit (0.45; the renderer has 14 atlas layers of 1024^2)
+DENSITY          atlas texels per map unit (1.0: about Counter-Strike's own texels; the
+                 renderer has 63 atlas layers of 1024^2)
 FLOOR_CELL       the floor grid near drivable ground, CTR units (512): the renderer gave up on
                  big floor quads right under the camera (holes to the void)
 WALL_EDGE        the longest wall quadblock edge, CTR units (1200): the vertex budget

@@ -12,7 +12,6 @@
 // wrote, and the renderer copies them along with the word into its polygons
 // (NativePrecise_Copy), where the GPU finds them (NativePrecise_Get). A word that changed some
 // other way has none: that vertex stays on its whole pixel, and its polygon is mapped affinely.
-void NativePrecise_Allow(int allowed);
 void NativePrecise_BeginLevel(int enabled);
 void NativePrecise_EndLevel(void);
 void NativePrecise_PushProjection(uint32_t sxy, int valid, float dx, float dy, float z);

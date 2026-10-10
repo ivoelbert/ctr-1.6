@@ -25,18 +25,12 @@ typedef struct
 
 static NativePreciseProjection s_preciseSxy[3];  // beside the GTE's SXY0..2
 static NativePreciseShadow s_preciseShadow[1u << NATIVE_PRECISE_SHADOW_BITS];
-static int s_preciseAllowed = 1;
 static int s_preciseEnabled;
 static int s_preciseRecording;
 
-void NativePrecise_Allow(int allowed)
-{
-	s_preciseAllowed = allowed;
-}
-
 void NativePrecise_BeginLevel(int enabled)
 {
-	s_preciseEnabled = enabled && s_preciseAllowed;
+	s_preciseEnabled = enabled;
 	s_preciseRecording = s_preciseEnabled;
 }
 
