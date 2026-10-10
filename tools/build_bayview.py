@@ -215,10 +215,61 @@ def orient(groups, world, route):
     print(f'{flipped} triangles turned round')
 
 
+BACK_TO_BACK = 1.0      # metres: a wall with one facing the other way this close behind it
+
+
+def back_to_back(groups):
+    """{texture: bool mask} of the walls that are one face of a thin object (a billboard and its
+    back, 43 cm behind it): another wall right behind, facing the other way, over it. Drawn
+    from both sides, the two fight in CTR's ordering table (each face is filed by its farthest
+    corner, a metre to a slot) and show through each other; so each is turned to face away from
+    the other (corners reordered in place) and drawn from its own side only."""
+    from scipy.spatial import cKDTree
+    keys, cs, ns, rs = [], [], [], []
+    for h, (P, _, _, _) in groups.items():
+        n = np.cross(P[:, 1] - P[:, 0], P[:, 2] - P[:, 0])
+        ln = np.linalg.norm(n, axis=1)
+        ok = ln > 1e-9
+        n = n / np.maximum(ln, 1e-12)[:, None]
+        wall = ok & (np.abs(n[:, 2]) <= 0.7)
+        for k in np.nonzero(wall)[0]:
+            keys.append((h, k))
+        c = P.mean(axis=1)
+        cs.append(c[wall])
+        ns.append(n[wall])
+        rs.append(np.linalg.norm(P - c[:, None], axis=2).max(axis=1)[wall])
+    out = {h: np.zeros(len(g[0]), bool) for h, g in groups.items()}
+    if not keys:
+        return out
+    C, N, R = np.concatenate(cs), np.concatenate(ns), np.concatenate(rs)
+    tree = cKDTree(C)
+    behind = np.zeros(len(C), int)   # +1: the twin is behind (along -n), -1: in front
+    for a, near in enumerate(tree.query_ball_point(C, R + BACK_TO_BACK)):
+        for b in near:
+            if b == a or np.dot(N[a], N[b]) > -0.95:
+                continue
+            off = float(np.dot(C[b] - C[a], N[a]))     # the other's middle along a's normal
+            side = C[b] - C[a] - off * N[a]           # and across a's plane
+            if 0.02 < abs(off) < BACK_TO_BACK and np.linalg.norm(side) < R[a]:
+                behind[a] = 1 if off < 0 else -1
+                break
+    turned = 0
+    for idx in np.nonzero(behind)[0]:
+        h, k = keys[idx]
+        out[h][k] = True
+        if behind[idx] < 0:
+            P, UV, Cc, _ = groups[h]
+            P[k], UV[k], Cc[k] = P[k][::-1].copy(), UV[k][::-1].copy(), Cc[k][::-1].copy()
+            turned += 1
+    print(f'{int((behind != 0).sum())} walls back to back with another, drawn from one side ({turned} turned round)')
+    return out
+
+
 def make_tris(world, groups, rects, cutouts, near):
     """track.Tri for every piece: uv = atlas texels, then the vertex colours, the texture's
     origin and wrap code (track.WRAP_CHANNELS). Walls are drawn from both sides."""
     tris = []
+    one_sided = back_to_back(groups)
     for th, (P, UV, C, _) in groups.items():
         if th not in rects:
             continue
@@ -239,6 +290,7 @@ def make_tris(world, groups, rects, cutouts, near):
             low = np.ptp(P[k, :, 2]) < LOW_WALL
             solid = floor or not (cutout or low)
             rows = np.concatenate([P[k], UV[k] * (sx, sy), light(C[k, :, :3])], axis=1)
+            double = (cutout or not floor) and not one_sided[th][k]
             pieces = []
             for a in wrap_pieces(list(rows), 3, w):
                 pieces += wrap_pieces(a, 4, h)
@@ -263,7 +315,7 @@ def make_tris(world, groups, rects, cutouts, near):
                                               np.tile([ox, oy, code, shift], (3, 1))], axis=1)
                         t = track.Tri(track.to_ctr(p), tuv, layer, track.dir_to_ctr(n), p.copy(), n.copy())
                         t.solid = solid
-                        if cutout or not floor:
+                        if double:
                             t.terrain |= track.DOUBLE_SIDED
                         tris.append(t)
     print(f'{len(tris)} triangles')
