@@ -160,6 +160,17 @@ void UI_Map_GetIconPos(struct UIMap *map, s32 *posX, s32 *posY)
 	s32 worldRangeY = map->worldEndY - map->worldStartY;
 	s32 mode = map->mode;
 
+#ifdef CTR_NATIVE
+	// NOTE(ctr-dust2): the map is placed in the level's own coordinates; with the origin moved
+	// (native_world.h), positions in play are back in those first
+	{
+		int origin[3];
+		NativeWorld_GetOrigin(origin);
+		*posX += origin[0];
+		*posY += origin[2];
+	}
+#endif
+
 	if (mode == UI_MAP_MODE_0_DEGREES)
 	{
 		// 0 degrees

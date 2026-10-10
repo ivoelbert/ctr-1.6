@@ -79,6 +79,17 @@ EMSCRIPTEN_KEEPALIVE void NativeWeb_SetRenderScale(int scale)
 	NativeRenderer_SetRenderScale(scale);
 }
 
+// NOTE(ctr-dust2): moves the level and everything in play (native_world.h)
+EMSCRIPTEN_KEEPALIVE void NativeWeb_ShiftOrigin(int dx, int dy, int dz)
+{
+	NativeWorld_RequestShift(dx, dy, dz);
+}
+
+EMSCRIPTEN_KEEPALIVE void NativeWeb_GetOrigin(int *out)
+{
+	NativeWorld_GetOrigin(out);
+}
+
 EMSCRIPTEN_KEEPALIVE void NativeWeb_SetButtons(int mask)
 {
 	g_nativeWebHeldButtons = mask & 0xffff;
