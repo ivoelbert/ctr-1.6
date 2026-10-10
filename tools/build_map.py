@@ -82,8 +82,8 @@ def select_faces(bsp, cfg):
         kind = None if e is None else kinds.get(e.get('classname'))
         if kind is None or mi in remove:
             continue
-        if e.get('rendermode', '0') != '0' and e.get('renderamt', '255') == '0':
-            continue   # drawn invisible
+        if e.get('rendermode', '0') != '0' and e.get('renderamt', '0') == '0':
+            continue   # drawn invisible (renderamt is 0 when the map doesn't say: Aztec's black boxes)
         for fi in range(m['firstface'], m['firstface'] + m['numfaces']):
             name = bsp.face_texture(fi)[0]
             if name.lower() in goldsrc.TOOL_TEXTURES:
