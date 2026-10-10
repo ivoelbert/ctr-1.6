@@ -441,6 +441,12 @@ static int DrawLevelOvr1P_IsNativeLevelSpan(u32 ptr, u32 size)
 		return 0;
 	}
 
+	// NOTE(ctr-dust2): a tiled world's level data is outside the mempack (native_world.h)
+	if (NativeWorld_OwnsSpan(ptr, size))
+	{
+		return 1;
+	}
+
 	const struct Mempack *pack = DrawLevelOvr1P_FindMempackContaining(ptr);
 	if (pack == NULL)
 	{

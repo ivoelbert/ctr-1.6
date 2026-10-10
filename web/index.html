@@ -198,6 +198,13 @@
         return { m: v.slice(0, 9), pos: v.slice(9, 12), h: v[12], rect: v.slice(13, 17) };
       },
       shiftOrigin(dx, dy, dz) { Module._NativeWeb_ShiftOrigin(dx | 0, dy | 0, dz | 0); },
+      world() {
+        const b = Module._malloc(24);
+        Module._NativeWeb_WorldInfo(b);
+        const v = Array.from(Module.HEAP32.subarray(b >> 2, (b >> 2) + 6));
+        Module._free(b);
+        return { active: v[0], tile: [v[1], v[2]], quads: v[3], assemblyMs: v[4] / 1000, tiles: v[5] };
+      },
       origin() {
         const b = Module._malloc(12);
         Module._NativeWeb_GetOrigin(b);
@@ -250,6 +257,25 @@
       Module.FS.writeFile(`/assets/override/${pad(k - 1)}.bin`, await fetchWithProgress(`lev/${map}_free${suffix}.vrm`, title));
     }
     Module.ctrRename = { 0: title };
+    // a tiled world (tools/build_world.py): its index and every tile, for the engine's
+    // native_world.c to put together round the kart
+    if (meta.world) {
+      Module.FS.mkdirTree('/assets/world');
+      const dir = `lev/${meta.world.tiles}`;
+      const index = new Uint8Array(await (await fetch(`${dir}/index.bin`, { cache: 'no-store' })).arrayBuffer());
+      Module.FS.writeFile('/assets/world/index.bin', index);
+      const view = new DataView(index.buffer);
+      const names = [];
+      for (let k = 0; k < view.getInt32(8, true); k++) {
+        names.push(`T_${view.getInt16(12 + 4 * k, true)}_${view.getInt16(14 + 4 * k, true)}.lev`);
+      }
+      let done = 0;
+      await Promise.all(names.map(async (name) => {
+        const data = new Uint8Array(await (await fetch(`${dir}/${name}`, { cache: 'no-store' })).arrayBuffer());
+        Module.FS.writeFile(`/assets/world/${name}`, data);
+        say(`Loading the world... ${++done} / ${names.length} tiles`);
+      }));
+    }
     const jpg = await fetchWithProgress(`lev/${meta.atlas.image}`, 'Textures');
     const bitmap = await createImageBitmap(new Blob([jpg], { type: 'image/jpeg' }));
     const { width, height } = bitmap;

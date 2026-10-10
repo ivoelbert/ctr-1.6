@@ -26,42 +26,43 @@ static void NativeWorld_ShiftBox(struct BoundingBox *b, int dx, int dy, int dz)
 	NativeWorld_ShiftSVec3(&b->max, dx, dy, dz);
 }
 
-// The level's own positions: vertices, quadblock and BSP boxes, split planes, pickup hitboxes,
-// checkpoints, nav paths, spawns. (The minimap stays in the level's own coordinates: UI_Map_GetIconPos.)
-static void NativeWorld_ShiftLevel(struct Level *lev, int dx, int dy, int dz)
+// A mesh's positions: vertices, quadblock and BSP boxes, split planes, pickup hitboxes.
+static void NativeWorld_ShiftMesh(struct mesh_info *mesh, int dx, int dy, int dz)
 {
-	struct mesh_info *mesh = lev->ptr_mesh_info;
-	if (mesh != 0)
+	for (int i = 0; i < mesh->numVertex; i++)
 	{
-		for (int i = 0; i < mesh->numVertex; i++)
+		NativeWorld_ShiftSVec3(&mesh->ptrVertexArray[i].pos, dx, dy, dz);
+	}
+	for (int i = 0; i < mesh->numQuadBlock; i++)
+	{
+		NativeWorld_ShiftBox(&mesh->ptrQuadBlockArray[i].bbox, dx, dy, dz);
+	}
+	for (int i = 0; i < mesh->numBspNodes; i++)
+	{
+		struct BSP *node = &mesh->bspRoot[i];
+		NativeWorld_ShiftBox(&node->box, dx, dy, dz);
+		if (node->flag & BSP_NODE_FLAG_LEAF)
 		{
-			NativeWorld_ShiftSVec3(&mesh->ptrVertexArray[i].pos, dx, dy, dz);
-		}
-		for (int i = 0; i < mesh->numQuadBlock; i++)
-		{
-			NativeWorld_ShiftBox(&mesh->ptrQuadBlockArray[i].bbox, dx, dy, dz);
-		}
-		for (int i = 0; i < mesh->numBspNodes; i++)
-		{
-			struct BSP *node = &mesh->bspRoot[i];
-			NativeWorld_ShiftBox(&node->box, dx, dy, dz);
-			if (node->flag & BSP_NODE_FLAG_LEAF)
+			// the leaf's pickup hitboxes (a list ended by a zero flag)
+			for (struct BSP *hb = node->data.leaf.bspHitboxArray; hb != 0 && hb->flag != 0; hb++)
 			{
-				// the leaf's pickup hitboxes (a list ended by a zero flag)
-				for (struct BSP *hb = node->data.leaf.bspHitboxArray; hb != 0 && hb->flag != 0; hb++)
-				{
-					NativeWorld_ShiftBox(&hb->box, dx, dy, dz);
-					NativeWorld_ShiftSVec3(&hb->data.hitbox.center, dx, dy, dz);
-				}
+				NativeWorld_ShiftBox(&hb->box, dx, dy, dz);
+				NativeWorld_ShiftSVec3(&hb->data.hitbox.center, dx, dy, dz);
 			}
-			else
-			{
-				// split plane: axis[0..2] a unit normal (4096 = 1), axis[3] the offset along it
-				s16 *axis = node->data.branch.axis;
-				axis[3] = (s16)(axis[3] + ((axis[0] * dx + axis[1] * dy + axis[2] * dz) >> 12));
-			}
+		}
+		else
+		{
+			// split plane: axis[0..2] a unit normal (4096 = 1), axis[3] the offset along it
+			s16 *axis = node->data.branch.axis;
+			axis[3] = (s16)(axis[3] + ((axis[0] * dx + axis[1] * dy + axis[2] * dz) >> 12));
 		}
 	}
+}
+
+// The level's other positions: checkpoints, nav paths, spawns, InstDefs. (The minimap stays in
+// the level's own coordinates: UI_Map_GetIconPos.)
+static void NativeWorld_ShiftLevelData(struct Level *lev, int dx, int dy, int dz)
+{
 	for (int i = 0; i < lev->cnt_restart_points; i++)
 	{
 		NativeWorld_ShiftSVec3(&lev->ptr_restart_points[i].pos, dx, dy, dz);
@@ -153,16 +154,35 @@ void NativeWorld_RequestShift(int dx, int dy, int dz)
 	s_worldShiftPending = 1;
 }
 
+static int s_worldActive;
+static struct Level *s_worldLevel;
+static void NativeWorld_Follow(struct GameTracker *gGT);
+
 void NativeWorld_FrameStart(struct GameTracker *gGT)
 {
-	if (!s_worldShiftPending || gGT->level1 == 0 || !LOAD_IsCustomLevel(gGT->levelID))
+	if (gGT->level1 == 0 || !LOAD_IsCustomLevel(gGT->levelID))
+	{
+		return;
+	}
+	if (s_worldActive && gGT->level1 == s_worldLevel)
+	{
+		// a world keeps its origin on its tiles: no shifts by hand
+		s_worldShiftPending = 0;
+		NativeWorld_Follow(gGT);
+		return;
+	}
+	if (!s_worldShiftPending)
 	{
 		return;
 	}
 	int dx = s_worldShift.x, dy = s_worldShift.y, dz = s_worldShift.z;
 	s_worldShiftPending = 0;
 	s_worldShift.x = s_worldShift.y = s_worldShift.z = 0;
-	NativeWorld_ShiftLevel(gGT->level1, dx, dy, dz);
+	if (gGT->level1->ptr_mesh_info != 0)
+	{
+		NativeWorld_ShiftMesh(gGT->level1->ptr_mesh_info, dx, dy, dz);
+	}
+	NativeWorld_ShiftLevelData(gGT->level1, dx, dy, dz);
 	NativeWorld_ShiftDynamic(gGT, dx, dy, dz);
 	s_worldOrigin.x -= dx;
 	s_worldOrigin.y -= dy;
@@ -174,4 +194,578 @@ void NativeWorld_GetOrigin(int *out)
 	out[0] = s_worldOrigin.x;
 	out[1] = s_worldOrigin.y;
 	out[2] = s_worldOrigin.z;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Tiled worlds. A world is square tiles (index.bin: their size and (i, j)), each a mesh-only
+// level file in coordinates from its centre (tools/build_world.py). The level's mesh is the
+// 3 x 3 tiles round the centre tile, put together (vertices, quadblocks, BSP) in coordinates
+// from that tile's centre; when the player's kart gets far enough into the next tile, the
+// window round that one is put together in the other buffer, swapped in, the quadblock
+// pointers the game holds are moved over, and everything moves by a tile (as a shift does).
+// Everything is visible: one PVS of all ones for every quadblock.
+
+#define NATIVE_WORLD_MAX_TILES 4096
+#define NATIVE_WORLD_WINDOW 9
+#define NATIVE_WORLD_MAX_NODES 0x3fff
+#define NATIVE_WORLD_VIS_WORDS (1 << 15) // a million quadblocks' bits
+
+typedef struct NativeWorldTile
+{
+	s16 i;
+	s16 j;
+	u8 *data;
+	struct mesh_info *mesh;
+	int banks;
+} NativeWorldTile;
+
+typedef struct NativeWorldWindow
+{
+	struct mesh_info mesh;
+	struct QuadBlock *quads;
+	int quadCap;
+	struct LevVertex *verts;
+	int vertCap;
+	struct BSP *bsp;
+	int count;
+	int tile[NATIVE_WORLD_WINDOW];
+	int quadBase[NATIVE_WORLD_WINDOW];
+	int quadCount[NATIVE_WORLD_WINDOW];
+	int ci;
+	int cj;
+} NativeWorldWindow;
+
+static NativeWorldTile s_tiles[NATIVE_WORLD_MAX_TILES];
+static int s_tileCount;
+static int s_tileSize;
+static u8 *s_tileArena;
+static u32 s_tileArenaSize;
+static NativeWorldWindow s_windows[2];
+static int s_windowCur = -1;
+static int *s_visAll;
+static struct PVS s_worldPVS;
+static struct VisMem s_worldVisMem;
+static double s_lastAssemblyMs;
+
+static int NativeWorld_FindTile(int i, int j)
+{
+	for (int k = 0; k < s_tileCount; k++)
+	{
+		if (s_tiles[k].i == i && s_tiles[k].j == j)
+		{
+			return k;
+		}
+	}
+	return -1;
+}
+
+static u8 *NativeWorld_ReadFile(const char *path, u32 *size)
+{
+	FILE *f = fopen(path, "rb");
+	if (f == NULL)
+	{
+		return NULL;
+	}
+	fseek(f, 0, SEEK_END);
+	long n = ftell(f);
+	fseek(f, 0, SEEK_SET);
+	u8 *buf = (u8 *)malloc((size_t)n);
+	if (buf != NULL && fread(buf, 1, (size_t)n, f) != (size_t)n)
+	{
+		free(buf);
+		buf = NULL;
+	}
+	fclose(f);
+	*size = (u32)n;
+	return buf;
+}
+
+static void NativeWorld_FreeTiles(void)
+{
+	free(s_tileArena);
+	s_tileArena = NULL;
+	s_tileArenaSize = 0;
+	s_tileCount = 0;
+}
+
+// index.bin and every tile, into one arena (the renderer's checks see one range); a tile's file
+// is a level file: u32 data size, the data, then its pointer map (u32 bytes, the slots).
+static int NativeWorld_LoadTiles(void)
+{
+	char path[768];
+	u32 size;
+	snprintf(path, sizeof(path), "%s/world/index.bin", NativeAssets_GetAssetDir());
+	u8 *index = NativeWorld_ReadFile(path, &size);
+	if (index == NULL)
+	{
+		return 0;
+	}
+	int count = 0;
+	if (size >= 12 && memcmp(index, "WRLD", 4) == 0)
+	{
+		memcpy(&s_tileSize, index + 4, 4);
+		memcpy(&count, index + 8, 4);
+	}
+	if (count <= 0 || count > NATIVE_WORLD_MAX_TILES || size < 12 + 4 * (u32)count)
+	{
+		free(index);
+		return 0;
+	}
+	u8 *files[NATIVE_WORLD_MAX_TILES];
+	u32 sizes[NATIVE_WORLD_MAX_TILES];
+	u32 total = 0;
+	for (int k = 0; k < count; k++)
+	{
+		s16 ij[2];
+		memcpy(ij, index + 12 + 4 * k, 4);
+		s_tiles[k].i = ij[0];
+		s_tiles[k].j = ij[1];
+		snprintf(path, sizeof(path), "%s/world/T_%d_%d.lev", NativeAssets_GetAssetDir(), ij[0], ij[1]);
+		files[k] = NativeWorld_ReadFile(path, &sizes[k]);
+		if (files[k] == NULL)
+		{
+			printf("[CTR Native] world: no %s\n", path);
+			sizes[k] = 0;
+		}
+		total += (sizes[k] + 15) & ~15u;
+	}
+	free(index);
+	s_tileArena = (u8 *)malloc(total);
+	s_tileArenaSize = total;
+	u32 at = 0;
+	s_tileCount = 0;
+	for (int k = 0; k < count; k++)
+	{
+		if (files[k] == NULL)
+		{
+			continue;
+		}
+		u8 *file = s_tileArena + at;
+		memcpy(file, files[k], sizes[k]);
+		free(files[k]);
+		at += (sizes[k] + 15) & ~15u;
+		u32 dataSize;
+		memcpy(&dataSize, file, 4);
+		u8 *data = file + 4;
+		u32 mapBytes;
+		memcpy(&mapBytes, data + dataSize, 4);
+		const u8 *slots = data + dataSize + 4;
+		for (u32 s = 0; s < mapBytes / 4; s++)
+		{
+			u32 slot;
+			memcpy(&slot, slots + 4 * s, 4);
+			u32 value;
+			memcpy(&value, data + slot, 4);
+			value += (u32)(uintptr_t)data;
+			memcpy(data + slot, &value, 4);
+		}
+		NativeWorldTile *t = &s_tiles[s_tileCount++];
+		*t = s_tiles[k];
+		t->data = data;
+		t->mesh = ((struct Level *)data)->ptr_mesh_info;
+		t->banks = (t->mesh->numVertex + 0xffff) >> 16;
+	}
+	printf("[CTR Native] world: %d tiles of %d units, %u KB\n", s_tileCount, s_tileSize, total >> 10);
+	return s_tileCount > 0;
+}
+
+static int NativeWorld_Grow(void **buf, int *cap, int need, size_t item)
+{
+	if (need <= *cap)
+	{
+		return 1;
+	}
+	void *p = realloc(*buf, (size_t)need * item);
+	if (p == NULL)
+	{
+		return 0;
+	}
+	*buf = p;
+	*cap = need;
+	return 1;
+}
+
+static int s_topNext;
+
+// The BSP over a window's tiles: halves split between tiles, alternating by their spread.
+static u16 NativeWorld_TopTree(NativeWorldWindow *w, int *order, int n, const u16 *rootIds, int ox, int oz)
+{
+	if (n == 1)
+	{
+		return rootIds[order[0]];
+	}
+	int me = s_topNext++;
+	int imin = 1 << 30, imax = -(1 << 30), jmin = 1 << 30, jmax = -(1 << 30);
+	for (int k = 0; k < n; k++)
+	{
+		NativeWorldTile *t = &s_tiles[w->tile[order[k]]];
+		imin = t->i < imin ? t->i : imin;
+		imax = t->i > imax ? t->i : imax;
+		jmin = t->j < jmin ? t->j : jmin;
+		jmax = t->j > jmax ? t->j : jmax;
+	}
+	int alongI = (imax - imin) >= (jmax - jmin);
+	// sort by i or j (insertion: nine at most)
+	for (int a = 1; a < n; a++)
+	{
+		int v = order[a], b = a - 1;
+		int key = alongI ? s_tiles[w->tile[v]].i : s_tiles[w->tile[v]].j;
+		while (b >= 0 && (alongI ? s_tiles[w->tile[order[b]]].i : s_tiles[w->tile[order[b]]].j) > key)
+		{
+			order[b + 1] = order[b];
+			b--;
+		}
+		order[b + 1] = v;
+	}
+	int mid = n / 2;
+	NativeWorldTile *t = &s_tiles[w->tile[order[mid]]];
+	int split = alongI ? (t->i * s_tileSize - s_tileSize / 2 - ox) : (t->j * s_tileSize - s_tileSize / 2 - oz);
+	u16 left = NativeWorld_TopTree(w, order, mid, rootIds, ox, oz);
+	u16 right = NativeWorld_TopTree(w, order + mid, n - mid, rootIds, ox, oz);
+	struct BSP *node = &w->bsp[me];
+	memset(node, 0, sizeof(*node));
+	node->flag = 0;
+	node->id = (s16)me;
+	struct BoundingBox *a = &w->bsp[left & BSP_CHILD_ID_INDEX_MASK].box;
+	struct BoundingBox *b = &w->bsp[right & BSP_CHILD_ID_INDEX_MASK].box;
+	node->box.min.x = a->min.x < b->min.x ? a->min.x : b->min.x;
+	node->box.min.y = a->min.y < b->min.y ? a->min.y : b->min.y;
+	node->box.min.z = a->min.z < b->min.z ? a->min.z : b->min.z;
+	node->box.max.x = a->max.x > b->max.x ? a->max.x : b->max.x;
+	node->box.max.y = a->max.y > b->max.y ? a->max.y : b->max.y;
+	node->box.max.z = a->max.z > b->max.z ? a->max.z : b->max.z;
+	node->data.branch.axis[0] = alongI ? 0x1000 : 0;
+	node->data.branch.axis[1] = 0;
+	node->data.branch.axis[2] = alongI ? 0 : 0x1000;
+	node->data.branch.axis[3] = (s16)split;
+	node->data.branch.childID[0] = (BspChildId)left;
+	node->data.branch.childID[1] = (BspChildId)right;
+	node->data.branch.childID[2] = (BspChildId)0x0D02; // near side first (levwriter BSP_NEAR_FIRST)
+	node->data.branch.childID[3] = 0;
+	return (u16)me;
+}
+
+// Puts the window round tile (ci, cj) together in w, in coordinates from origin (ox, oz).
+static int NativeWorld_Assemble(NativeWorldWindow *w, int ci, int cj, int ox, int oz)
+{
+	double t0 = ((double)SDL_GetTicksNS() / 1e6);
+	w->count = 0;
+	int nq = 0, banks = 0, nodes = 0;
+	for (int dj = -1; dj <= 1; dj++)
+	{
+		for (int di = -1; di <= 1; di++)
+		{
+			int k = NativeWorld_FindTile(ci + di, cj + dj);
+			if (k < 0)
+			{
+				continue;
+			}
+			w->tile[w->count++] = k;
+			nq += s_tiles[k].mesh->numQuadBlock;
+			banks += s_tiles[k].banks;
+			nodes += s_tiles[k].mesh->numBspNodes;
+		}
+	}
+	if (w->count == 0)
+	{
+		return 0;
+	}
+	int top = w->count - 1;
+	if (top + nodes > NATIVE_WORLD_MAX_NODES || banks > 256)
+	{
+		printf("[CTR Native] world: window %d,%d too big (%d BSP nodes, %d vertex banks)\n", ci, cj, top + nodes, banks);
+		return 0;
+	}
+	if (!NativeWorld_Grow((void **)&w->quads, &w->quadCap, nq, sizeof(struct QuadBlock)) ||
+	    !NativeWorld_Grow((void **)&w->verts, &w->vertCap, banks << 16, sizeof(struct LevVertex)))
+	{
+		return 0;
+	}
+	if (w->bsp == NULL)
+	{
+		w->bsp = (struct BSP *)calloc(NATIVE_WORLD_MAX_NODES + 1, sizeof(struct BSP));
+	}
+	u16 rootIds[NATIVE_WORLD_WINDOW];
+	int qbase = 0, bank = 0, nbase = top;
+	for (int k = 0; k < w->count; k++)
+	{
+		NativeWorldTile *t = &s_tiles[w->tile[k]];
+		struct mesh_info *m = t->mesh;
+		int dx = t->i * s_tileSize - ox, dz = t->j * s_tileSize - oz;
+		int tileBanked = ((u32)m->unk2 == LEV_VERTEX_BANKS);
+		struct LevVertex *vdst = &w->verts[bank << 16];
+		memcpy(vdst, m->ptrVertexArray, (size_t)m->numVertex * sizeof(struct LevVertex));
+		for (int v = 0; v < m->numVertex; v++)
+		{
+			vdst[v].pos.x = (s16)(vdst[v].pos.x + dx);
+			vdst[v].pos.z = (s16)(vdst[v].pos.z + dz);
+		}
+		struct QuadBlock *qdst = &w->quads[qbase];
+		memcpy(qdst, m->ptrQuadBlockArray, (size_t)m->numQuadBlock * sizeof(struct QuadBlock));
+		for (int q = 0; q < m->numQuadBlock; q++)
+		{
+			struct QuadBlock *qb = &qdst[q];
+			qb->weather_vanishRate = (u8)(bank + (tileBanked ? qb->weather_vanishRate : 0));
+			NativeWorld_ShiftBox(&qb->bbox, dx, 0, dz);
+			qb->pvs = &s_worldPVS;
+			int gi = qbase + q;
+			qb->blockID = (s16)(((gi & ~31) | (31 - (gi & 31))) & 0x7fff);
+		}
+		struct BSP *ndst = &w->bsp[nbase];
+		memcpy(ndst, m->bspRoot, (size_t)m->numBspNodes * sizeof(struct BSP));
+		for (int n = 0; n < m->numBspNodes; n++)
+		{
+			struct BSP *node = &ndst[n];
+			node->id = (s16)(nbase + n);
+			NativeWorld_ShiftBox(&node->box, dx, 0, dz);
+			if (node->flag & BSP_NODE_FLAG_LEAF)
+			{
+				node->data.leaf.ptrQuadBlockArray = qdst + (node->data.leaf.ptrQuadBlockArray - m->ptrQuadBlockArray);
+				node->data.leaf.bspHitboxArray = NULL;
+			}
+			else
+			{
+				for (int c = 0; c < 2; c++)
+				{
+					u16 id = (u16)node->data.branch.childID[c];
+					if (id != BSP_CHILD_ID_NONE)
+					{
+						node->data.branch.childID[c] = (BspChildId)(((id & BSP_CHILD_ID_INDEX_MASK) + nbase) | (id & BSP_CHILD_ID_LEAF_FLAG));
+					}
+				}
+				s16 *axis = node->data.branch.axis;
+				axis[3] = (s16)(axis[3] + ((axis[0] * dx + axis[2] * dz) >> 12));
+			}
+		}
+		rootIds[k] = (u16)(nbase | ((ndst[0].flag & BSP_NODE_FLAG_LEAF) ? BSP_CHILD_ID_LEAF_FLAG : 0));
+		w->quadBase[k] = qbase;
+		w->quadCount[k] = m->numQuadBlock;
+		qbase += m->numQuadBlock;
+		bank += t->banks;
+		nbase += m->numBspNodes;
+	}
+	int order[NATIVE_WORLD_WINDOW];
+	for (int k = 0; k < w->count; k++)
+	{
+		order[k] = k;
+	}
+	s_topNext = 0;
+	NativeWorld_TopTree(w, order, w->count, rootIds, ox, oz);
+	w->mesh.numQuadBlock = nq;
+	w->mesh.numVertex = bank << 16;
+	w->mesh.unk1 = 0;
+	w->mesh.ptrQuadBlockArray = w->quads;
+	w->mesh.ptrVertexArray = w->verts;
+	w->mesh.unk2 = (int)LEV_VERTEX_BANKS;
+	w->mesh.bspRoot = w->bsp;
+	w->mesh.numBspNodes = nbase;
+	w->ci = ci;
+	w->cj = cj;
+	s_lastAssemblyMs = ((double)SDL_GetTicksNS() / 1e6) - t0;
+	return 1;
+}
+
+static struct QuadBlock *NativeWorld_MoveQuad(struct QuadBlock *q, NativeWorldWindow *from, NativeWorldWindow *to)
+{
+	if (q == NULL || from == NULL || q < from->quads || q >= from->quads + from->mesh.numQuadBlock)
+	{
+		return NULL;
+	}
+	int gi = (int)(q - from->quads);
+	for (int k = 0; k < from->count; k++)
+	{
+		if (gi >= from->quadBase[k] && gi < from->quadBase[k] + from->quadCount[k])
+		{
+			for (int k2 = 0; k2 < to->count; k2++)
+			{
+				if (to->tile[k2] == from->tile[k])
+				{
+					return to->quads + to->quadBase[k2] + (gi - from->quadBase[k]);
+				}
+			}
+			return NULL;
+		}
+	}
+	return NULL;
+}
+
+static void NativeWorld_ResetVisMem(struct GameTracker *gGT)
+{
+	struct mesh_info *mesh = gGT->level1->ptr_mesh_info;
+	for (int p = 0; p < 4; p++)
+	{
+		s_worldVisMem.visLeafSrc[p] = NULL;
+		s_worldVisMem.visFaceSrc[p] = NULL;
+		s_worldVisMem.visOVertSrc[p] = NULL;
+		s_worldVisMem.visSCVertSrc[p] = NULL;
+		memset(s_worldVisMem.visLeafList[p], 0xff, NATIVE_WORLD_VIS_WORDS * 4);
+		memset(s_worldVisMem.visFaceList[p], 0xff, NATIVE_WORLD_VIS_WORDS * 4);
+		for (int n = 0; n < mesh->numBspNodes; n++)
+		{
+			s_worldVisMem.bspList[p][n].next = NULL;
+			s_worldVisMem.bspList[p][n].bsp = &mesh->bspRoot[n];
+		}
+	}
+}
+
+// Before the drivers are made (they land on what's under the spawn): the world's mesh in
+// place of the level's, round tile (0, 0) (the level is built in the world's coordinates).
+void NativeWorld_LevelStart(struct GameTracker *gGT)
+{
+	struct Level *lev = gGT->level1;
+	s_worldShiftPending = 0;
+	s_worldShift.x = s_worldShift.y = s_worldShift.z = 0;
+	if (lev == NULL || !LOAD_IsCustomLevel(gGT->levelID))
+	{
+		s_worldActive = 0;
+		s_worldLevel = NULL;
+		s_worldOrigin.x = s_worldOrigin.y = s_worldOrigin.z = 0;
+		return;
+	}
+	if (lev == s_worldLevel)
+	{
+		// a restart: the level's data back where it was built
+		NativeWorld_ShiftLevelData(lev, s_worldOrigin.x, s_worldOrigin.y, s_worldOrigin.z);
+	}
+	else
+	{
+		NativeWorld_FreeTiles();
+		s_worldActive = NativeWorld_LoadTiles();
+		s_worldLevel = lev;
+	}
+	s_worldOrigin.x = s_worldOrigin.y = s_worldOrigin.z = 0;
+	if (!s_worldActive)
+	{
+		return;
+	}
+	if (s_visAll == NULL)
+	{
+		s_visAll = (int *)malloc(NATIVE_WORLD_VIS_WORDS * 4);
+		memset(s_visAll, 0xff, NATIVE_WORLD_VIS_WORDS * 4);
+		s_worldPVS.visLeafSrc = s_visAll;
+		s_worldPVS.visFaceSrc = s_visAll;
+		s_worldPVS.visInstSrc = NULL;
+		s_worldPVS.visExtraSrc = NULL;
+		for (int p = 0; p < 4; p++)
+		{
+			s_worldVisMem.visLeafList[p] = (int *)malloc(NATIVE_WORLD_VIS_WORDS * 4);
+			s_worldVisMem.visFaceList[p] = (int *)malloc(NATIVE_WORLD_VIS_WORDS * 4);
+			s_worldVisMem.visOVertList[p] = (int *)calloc(16, 4);
+			s_worldVisMem.visSCVertList[p] = (int *)calloc(16, 4);
+			s_worldVisMem.bspList[p] = (struct VisMemBspListNode *)calloc(NATIVE_WORLD_MAX_NODES + 1, sizeof(struct VisMemBspListNode));
+		}
+	}
+	if (!NativeWorld_Assemble(&s_windows[0], 0, 0, 0, 0))
+	{
+		s_worldActive = 0;
+		return;
+	}
+	s_windowCur = 0;
+	lev->ptr_mesh_info = &s_windows[0].mesh;
+	// MainInit_VisMem fills the VisMem's BSP lists for the mesh: the world's, sized for any window
+	lev->visMem = &s_worldVisMem;
+	printf("[CTR Native] world: window 0,0: %d tiles, %d quadblocks, %d BSP nodes (%.1f ms)\n", s_windows[0].count,
+	       s_windows[0].mesh.numQuadBlock, s_windows[0].mesh.numBspNodes, s_lastAssemblyMs);
+}
+
+// After MainInit_VisMem: the world's VisMem (sized for any window) in place of the level's.
+void NativeWorld_LevelReady(struct GameTracker *gGT)
+{
+	if (!s_worldActive)
+	{
+		return;
+	}
+	gGT->visMem1 = &s_worldVisMem;
+	gGT->level1->visMem = &s_worldVisMem;
+	NativeWorld_ResetVisMem(gGT);
+}
+
+// A frame's start: past the edge of the centre tile (and an eighth of a tile more), the
+// window round the tile the kart is in takes over.
+static void NativeWorld_Follow(struct GameTracker *gGT)
+{
+	struct Driver *d = gGT->drivers[0];
+	if (d == NULL || s_windowCur < 0)
+	{
+		return;
+	}
+	int x = d->posCurr.x >> 8, z = d->posCurr.z >> 8;
+	int reach = s_tileSize / 2 + s_tileSize / 8;
+	if (x > -reach && x < reach && z > -reach && z < reach)
+	{
+		return;
+	}
+	NativeWorldWindow *from = &s_windows[s_windowCur];
+	int di = (x + (x >= 0 ? s_tileSize / 2 : -s_tileSize / 2)) / s_tileSize;
+	int dj = (z + (z >= 0 ? s_tileSize / 2 : -s_tileSize / 2)) / s_tileSize;
+	int ci = from->ci + di, cj = from->cj + dj;
+	int ox = ci * s_tileSize, oz = cj * s_tileSize;
+	NativeWorldWindow *to = &s_windows[1 - s_windowCur];
+	if (!NativeWorld_Assemble(to, ci, cj, ox, oz))
+	{
+		return;
+	}
+	// the quadblocks the game holds, moved over (NULL when their tile is left behind)
+	for (int i = 0; i < 8; i++)
+	{
+		struct Driver *dr = gGT->drivers[i];
+		if (dr == NULL)
+		{
+			continue;
+		}
+		struct QuadBlock *touching = NativeWorld_MoveQuad(dr->currBlockTouching, from, to);
+		struct QuadBlock *under = NativeWorld_MoveQuad(dr->underDriver, from, to);
+		struct QuadBlock *last = NativeWorld_MoveQuad(dr->lastValid, from, to);
+		dr->currBlockTouching = touching;
+		dr->underDriver = under;
+		dr->lastValid = last != NULL ? last : (under != NULL ? under : touching);
+	}
+	for (int i = 0; i < 4; i++)
+	{
+		gGT->cameraDC[i].ptrQuadBlock = NativeWorld_MoveQuad(gGT->cameraDC[i].ptrQuadBlock, from, to);
+	}
+	gGT->level1->ptr_mesh_info = &to->mesh;
+	s_windowCur = 1 - s_windowCur;
+	int dx = (s_worldOrigin.x - ox), dz = (s_worldOrigin.z - oz);
+	NativeWorld_ShiftLevelData(gGT->level1, dx, 0, dz);
+	NativeWorld_ShiftDynamic(gGT, dx, 0, dz);
+	s_worldOrigin.x = ox;
+	s_worldOrigin.z = oz;
+	NativeWorld_ResetVisMem(gGT);
+	printf("[CTR Native] world: window %d,%d: %d tiles, %d quadblocks (%.1f ms)\n", ci, cj, to->count, to->mesh.numQuadBlock,
+	       s_lastAssemblyMs);
+}
+
+// NOTE(ctr-dust2): the renderer checks texture pointers lie in level memory: a world's are in
+// its tiles and windows.
+int NativeWorld_OwnsSpan(u32 ptr, u32 size)
+{
+	if (!s_worldActive)
+	{
+		return 0;
+	}
+	if (ptr >= (u32)(uintptr_t)s_tileArena && ptr + size <= (u32)(uintptr_t)s_tileArena + s_tileArenaSize)
+	{
+		return 1;
+	}
+	for (int k = 0; k < 2; k++)
+	{
+		NativeWorldWindow *w = &s_windows[k];
+		if (w->quads != NULL && ptr >= (u32)(uintptr_t)w->quads && ptr + size <= (u32)(uintptr_t)(w->quads + w->quadCap))
+		{
+			return 1;
+		}
+	}
+	return 0;
+}
+
+int NativeWorld_Info(int *out)
+{
+	out[0] = s_worldActive;
+	out[1] = s_windowCur >= 0 ? s_windows[s_windowCur].ci : 0;
+	out[2] = s_windowCur >= 0 ? s_windows[s_windowCur].cj : 0;
+	out[3] = s_windowCur >= 0 ? s_windows[s_windowCur].mesh.numQuadBlock : 0;
+	out[4] = (int)(s_lastAssemblyMs * 1000.0);
+	out[5] = s_tileCount;
+	return s_worldActive;
 }

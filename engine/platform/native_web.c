@@ -90,6 +90,12 @@ EMSCRIPTEN_KEEPALIVE void NativeWeb_GetOrigin(int *out)
 	NativeWorld_GetOrigin(out);
 }
 
+// out: active, centre tile i, j, quadblocks in the window, last assembly (microseconds), tiles
+EMSCRIPTEN_KEEPALIVE int NativeWeb_WorldInfo(int *out)
+{
+	return NativeWorld_Info(out);
+}
+
 EMSCRIPTEN_KEEPALIVE void NativeWeb_SetButtons(int mask)
 {
 	g_nativeWebHeldButtons = mask & 0xffff;

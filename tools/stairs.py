@@ -86,9 +86,15 @@ def find_risers(tris):
 def chain(risers):
     """Groups risers into staircases (lists ordered from the bottom up)."""
     nxt = {}
+    # candidates by the height they start at (a riser's next starts where it ends, within 0.6)
+    by_z0 = {}
+    for j, s in enumerate(risers):
+        by_z0.setdefault(int(np.floor(s.z0)), []).append(j)
     for i, r in enumerate(risers):
         best = None
-        for j, s in enumerate(risers):
+        near = [j for z in (int(np.floor(r.z1)) - 1, int(np.floor(r.z1)), int(np.floor(r.z1)) + 1) for j in by_z0.get(z, ())]
+        for j in near:
+            s = risers[j]
             if i == j or abs(s.z0 - r.z1) > 0.6 or np.dot(s.n, r.n) < 0.99:
                 continue
             # s stands behind r (up the stairs is -n)
@@ -155,14 +161,21 @@ def floor_at(floors, x, y, z, tol=1.0):
 
 def drivable_stairs(tris):
     """Staircases with a floor at the foot of the first riser and on top of the last one."""
-    floors = [P for P, n in tris if n[2] > 0.99]
+    # floors by height (floor_at wants them within a unit of a riser's bottom or top)
+    floors = {}
+    for P, n in tris:
+        if n[2] > 0.99:
+            floors.setdefault(int(np.floor(P[0, 2])), []).append(P)
+
+    def floors_near(z):
+        return [P for k in (int(np.floor(z)) - 1, int(np.floor(z)), int(np.floor(z)) + 1) for P in floors.get(k, ())]
 
     def drivable(st):
         first, last = st[0], st[-1]
         mid_a = (first.a + first.b) / 2
         mid_b = (last.a + last.b) / 2
-        return (floor_at(floors, *(mid_a + first.n * 6), first.z0)
-                and floor_at(floors, *(mid_b - last.n * 6), last.z1))
+        return (floor_at(floors_near(first.z0), *(mid_a + first.n * 6), first.z0)
+                and floor_at(floors_near(last.z1), *(mid_b - last.n * 6), last.z1))
 
     # A chain can run on into something that isn't a step (Inferno's banana: its bottom step
     # chained to a crate's ledge beside it): the longest drivable run from its foot, and the
