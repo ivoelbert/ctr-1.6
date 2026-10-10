@@ -38,6 +38,7 @@ LEAF_QUADS = 24         # quadblocks a BSP leaf holds, at least
 TILE_LEAVES = 512       # a window's BSP holds 16383 nodes: 9 tiles' (the kd-tree halves to a
                         # power of two leaves: 1023 nodes) and the top
 KILL_Y = -1600          # CTR units under the floor: a kart that falls this far is put back
+MAX_HEIGHT = 32000      # CTR units: 16-bit positions
 
 
 def tile_kill_plane(out, half, y):
@@ -84,6 +85,13 @@ def build_tile(ij):
     off = np.array([i * size, 0, j * size])
     for q in out:
         q.pos = [tuple(int(round(v)) for v in np.asarray(p) - off) for p in q.pos]
+    # heights are 16-bit too: 500 m over the city's floor (the hills' far side) is left out
+    high = [q for q in out if max(abs(p[1]) for p in q.pos) > MAX_HEIGHT]
+    if high:
+        out = [q for q in out if max(abs(p[1]) for p in q.pos) <= MAX_HEIGHT]
+        print(f'tile {i},{j}: {len(high)} quadblocks out of reach above or below', flush=True)
+    if not out:
+        return None
     tile_kill_plane(out, half, KILL_Y)
     span = np.abs(np.array([p for q in out for p in q.pos])).max(axis=0)
     assert span[0] < 0x7000 and span[2] < 0x7000, f'tile {i},{j} reaches {span}'
