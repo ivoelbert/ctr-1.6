@@ -23,7 +23,8 @@ Dust 2 from a Sketchfab model of it, then moved every map to Counter-Strike's ow
     textures lit by the vertex colours (0x80 = 1), alpha-tested, that repeat inside their
     rectangle like the PS1's texture window: tpage bits 0-4 = 16 | log2(w / 32) |
     log2(h / 32) << 2 (the bits are the page base, which atlas primitives don't use), and
-    CLUT bits 14-15 scale the UVs by 1-8 before they wrap (the CLUT arrives as a signed short).
+    CLUT bits 14-15 scale the UVs by 1-8 before they wrap (the CLUT arrives as a signed short);
+    its textures are 64-aligned, CLUT = layer << 8 | (y / 64) << 4 | (x / 64): 59 layers.
     The repeats are sampled with the unwrapped UVs' gradients (`textureGrad`), so the mipmap
     doesn't jump at the seams.
   - `LOAD_IsCustomLevel`: overridden levels get 2.5 MB of primitive memory and a 64000-word

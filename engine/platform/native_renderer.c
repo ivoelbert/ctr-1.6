@@ -921,8 +921,10 @@ const char *gte_shader_32_rgba = "	uniform sampler2D s_texture;\n"
 // UVs' gradients, so the mipmap doesn't jump at the seams); CLUT bits 14-15 scale the UVs by
 // 1, 2, 4 or 8 first, so one primitive can span more than 255 texels of a repeating texture.
 // In a "CTRA" atlas those two bits are the layer's high bits instead: up to 63 layers (15 is
-// never drawn), 4 to a row of the atlas. Layer 15 is never drawn:
-// collision-only quadblocks (stair ramps) use it.
+// never drawn), 4 to a row of the atlas. A "CTRV" atlas's textures are 64-aligned instead:
+// CLUT = layer << 8 | (y / 64) << 4 | (x / 64), up to 59 layers (a whole city's textures).
+// CLUT bits 10-13 all set (layer 15, the old way) is never drawn: collision-only quadblocks
+// (stair ramps) use it.
 const char *gte_shader_virtual_atlas = "	uniform sampler2D s_texture;\n"
                                        "	uniform int psxDrawMaskSet;\n"
                                        "	uniform vec2 atlasSize;\n"
@@ -937,11 +939,17 @@ const char *gte_shader_virtual_atlas = "	uniform sampler2D s_texture;\n"
                                        "			uvScale = exp2(floor(clut / 16384.0));\n"
                                        "			clut = mod(clut, 16384.0);\n"
                                        "		}\n"
+                                       "		if (abs(floor(clut / 1024.0) - 15.0) < 0.5) discard;\n"
                                        "		float layer = floor(clut / 1024.0);\n"
-                                       "		if (abs(layer - 15.0) < 0.5) discard;\n"
                                        "		float cell = mod(clut, 1024.0);\n"
                                        "		vec2 origin = vec2(mod(layer, 4.0) * 1024.0 + mod(cell, 32.0) * 32.0,\n"
                                        "		                   floor(layer / 4.0) * 1024.0 + floor(cell / 32.0) * 32.0);\n"
+                                       "		if (atlasVertexColor != 0) {\n"
+                                       "			layer = floor(clut / 256.0);\n"
+                                       "			cell = mod(clut, 256.0);\n"
+                                       "			origin = vec2(mod(layer, 4.0) * 1024.0 + mod(cell, 16.0) * 64.0,\n"
+                                       "			              floor(layer / 4.0) * 1024.0 + floor(cell / 16.0) * 64.0);\n"
+                                       "		}\n"
                                        "		vec2 uv = v_texcoord.xy * uvScale;\n"
                                        "		vec2 gx = dFdx(uv) / atlasSize, gy = dFdy(uv) / atlasSize;\n"
                                        "		float page = floor(v_page_clut.x / 64.0 + 0.5) + floor(v_page_clut.y / 256.0 + 0.5) * 16.0;\n"

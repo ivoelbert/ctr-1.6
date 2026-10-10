@@ -41,6 +41,7 @@ def max_edge(n):
 LAYER_SIZE = 1024       # each model texture is 1024 x 1024
 ATLAS_COLS = 4
 PAGE_ALIGN = 32         # texture page origins are 32-texel aligned (TF_VIRTUAL_ATLAS)
+CTRV_ALIGN = 64         # a "CTRV" atlas's textures: 64-texel aligned origins (see layout)
 MAX_UV_SPAN = 255 - PAGE_ALIGN
 TPAGE_ATLAS = 3 << 7    # color mode 3
 
@@ -183,12 +184,18 @@ def page_for(uvs):
 
 def layout(uv4, layer, origin, wrap=0, shift=0):
     rel = np.clip(np.round((uv4[:, :2] - origin) / (1 << shift)), 0, 255).astype(int)
-    clut = (shift << 14) | (layer << 10) | ((int(origin[1]) // PAGE_ALIGN) << 5) | (int(origin[0]) // PAGE_ALIGN)
+    if wrap:
+        # a repeating texture ("CTRV" atlas): its origin 64-aligned, so the layer has 6 bits
+        # (59 layers: 60-63 are where the never-drawn layer 15's CLUT falls, see INVISIBLE)
+        assert int(origin[0]) % CTRV_ALIGN == 0 and int(origin[1]) % CTRV_ALIGN == 0 and layer < 60
+        clut = (shift << 14) | (layer << 8) | ((int(origin[1]) // CTRV_ALIGN) << 4) | (int(origin[0]) // CTRV_ALIGN)
+    else:
+        clut = (shift << 14) | (layer << 10) | ((int(origin[1]) // PAGE_ALIGN) << 5) | (int(origin[0]) // PAGE_ALIGN)
     return TexLayout(uv=tuple((int(u), int(v)) for u, v in rel), clut=clut, tpage=TPAGE_ATLAS | wrap)
 
 
 # A repeating texture ("CTRV" atlas): uv carries, after the colours, the texture's origin in the
-# layer (32-aligned), its wrap code for the atlas shader (tpage bits 0-4: 16 | log2(w / 32)
+# layer (64-aligned), its wrap code for the atlas shader (tpage bits 0-4: 16 | log2(w / 32)
 # | log2(h / 32) << 2) and a uv scale's log2 (CLUT bits 14-15), and the uvs count from that
 # origin, up to 255 texels times the scale.
 WRAP_CHANNELS = 9
