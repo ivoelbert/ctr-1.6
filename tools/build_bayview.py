@@ -222,8 +222,9 @@ def back_to_back(groups):
     """{texture: bool mask} of the walls that are one face of a thin object (a billboard and its
     back, 43 cm behind it): another wall right behind, facing the other way, over it. Drawn
     from both sides, the two fight in CTR's ordering table (each face is filed by its farthest
-    corner, a metre to a slot) and show through each other; so each is turned to face away from
-    the other (corners reordered in place) and drawn from its own side only."""
+    corner, a metre to a slot) and show through each other; so each is drawn from its own side
+    only. Only faces turned away from each other: a wall with something in front of it facing
+    it (a fascia, a pillar) stays drawn from both sides (turning it round hid shop fronts)."""
     from scipy.spatial import cKDTree
     keys, cs, ns, rs = [], [], [], []
     for h, (P, _, _, _) in groups.items():
@@ -243,25 +244,20 @@ def back_to_back(groups):
         return out
     C, N, R = np.concatenate(cs), np.concatenate(ns), np.concatenate(rs)
     tree = cKDTree(C)
-    behind = np.zeros(len(C), int)   # +1: the twin is behind (along -n), -1: in front
+    behind = np.zeros(len(C), bool)
     for a, near in enumerate(tree.query_ball_point(C, R + BACK_TO_BACK)):
         for b in near:
             if b == a or np.dot(N[a], N[b]) > -0.95:
                 continue
             off = float(np.dot(C[b] - C[a], N[a]))     # the other's middle along a's normal
             side = C[b] - C[a] - off * N[a]           # and across a's plane
-            if 0.02 < abs(off) < BACK_TO_BACK and np.linalg.norm(side) < R[a]:
-                behind[a] = 1 if off < 0 else -1
+            if -BACK_TO_BACK < off < -0.02 and np.linalg.norm(side) < R[a]:
+                behind[a] = True
                 break
-    turned = 0
     for idx in np.nonzero(behind)[0]:
         h, k = keys[idx]
         out[h][k] = True
-        if behind[idx] < 0:
-            P, UV, Cc, _ = groups[h]
-            P[k], UV[k], Cc[k] = P[k][::-1].copy(), UV[k][::-1].copy(), Cc[k][::-1].copy()
-            turned += 1
-    print(f'{int((behind != 0).sum())} walls back to back with another, drawn from one side ({turned} turned round)')
+    print(f'{int(behind.sum())} walls back to back with another, drawn from one side')
     return out
 
 
