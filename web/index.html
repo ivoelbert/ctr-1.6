@@ -221,7 +221,9 @@
         const s = window.ctr.state();
         if (!s.kart) return 'not racing';
         const k = s.kart;
-        return `${choiceName || 'level'} ${Math.round(k.x)},${Math.round(k.y)},${Math.round(k.z)},${k.angle & 4095} level ${s.level} mode ${(s.gameMode1 >>> 0).toString(16)}`;
+        // in a world (whose origin moves), the world's coordinates
+        const o = window.ctr.origin();
+        return `${choiceName || 'level'} ${Math.round(k.x + o[0])},${Math.round(k.y + o[1])},${Math.round(k.z + o[2])},${k.angle & 4095} level ${s.level} mode ${(s.gameMode1 >>> 0).toString(16)}`;
       },
     };
   }
@@ -374,6 +376,8 @@
       Math.min(4, Math.max(1, Math.ceil(canvas.clientHeight * (window.devicePixelRatio || 1) / 240))));
     fitScale();
     window.addEventListener('resize', fitScale);
+    // ?depth=0: a custom level's faces in CTR's painted order only, as the PS1 drew them
+    if (params.get('depth') === '0') Module._NativeWeb_SetLevelDepth(0);
     Module.callMain([]);
   }
 
