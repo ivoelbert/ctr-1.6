@@ -2,6 +2,10 @@
 
 #include "platform/native_world.h"
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
+
 static int s_worldShiftPending;
 static Vec3 s_worldShift;
 static Vec3 s_worldOrigin;
@@ -157,6 +161,7 @@ void NativeWorld_RequestShift(int dx, int dy, int dz)
 static int s_worldActive;
 static struct Level *s_worldLevel;
 static void NativeWorld_Follow(struct GameTracker *gGT);
+static void NativeWorld_Stream(void);
 
 void NativeWorld_FrameStart(struct GameTracker *gGT)
 {
@@ -169,6 +174,7 @@ void NativeWorld_FrameStart(struct GameTracker *gGT)
 		// a world keeps its origin on its tiles: no shifts by hand
 		s_worldShiftPending = 0;
 		NativeWorld_Follow(gGT);
+		NativeWorld_Stream();
 		return;
 	}
 	if (!s_worldShiftPending)
@@ -214,6 +220,9 @@ typedef struct NativeWorldTile
 {
 	s16 i;
 	s16 j;
+	u32 bytes;  // its file's size
+	int slot;   // -1: not loaded
+	int asked;  // the page was asked for it (web)
 	u8 *data;
 	struct mesh_info *mesh;
 	int banks;
@@ -235,17 +244,41 @@ typedef struct NativeWorldWindow
 	int cj;
 } NativeWorldWindow;
 
+// Tiles live in slots of one arena (the renderer's checks see one range): the 5 x 5 round the
+// centre tile, loaded as they come (the page fetches them on the web), and the slots of tiles
+// outside that reused.
+#define NATIVE_WORLD_RING 2
+#define NATIVE_WORLD_SLOTS ((2 * NATIVE_WORLD_RING + 1) * (2 * NATIVE_WORLD_RING + 1))
+
 static NativeWorldTile s_tiles[NATIVE_WORLD_MAX_TILES];
 static int s_tileCount;
 static int s_tileSize;
 static u8 *s_tileArena;
 static u32 s_tileArenaSize;
+static u32 s_slotSize;
+static int s_slotOwner[NATIVE_WORLD_SLOTS];
 static NativeWorldWindow s_windows[2];
 static int s_windowCur = -1;
+static int s_centreI, s_centreJ;
 static int *s_visAll;
 static struct PVS s_worldPVS;
 static struct VisMem s_worldVisMem;
 static double s_lastAssemblyMs;
+static double s_lastLoadMs;
+static int s_tilesLoaded;
+
+#ifdef __EMSCRIPTEN__
+// the page fetches a tile into assets/world/ (index.html: Module.ctrFetchTile)
+EM_JS(void, NativeWorld_AskPage, (int i, int j), {
+	if (Module.ctrFetchTile) Module.ctrFetchTile(i, j);
+});
+#else
+static void NativeWorld_AskPage(int i, int j)
+{
+	(void)i;
+	(void)j;
+}
+#endif
 
 static int NativeWorld_FindTile(int i, int j)
 {
@@ -257,6 +290,11 @@ static int NativeWorld_FindTile(int i, int j)
 		}
 	}
 	return -1;
+}
+
+static void NativeWorld_TilePath(char *path, size_t size, int i, int j)
+{
+	snprintf(path, size, "%s/world/T_%d_%d.lev", NativeAssets_GetAssetDir(), i, j);
 }
 
 static u8 *NativeWorld_ReadFile(const char *path, u32 *size)
@@ -288,9 +326,8 @@ static void NativeWorld_FreeTiles(void)
 	s_tileCount = 0;
 }
 
-// index.bin and every tile, into one arena (the renderer's checks see one range); a tile's file
-// is a level file: u32 data size, the data, then its pointer map (u32 bytes, the slots).
-static int NativeWorld_LoadTiles(void)
+// index.bin: 'WRLD', tile size (units), count, then per tile (i, j) s16 and its file's bytes.
+static int NativeWorld_LoadIndex(void)
 {
 	char path[768];
 	u32 size;
@@ -306,67 +343,174 @@ static int NativeWorld_LoadTiles(void)
 		memcpy(&s_tileSize, index + 4, 4);
 		memcpy(&count, index + 8, 4);
 	}
-	if (count <= 0 || count > NATIVE_WORLD_MAX_TILES || size < 12 + 4 * (u32)count)
+	if (count <= 0 || count > NATIVE_WORLD_MAX_TILES || size < 12 + 8 * (u32)count)
 	{
 		free(index);
 		return 0;
 	}
-	u8 *files[NATIVE_WORLD_MAX_TILES];
-	u32 sizes[NATIVE_WORLD_MAX_TILES];
-	u32 total = 0;
+	s_slotSize = 0;
 	for (int k = 0; k < count; k++)
 	{
-		s16 ij[2];
-		memcpy(ij, index + 12 + 4 * k, 4);
-		s_tiles[k].i = ij[0];
-		s_tiles[k].j = ij[1];
-		snprintf(path, sizeof(path), "%s/world/T_%d_%d.lev", NativeAssets_GetAssetDir(), ij[0], ij[1]);
-		files[k] = NativeWorld_ReadFile(path, &sizes[k]);
-		if (files[k] == NULL)
-		{
-			printf("[CTR Native] world: no %s\n", path);
-			sizes[k] = 0;
-		}
-		total += (sizes[k] + 15) & ~15u;
+		NativeWorldTile *t = &s_tiles[k];
+		memset(t, 0, sizeof(*t));
+		memcpy(&t->i, index + 12 + 8 * k, 2);
+		memcpy(&t->j, index + 14 + 8 * k, 2);
+		memcpy(&t->bytes, index + 16 + 8 * k, 4);
+		t->slot = -1;
+		s_slotSize = t->bytes > s_slotSize ? t->bytes : s_slotSize;
 	}
 	free(index);
-	s_tileArena = (u8 *)malloc(total);
-	s_tileArenaSize = total;
-	u32 at = 0;
-	s_tileCount = 0;
-	for (int k = 0; k < count; k++)
+	s_tileCount = count;
+	s_slotSize = (s_slotSize + 0xffff) & ~0xffffu;
+	s_tileArenaSize = s_slotSize * NATIVE_WORLD_SLOTS;
+	s_tileArena = (u8 *)malloc(s_tileArenaSize);
+	for (int k = 0; k < NATIVE_WORLD_SLOTS; k++)
 	{
-		if (files[k] == NULL)
+		s_slotOwner[k] = -1;
+	}
+	s_tilesLoaded = 0;
+	printf("[CTR Native] world: %d tiles of %d units, %d slots of %u KB\n", s_tileCount, s_tileSize, NATIVE_WORLD_SLOTS,
+	       s_slotSize >> 10);
+	return s_tileArena != NULL;
+}
+
+static int NativeWorld_InRing(const NativeWorldTile *t, int ci, int cj, int r)
+{
+	return t->i >= ci - r && t->i <= ci + r && t->j >= cj - r && t->j <= cj + r;
+}
+
+// Loads tile k from assets/world/ when its file is there (the page fetched it), into a free
+// slot or one whose tile is out of the ring round the centre (never the window's).
+static int NativeWorld_LoadTile(int k)
+{
+	NativeWorldTile *t = &s_tiles[k];
+	if (t->slot >= 0)
+	{
+		return 1;
+	}
+	char path[768];
+	NativeWorld_TilePath(path, sizeof(path), t->i, t->j);
+	FILE *f = fopen(path, "rb");
+	if (f == NULL)
+	{
+		return 0;
+	}
+	int slot = -1;
+	for (int s = 0; s < NATIVE_WORLD_SLOTS && slot < 0; s++)
+	{
+		if (s_slotOwner[s] < 0)
+		{
+			slot = s;
+		}
+	}
+	for (int s = 0; s < NATIVE_WORLD_SLOTS && slot < 0; s++)
+	{
+		if (!NativeWorld_InRing(&s_tiles[s_slotOwner[s]], s_centreI, s_centreJ, NATIVE_WORLD_RING))
+		{
+			slot = s;
+		}
+	}
+	if (slot < 0)
+	{
+		fclose(f);
+		return 0;
+	}
+	double t0 = ((double)SDL_GetTicksNS() / 1e6);
+	if (s_slotOwner[slot] >= 0)
+	{
+		NativeWorldTile *old = &s_tiles[s_slotOwner[slot]];
+		old->slot = -1;
+		old->asked = 0;
+		old->data = NULL;
+		old->mesh = NULL;
+		s_tilesLoaded--;
+	}
+	u8 *file = s_tileArena + (size_t)slot * s_slotSize;
+	size_t n = fread(file, 1, s_slotSize, f);
+	fclose(f);
+	s_slotOwner[slot] = -1;
+	if (n < 8 || n != t->bytes)
+	{
+		printf("[CTR Native] world: %s: %zu bytes, expected %u\n", path, n, t->bytes);
+		return 0;
+	}
+#ifdef __EMSCRIPTEN__
+	remove(path); // the page's copy, read: the slot holds it now
+#endif
+	// a level file: u32 data size, the data, then its pointer map (u32 bytes, the slots)
+	u32 dataSize;
+	memcpy(&dataSize, file, 4);
+	u8 *data = file + 4;
+	u32 mapBytes;
+	memcpy(&mapBytes, data + dataSize, 4);
+	const u8 *slots = data + dataSize + 4;
+	for (u32 s = 0; s < mapBytes / 4; s++)
+	{
+		u32 at;
+		memcpy(&at, slots + 4 * s, 4);
+		u32 value;
+		memcpy(&value, data + at, 4);
+		value += (u32)(uintptr_t)data;
+		memcpy(data + at, &value, 4);
+	}
+	t->slot = slot;
+	t->data = data;
+	t->mesh = ((struct Level *)data)->ptr_mesh_info;
+	t->banks = (t->mesh->numVertex + 0xffff) >> 16;
+	s_slotOwner[slot] = k;
+	s_tilesLoaded++;
+	s_lastLoadMs = ((double)SDL_GetTicksNS() / 1e6) - t0;
+	return 1;
+}
+
+// The ring round the centre tile: asks the page for what's missing and loads what's come (one
+// tile a frame: a few milliseconds each), nearest first.
+static void NativeWorld_Stream(void)
+{
+	int best = -1, bestD = 1 << 30;
+	for (int k = 0; k < s_tileCount; k++)
+	{
+		NativeWorldTile *t = &s_tiles[k];
+		if (t->slot >= 0 || !NativeWorld_InRing(t, s_centreI, s_centreJ, NATIVE_WORLD_RING))
 		{
 			continue;
 		}
-		u8 *file = s_tileArena + at;
-		memcpy(file, files[k], sizes[k]);
-		free(files[k]);
-		at += (sizes[k] + 15) & ~15u;
-		u32 dataSize;
-		memcpy(&dataSize, file, 4);
-		u8 *data = file + 4;
-		u32 mapBytes;
-		memcpy(&mapBytes, data + dataSize, 4);
-		const u8 *slots = data + dataSize + 4;
-		for (u32 s = 0; s < mapBytes / 4; s++)
+		if (!t->asked)
 		{
-			u32 slot;
-			memcpy(&slot, slots + 4 * s, 4);
-			u32 value;
-			memcpy(&value, data + slot, 4);
-			value += (u32)(uintptr_t)data;
-			memcpy(data + slot, &value, 4);
+			t->asked = 1;
+			NativeWorld_AskPage(t->i, t->j);
 		}
-		NativeWorldTile *t = &s_tiles[s_tileCount++];
-		*t = s_tiles[k];
-		t->data = data;
-		t->mesh = ((struct Level *)data)->ptr_mesh_info;
-		t->banks = (t->mesh->numVertex + 0xffff) >> 16;
+		int d = abs(t->i - s_centreI) + abs(t->j - s_centreJ);
+		if (d < bestD)
+		{
+			bestD = d;
+			best = k;
+		}
 	}
-	printf("[CTR Native] world: %d tiles of %d units, %u KB\n", s_tileCount, s_tileSize, total >> 10);
-	return s_tileCount > 0;
+	if (best >= 0)
+	{
+		NativeWorld_LoadTile(best);
+	}
+}
+
+// Whether every tile of the window round (ci, cj) is loaded (asking for and loading the rest).
+static int NativeWorld_WindowReady(int ci, int cj)
+{
+	int ready = 1;
+	for (int k = 0; k < s_tileCount; k++)
+	{
+		NativeWorldTile *t = &s_tiles[k];
+		if (NativeWorld_InRing(t, ci, cj, 1) && t->slot < 0)
+		{
+			if (!t->asked)
+			{
+				t->asked = 1;
+				NativeWorld_AskPage(t->i, t->j);
+			}
+			ready &= NativeWorld_LoadTile(k);
+		}
+	}
+	return ready;
 }
 
 static int NativeWorld_Grow(void **buf, int *cap, int need, size_t item)
@@ -456,7 +600,7 @@ static int NativeWorld_Assemble(NativeWorldWindow *w, int ci, int cj, int ox, in
 		for (int di = -1; di <= 1; di++)
 		{
 			int k = NativeWorld_FindTile(ci + di, cj + dj);
-			if (k < 0)
+			if (k < 0 || s_tiles[k].slot < 0)
 			{
 				continue;
 			}
@@ -630,7 +774,7 @@ void NativeWorld_LevelStart(struct GameTracker *gGT)
 	else
 	{
 		NativeWorld_FreeTiles();
-		s_worldActive = NativeWorld_LoadTiles();
+		s_worldActive = NativeWorld_LoadIndex();
 		s_worldLevel = lev;
 	}
 	s_worldOrigin.x = s_worldOrigin.y = s_worldOrigin.z = 0;
@@ -655,8 +799,10 @@ void NativeWorld_LevelStart(struct GameTracker *gGT)
 			s_worldVisMem.bspList[p] = (struct VisMemBspListNode *)calloc(NATIVE_WORLD_MAX_NODES + 1, sizeof(struct VisMemBspListNode));
 		}
 	}
-	if (!NativeWorld_Assemble(&s_windows[0], 0, 0, 0, 0))
+	s_centreI = s_centreJ = 0;
+	if (!NativeWorld_WindowReady(0, 0) || !NativeWorld_Assemble(&s_windows[0], 0, 0, 0, 0))
 	{
+		printf("[CTR Native] world: the tiles round 0,0 aren't there\n");
 		s_worldActive = 0;
 		return;
 	}
@@ -701,7 +847,8 @@ static void NativeWorld_Follow(struct GameTracker *gGT)
 	int ci = from->ci + di, cj = from->cj + dj;
 	int ox = ci * s_tileSize, oz = cj * s_tileSize;
 	NativeWorldWindow *to = &s_windows[1 - s_windowCur];
-	if (!NativeWorld_Assemble(to, ci, cj, ox, oz))
+	// not before its tiles are in (the kart drives on in this window meanwhile)
+	if (!NativeWorld_WindowReady(ci, cj) || !NativeWorld_Assemble(to, ci, cj, ox, oz))
 	{
 		return;
 	}
@@ -731,6 +878,8 @@ static void NativeWorld_Follow(struct GameTracker *gGT)
 	NativeWorld_ShiftDynamic(gGT, dx, 0, dz);
 	s_worldOrigin.x = ox;
 	s_worldOrigin.z = oz;
+	s_centreI = ci;
+	s_centreJ = cj;
 	NativeWorld_ResetVisMem(gGT);
 	printf("[CTR Native] world: window %d,%d: %d tiles, %d quadblocks (%.1f ms)\n", ci, cj, to->count, to->mesh.numQuadBlock,
 	       s_lastAssemblyMs);
@@ -767,5 +916,7 @@ int NativeWorld_Info(int *out)
 	out[3] = s_windowCur >= 0 ? s_windows[s_windowCur].mesh.numQuadBlock : 0;
 	out[4] = (int)(s_lastAssemblyMs * 1000.0);
 	out[5] = s_tileCount;
+	out[6] = s_tilesLoaded;
+	out[7] = (int)(s_lastLoadMs * 1000.0);
 	return s_worldActive;
 }
