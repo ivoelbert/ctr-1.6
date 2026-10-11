@@ -293,6 +293,11 @@ sector, sector count, name). The shared PS2 parts (the ISO reader, the GS swizzl
   midday's WaterRGBA 90 170 170) in every cell nothing reaches above 6 m, and drops the seabed
   under them. CTR's height 0 is the sea's (`floor_z`): the engine draws a kart on water only
   above 0.
+- Overlays the game blends over walls and roads (grime and shade: `black`, `black64` under
+  every balcony on Ocean Drive, tyre tracks, light glows): mostly see-through and all but black
+  or all but invisible (`blended_overlay`), they're left out. CTR doesn't blend a level's faces,
+  so they were solid black wedges under the balconies (the depth buffer put them in front;
+  painted in CTR's order the walls mostly hid them).
 - What `OBJECT.DAT` makes a physics object (under 9,999 kg: lamp posts, bins, benches, signs,
   hydrants; 1,894 placements) is drawn but not solid (`build_bayview.LOOSE`), as a car knocks
   them over: they walled off the pavements on the drivable grid.
@@ -343,8 +348,8 @@ Iterating on a report (a P line: `bayview_free 15303,958,8413,2505 level 0 mode 
 - Bayview: more of the city (the downtown towers, the airport, Beacon Hill) as more loops; the
   panoramas as a skyline that doesn't collide; the glows and light shafts (additive); the decal
   textures (soft alpha) are drawn alpha-tested.
-- Vice City: the hours (the night versions, the lit windows), the cars, the interiors; some
-  facades show their recesses black where the game's look lighter.
+- Vice City: the hours (the night versions, the lit windows), the cars, the interiors; the
+  blended overlays (grime, road markings, glass) as something CTR can draw.
 
 - Races, the same way for every map: a loop through landmarks, Time Trial, CTR's own menus with
   the maps in retail tracks' places. (Dust 2 had two loops from its model: long A, CT spawn,

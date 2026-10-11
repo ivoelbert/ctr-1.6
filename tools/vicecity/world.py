@@ -6,7 +6,8 @@ interior, position, scale, rotation as a quaternion x, y, z, w). Left out: the l
 stand-ins for far away (models named LOD...), the interiors (interior 0 is outdoors; 13
 shows everywhere), the night versions of what changes with the hour (a tobj not shown at
 noon), the islands' own stand-ins (islandlod...) and the shadows the PS2 lays over the ground
-(models named ...shad..., and see-through textures named so: CTR would draw them black). What
+(models named ...shad..., and see-through textures named so: CTR would draw them black), and
+the other overlays the game blends (blended_overlay: grime, shade, tyre tracks). What
 OBJECT.DAT makes a physics object (lamp posts, bins, benches, signs) is LOOSE. A
 model's textures are in its own dictionary, else in generic.txd.
 
@@ -62,6 +63,18 @@ def quat_matrix(x, y, z, w):
     return np.array([[1 - 2 * (y * y + z * z), 2 * (x * y + z * w), 2 * (x * z - y * w)],
                      [2 * (x * y - z * w), 1 - 2 * (x * x + z * z), 2 * (y * z + x * w)],
                      [2 * (x * z + y * w), 2 * (y * z - x * w), 1 - 2 * (x * x + y * y)]])
+
+
+def blended_overlay(name, rgba):
+    """A texture the game blends over what's under it, which CTR (no blending for a level's
+    faces) would draw solid: ground shadows, and the grime, shade and tyre tracks laid over
+    walls and roads (black64 under every balcony on Ocean Drive) - mostly see-through, and all
+    but black or all but invisible."""
+    a = rgba[..., 3].astype(float)
+    soft = ((a > 8) & (a < 240)).mean()
+    if 'shad' in name and (a < 64).mean() > 0.3:
+        return True
+    return soft > 0.3 and (a.mean() < 64 or rgba[..., :3].mean() < 12)
 
 
 def skipped_model(name):
@@ -180,7 +193,7 @@ class ViceCity:
                 t = self.txd(d).get(tex)
                 if t is None:
                     continue
-                if 'shad' not in tex or (t.rgba[..., 3] < 64).mean() <= 0.3:
+                if not blended_overlay(tex, t.rgba):
                     key = f'{tex}@{hashlib.sha1(t.rgba.tobytes() + str(t.rgba.shape).encode()).hexdigest()[:10]}'
                     self.textures.setdefault(key, t)
                 break
