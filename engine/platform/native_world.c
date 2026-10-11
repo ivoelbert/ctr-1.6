@@ -9,6 +9,15 @@
 static int s_worldShiftPending;
 static Vec3 s_worldShift;
 static Vec3 s_worldOrigin;
+static int s_worldActive;
+static struct Level *s_worldLevel;
+// a world's pickup hitboxes, one of each (ended by a zero flag): every window leaf's list
+static struct BSP *s_worldHitboxes;
+static int s_worldHitboxCount;
+// the level's instances (its PVS's list, of InstDefs: the start level's mesh is never unpacked),
+// and theirs once made: every camera's to draw
+static struct InstDef **s_worldInstDefs;
+static struct Instance **s_worldInstances;
 
 static void NativeWorld_ShiftSVec3(SVec3 *p, int dx, int dy, int dz)
 {
@@ -95,6 +104,14 @@ static void NativeWorld_ShiftLevelData(struct Level *lev, int dx, int dy, int dz
 	{
 		NativeWorld_ShiftSVec3(&lev->ptrInstDefs[i].pos, dx, dy, dz);
 	}
+	if (lev == s_worldLevel)
+	{
+		for (int i = 0; i < s_worldHitboxCount; i++)
+		{
+			NativeWorld_ShiftBox(&s_worldHitboxes[i].box, dx, dy, dz);
+			NativeWorld_ShiftSVec3(&s_worldHitboxes[i].data.hitbox.center, dx, dy, dz);
+		}
+	}
 }
 
 // What moves: drivers, instances, particles, cameras.
@@ -125,9 +142,30 @@ static void NativeWorld_ShiftDynamic(struct GameTracker *gGT, int dx, int dy, in
 	for (struct Instance *inst = (struct Instance *)LIST_GetFirstItem(&gGT->JitPools.instance.taken); inst != 0;
 	     inst = (struct Instance *)LIST_GetNextItem((struct Item *)inst))
 	{
+		// the HUD's (its fruit, the big 1st) are on the screen
+		if ((inst->flags & PUSHBUFFER_EXISTS) || INST_GETIDPP(inst)[0].pushBuffer == &gGT->pushBuffer_UI)
+		{
+			continue;
+		}
 		inst->matrix.t[0] += dx;
 		inst->matrix.t[1] += dy;
 		inst->matrix.t[2] += dz;
+	}
+	// a world's level instances (its pickups) are the level's own, outside that pool
+	for (int i = 0; s_worldInstances != NULL && s_worldInstances[i] != NULL; i++)
+	{
+		struct Instance *inst = s_worldInstances[i];
+		int pooled = 0;
+		for (struct Item *it = LIST_GetFirstItem(&gGT->JitPools.instance.taken); it != 0 && !pooled; it = LIST_GetNextItem(it))
+		{
+			pooled = (it == (struct Item *)inst);
+		}
+		if (!pooled)
+		{
+			inst->matrix.t[0] += dx;
+			inst->matrix.t[1] += dy;
+			inst->matrix.t[2] += dz;
+		}
 	}
 	for (struct Particle *p = (struct Particle *)LIST_GetFirstItem(&gGT->JitPools.particle.taken); p != 0;
 	     p = (struct Particle *)LIST_GetNextItem((struct Item *)p))
@@ -158,8 +196,6 @@ void NativeWorld_RequestShift(int dx, int dy, int dz)
 	s_worldShiftPending = 1;
 }
 
-static int s_worldActive;
-static struct Level *s_worldLevel;
 static void NativeWorld_Follow(struct GameTracker *gGT);
 static void NativeWorld_Stream(void);
 static void NativeWorld_UpdateMap(struct GameTracker *gGT);
@@ -177,6 +213,11 @@ void NativeWorld_FrameStart(struct GameTracker *gGT)
 		// a world keeps its origin on its tiles: no shifts by hand
 		s_worldShiftPending = 0;
 		NativeWorld_Follow(gGT);
+		// every instance is drawn: the tiles' quadblocks have no list for the cameras to take
+		for (int p = 0; p < 4 && s_worldInstances != NULL; p++)
+		{
+			gGT->cameraDC[p].visInstSrc = s_worldInstances;
+		}
 		NativeWorld_Stream();
 		NativeWorld_UpdateMap(gGT);
 		return;
@@ -669,7 +710,7 @@ static int NativeWorld_Assemble(NativeWorldWindow *w, int ci, int cj, int ox, in
 			if (node->flag & BSP_NODE_FLAG_LEAF)
 			{
 				node->data.leaf.ptrQuadBlockArray = qdst + (node->data.leaf.ptrQuadBlockArray - m->ptrQuadBlockArray);
-				node->data.leaf.bspHitboxArray = NULL;
+				node->data.leaf.bspHitboxArray = s_worldHitboxCount > 0 ? s_worldHitboxes : NULL;
 			}
 			else
 			{
@@ -756,6 +797,55 @@ static void NativeWorld_ResetVisMem(struct GameTracker *gGT)
 	}
 }
 
+// The level's own pickup hitboxes (listed in each leaf they overlap), one of each, for the
+// windows' leaves: the tiles have none.
+static void NativeWorld_CollectHitboxes(struct mesh_info *mesh)
+{
+	s_worldHitboxCount = 0;
+	for (int pass = 0; pass < 2; pass++)
+	{
+		int n = 0;
+		for (int i = 0; i < mesh->numBspNodes; i++)
+		{
+			struct BSP *node = &mesh->bspRoot[i];
+			if ((node->flag & BSP_NODE_FLAG_LEAF) == 0)
+			{
+				continue;
+			}
+			for (struct BSP *hb = node->data.leaf.bspHitboxArray; hb != 0 && hb->flag != 0; hb++)
+			{
+				int seen = 0;
+				for (int k = 0; pass == 1 && k < n; k++)
+				{
+					seen |= (s_worldHitboxes[k].data.hitbox.instDef == hb->data.hitbox.instDef);
+				}
+				if (pass == 0)
+				{
+					n++;
+				}
+				else if (!seen)
+				{
+					s_worldHitboxes[n++] = *hb;
+				}
+			}
+		}
+		if (pass == 0)
+		{
+			free(s_worldHitboxes);
+			s_worldHitboxes = (struct BSP *)calloc((size_t)n + 1, sizeof(struct BSP));
+			if (s_worldHitboxes == NULL)
+			{
+				return;
+			}
+		}
+		else
+		{
+			s_worldHitboxes[n].flag = 0;
+			s_worldHitboxCount = n;
+		}
+	}
+}
+
 // Before the drivers are made (they land on what's under the spawn): the world's mesh in
 // place of the level's, round tile (0, 0) (the level is built in the world's coordinates).
 void NativeWorld_LevelStart(struct GameTracker *gGT)
@@ -763,6 +853,10 @@ void NativeWorld_LevelStart(struct GameTracker *gGT)
 	struct Level *lev = gGT->level1;
 	s_worldShiftPending = 0;
 	s_worldShift.x = s_worldShift.y = s_worldShift.z = 0;
+	free(s_worldInstances);
+	s_worldInstances = NULL;
+	s_worldInstDefs = NULL;
+	s_worldHitboxCount = 0;
 	if (lev == NULL || !LOAD_IsCustomLevel(gGT->levelID))
 	{
 		s_worldActive = 0;
@@ -803,6 +897,16 @@ void NativeWorld_LevelStart(struct GameTracker *gGT)
 			s_worldVisMem.bspList[p] = (struct VisMemBspListNode *)calloc(NATIVE_WORLD_MAX_NODES + 1, sizeof(struct VisMemBspListNode));
 		}
 	}
+	NativeWorld_CollectHitboxes(lev->ptr_mesh_info);
+	s_worldInstDefs = NULL;
+	for (int q = 0; q < lev->ptr_mesh_info->numQuadBlock && s_worldInstDefs == NULL; q++)
+	{
+		struct PVS *pvs = lev->ptr_mesh_info->ptrQuadBlockArray[q].pvs;
+		if (pvs != NULL && pvs->visInstSrc != NULL)
+		{
+			s_worldInstDefs = (struct InstDef **)pvs->visInstSrc;
+		}
+	}
 	s_centreI = s_centreJ = 0;
 	if (!NativeWorld_WindowReady(0, 0) || !NativeWorld_Assemble(&s_windows[0], 0, 0, 0, 0))
 	{
@@ -830,6 +934,23 @@ void NativeWorld_LevelReady(struct GameTracker *gGT)
 	gGT->visMem1 = &s_worldVisMem;
 	gGT->level1->visMem = &s_worldVisMem;
 	NativeWorld_ResetVisMem(gGT);
+	// the instances are made by now
+	free(s_worldInstances);
+	s_worldInstances = NULL;
+	int n = 0;
+	while (s_worldInstDefs != NULL && s_worldInstDefs[n] != NULL)
+	{
+		n++;
+	}
+	s_worldInstances = (struct Instance **)calloc((size_t)n + 1, sizeof(struct Instance *));
+	for (int i = 0, k = 0; s_worldInstances != NULL && i < n; i++)
+	{
+		if (s_worldInstDefs[i]->ptrInstance != NULL)
+		{
+			s_worldInstances[k++] = s_worldInstDefs[i]->ptrInstance;
+		}
+	}
+	printf("[CTR Native] world: %d instances, %d pickup hitboxes\n", n, s_worldHitboxCount);
 }
 
 // A frame's start: past the edge of the centre tile (and an eighth of a tile more), the
