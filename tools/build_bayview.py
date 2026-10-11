@@ -630,9 +630,9 @@ def main(iso, disc, outdir, area='citycore', world=None, name=None, center=None,
     print(f'centre {track.CENTER}, floor z {track.FLOOR_Z:.1f}')
     # NFSU2's floors are small (half the streets' triangles have sides under 10 m): the floor
     # grid only cuts its big terrain
-    track.FLOOR_CELL = FLOOR_CELL
-    track.FLOOR_MAX_EDGE = FLOOR_CELL * 1.6
-    track.MAX_EDGE = 1200.0
+    track.FLOOR_CELL = getattr(world, 'floor_cell', FLOOR_CELL)
+    track.FLOOR_MAX_EDGE = track.FLOOR_CELL * 1.6
+    track.MAX_EDGE = getattr(world, 'max_edge', 1200.0)
     track.light_maps = None
 
     # the route: through the waypoints and back to the first, on the drivable grid
