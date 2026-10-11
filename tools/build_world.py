@@ -189,7 +189,7 @@ def main(iso, disc, outdir, name='bayview'):
     # the world's origin: the middle of its start area, where tile (0, 0) is centred
     wps = np.array(world.areas[world.start]['waypoints'], dtype=float)
     center = ((wps[:, 0].min() + wps[:, 0].max()) / 2, (wps[:, 1].min() + wps[:, 1].max()) / 2)
-    cutouts = {h for h in groups if bb.is_cutout(world.textures[h].rgba) and not world.textures[h].name.startswith(world.ground_textures)}
+    cutouts = {h for h in groups if getattr(world, 'is_cutout', bb.is_cutout)(world.textures[h].rgba) and not world.textures[h].name.startswith(world.ground_textures)}
     # how much of the world each texture covers (square metres): the atlas keeps the most
     # used ones' size when not all of them fit
     area = {h: float(np.linalg.norm(np.cross(g[0][:, 1] - g[0][:, 0], g[0][:, 2] - g[0][:, 0]), axis=1).sum() / 2) for h, g in groups.items()}
