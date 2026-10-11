@@ -259,6 +259,24 @@ texels. Coplanar merging saves almost nothing on NFSU2's meshes (2%). The 2 m dr
   `pursuit.mjs` (an autopilot along a map's free-drive route: snags and stuck spots).
 - `tools/roundtrip.py` rebuilds a retail level with levwriter (a test of the writer).
 
+Iterating on a report (a P line: `bayview_free 15303,958,8413,2505 level 0 mode 20000`):
+
+- `node tools/e2e/spot.mjs MAP OUTDIR 'P line'...` goes there (`ctr.goto`: the world's
+  coordinates, hopping a window at a time in a world), screenshots, and prints fps and the
+  world's tile; `DRIVE=2500` then holds the gas and prints top speed, item and fruit.
+  `BASE_URL` picks the server: a test one (`WEB_DIR=... LEV_DIR=... node tools/serve.mjs PORT`)
+  leaves 8642 alone.
+- `AROUND='P line' python3 -I tools/build_world.py ...` rebuilds only the city's tiles round
+  there (the 3 x 3; `AROUND_TILES=0`, the one) and patches the index and minimap: 45 s, not
+  8 minutes, byte for byte the full build's (it refuses when the textures changed: the atlas
+  id in WORLD.json).
+- One map: `tools/build_map.py` alone (a minute and a half); the engine alone:
+  `OUT=build/web-x ./build-web.sh` (a minute or two).
+- `python3 -I tools/levinfo.py LEV [x,y,z [radius]]`: a built level's terrain, flags, extent and
+  instances, or its quadblocks near a spot, without the game.
+- `tools/deps.py`: what each builder runs; play.sh rebuilds a level only when one of those is
+  newer (a fix to the city's builder leaves the Counter-Strike maps alone, and the other way).
+
 ## Left to do
 
 - Bayview: more of the city (the downtown towers, the airport, Beacon Hill) as more loops; the

@@ -27,7 +27,6 @@ import numpy as np
 from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import build_map  # noqa: E402
 import track  # noqa: E402
 from nfsu2.world import BUILDING, PROP, TERRAIN, Bayview  # noqa: E402
 
@@ -298,7 +297,7 @@ def make_tris(world, groups, rects, cutouts, near):
                 local = np.minimum(local, 255 << shift)
                 pts = piece[:, :3]
                 attrs = np.concatenate([local, piece[:, 5:8]], axis=1)
-                polys = build_map.floor_cells(pts) if floor and near(track.to_ctr(pts)) else [pts]
+                polys = track.floor_cells(pts) if floor and near(track.to_ctr(pts)) else [pts]
                 for poly in polys:
                     a = interpolate(pts, attrs, poly) if len(polys) > 1 else attrs
                     for i in range(1, len(poly) - 1):
@@ -630,7 +629,7 @@ def main(iso, disc, outdir, area='citycore', world=None, name=None, center=None,
     print(f'{len(rects)} textures in {len(layers)} atlas layers')
     g = NavGrid(nav_quads(groups, cutouts))
     start = street_node(g, groups, world, *wps[0])
-    near = build_map.near_drivable(g, start)
+    near = track.near_drivable(g, start)
     if os.environ.get('VISIBILITY') != '0' and not quick:
         groups = visible_only(groups, cutouts, g, start, outdir)
     tris = make_tris(world, groups, rects, cutouts, near)
