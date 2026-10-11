@@ -96,9 +96,14 @@ def build_tile(ij):
     tris = bb.make_tris(world, groups, rects, cutouts, lambda p: True)
     if not tris:
         return None
-    # no stair ramps: tools/stairs.py's sizes are Counter-Strike's units, and NFSU2's walls
-    # lower than a kerb are driven over anyway (build_bayview.LOW_WALL)
-    out = track.emit_level(tris, [], near=lambda t: True)
+    # ramps over kerbs and steps, for a world that asks (its stair_unit: its units in inches,
+    # tools/stairs.py's); a floor a kerb higher stops a kart, though the kerb itself isn't solid
+    # (build_bayview.LOW_WALL)
+    ramps = []
+    if getattr(world, 'stair_unit', None):
+        track.add_stair_ramps(tris, ramps, unit=world.stair_unit, floor_tol=getattr(world, 'stair_floor_tol', None),
+                              floor_nz=getattr(world, 'stair_floor_nz', None), either_way=not getattr(world, 'back_to_back', True))
+    out = track.emit_level(tris, ramps, near=lambda t: True)
     off = np.array([i * size, 0, j * size])
     for q in out:
         q.pos = [tuple(int(round(v)) for v in np.asarray(p) - off) for p in q.pos]

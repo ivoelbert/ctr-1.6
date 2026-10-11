@@ -13,6 +13,19 @@ MAX_RISE = 24.0
 MIN_RISE = 1.0
 MAX_TREAD = 64.0
 RUN_PER_RISE = 3.0   # a lone step gets a ramp 3x as long as it is tall
+# a step's floors: within FLOOR_TOL of its riser's bottom and top, flat to FLOOR_NZ (a map's own
+# kerbs may reach under the road, its pavements slope to drain: tools/build_world.py loosens them)
+FLOOR_TOL = 1.0
+FLOOR_NZ = 0.99
+# a map whose faces turn either way gives each riser both ways round: then the floor at a step's
+# foot must be nearer its riser's bottom than its top, and the floor at its head the other way
+# (with a loose FLOOR_TOL a low step otherwise passed both ways, its ramp on the wrong side)
+SIDES = False
+# a riser's normal is rounded (to group its faces) and its line rebuilt as that normal times its
+# offset: far from the origin (a city's 460 m) the rounding put it, and its ramp, metres off its
+# stairs. EXACT takes the line from its faces instead: their mean normal, offset and extent (the
+# Counter-Strike maps keep the old way: their stairs are near the origin, and along the axes)
+EXACT = False
 
 
 class Riser:
@@ -54,6 +67,11 @@ def find_risers(tris):
     for (nx, ny, off, z0, z1), ids in groups.items():
         nxy = np.array([nx, ny])
         t = np.array([-ny, nx])
+        if EXACT:
+            m = np.sum([tris[i][1][:2] / (np.linalg.norm(tris[i][1][:2]) + 1e-9) for i in ids], axis=0)
+            nxy = m / np.linalg.norm(m)
+            t = np.array([-nxy[1], nxy[0]])
+            off = float(np.mean([np.dot(p[:2], nxy) for i in ids for p in tris[i][0]]))
         # merge into contiguous lateral spans
         spans = []
         for i in ids:
@@ -142,8 +160,9 @@ def ramp_for(stair):
             np.array([head[0][0], head[0][1], last.z1]), np.array([head[1][0], head[1][1], last.z1])]
 
 
-def floor_at(floors, x, y, z, tol=1.0):
+def floor_at(floors, x, y, z, tol=None):
     """True if a horizontal floor triangle at height z (within tol) covers (x, y)."""
+    tol = FLOOR_TOL if tol is None else tol
     for P in floors:
         if abs(P[0, 2] - z) > tol:
             continue
@@ -159,23 +178,54 @@ def floor_at(floors, x, y, z, tol=1.0):
     return False
 
 
+def floor_heights(floors, x, y):
+    """The heights of the floor triangles covering (x, y)."""
+    out = []
+    for P in floors:
+        a, b, c = P[:, :2]
+        v0, v1, d = b - a, c - a, np.array([x, y]) - a
+        den = v0[0] * v1[1] - v0[1] * v1[0]
+        if abs(den) < 1e-9:
+            continue
+        u = (d[0] * v1[1] - d[1] * v1[0]) / den
+        v = (v0[0] * d[1] - v0[1] * d[0]) / den
+        if u >= -1e-6 and v >= -1e-6 and u + v <= 1 + 1e-6:
+            out.append(P[0, 2])
+    return out
+
+
+def nearer(floors, x, y, z, other):
+    """The floor at (x, y) nearest z is nearer z than other."""
+    hs = floor_heights(floors, x, y)
+    if not hs:
+        return False
+    h = min(hs, key=lambda h: abs(h - z))
+    return abs(h - z) < abs(h - other)
+
+
 def drivable_stairs(tris):
     """Staircases with a floor at the foot of the first riser and on top of the last one."""
     # floors by height (floor_at wants them within a unit of a riser's bottom or top)
     floors = {}
     for P, n in tris:
-        if n[2] > 0.99:
+        if n[2] > FLOOR_NZ:
             floors.setdefault(int(np.floor(P[0, 2])), []).append(P)
+    reach = int(np.ceil(FLOOR_TOL))
 
     def floors_near(z):
-        return [P for k in (int(np.floor(z)) - 1, int(np.floor(z)), int(np.floor(z)) + 1) for P in floors.get(k, ())]
+        k0 = int(np.floor(z))
+        return [P for k in range(k0 - reach, k0 + reach + 1) for P in floors.get(k, ())]
 
     def drivable(st):
         first, last = st[0], st[-1]
         mid_a = (first.a + first.b) / 2
         mid_b = (last.a + last.b) / 2
-        return (floor_at(floors_near(first.z0), *(mid_a + first.n * 6), first.z0)
-                and floor_at(floors_near(last.z1), *(mid_b - last.n * 6), last.z1))
+        ok = (floor_at(floors_near(first.z0), *(mid_a + first.n * 6), first.z0)
+              and floor_at(floors_near(last.z1), *(mid_b - last.n * 6), last.z1))
+        if ok and SIDES:
+            ok = (nearer(floors_near(first.z0), *(mid_a + first.n * 6), first.z0, first.z1)
+                  and nearer(floors_near(last.z1), *(mid_b - last.n * 6), last.z1, last.z0))
+        return ok
 
     # A chain can run on into something that isn't a step (Inferno's banana: its bottom step
     # chained to a crate's ledge beside it): the longest drivable run from its foot, and the

@@ -311,6 +311,14 @@ sector, sector count, name). The shared PS2 parts (the ISO reader, the GS swizzl
   above the camera's horizon and the second under it, the third isn't used) is a grey between
   the roads' and the sea's: the hairline cracks between the models' pieces showed it, bright
   sky blue, all along the roads.
+- Kerbs and steps: a kerb isn't solid (under `LOW_WALL`), but a floor a kerb higher still
+  stops a kart. The tiles get `tools/stairs.py`'s ramps (`stair_unit`: its sizes are inches),
+  with Vice City's own looseness: a step's floors within 6 inches of its riser's ends and up to
+  14 degrees off flat (kerbs reach under the road, pavements slope to drain), each riser looked
+  at both ways round (`SIDES`: the floor at the foot must be nearer the riser's bottom), and its
+  line taken from its faces (`EXACT`: rebuilt from the rounded normal times its offset, 460 m
+  from the origin, it landed metres off the stairs). A step's ramp starts a tread out; a kart
+  with a run-up takes Ocean Drive's 27-step staircase and the hotels' front steps.
 - What `OBJECT.DAT` makes a physics object (under 9,999 kg: lamp posts, bins, benches, signs,
   hydrants; 1,894 placements) is drawn but not solid (`build_bayview.LOOSE`), as a car knocks
   them over: they walled off the pavements on the drivable grid.
