@@ -109,8 +109,9 @@ in place of the canyon's.
 - The minimap shows the drivable grid's cells reachable from the start (roofs are floors too:
   Inferno's covered the whole map).
 - Grafted onto Dingo Canyon (entry 1): its models, skybox, textures. Free drive's route runs
-  from the T spawn to the CT spawn and back; along it (`place_pickups`), weapon crates in rows of
-  four across the track, wumpa fruit in lines along it and two fruit crates.
+  from the T spawn to the CT spawn and back; along it `place_pickups` lays weapon crates in rows
+  of four across the track, wumpa fruit in lines along it and two fruit crates, for races
+  (`write_modes(pickups=True)`): free drive keeps only the start banner.
 - Floors the kart can get near are cut along a world grid (a map's FLOOR_CELL): the renderer
   gave up on big floor quads right under the camera (holes to the void). Polygon by polygon, so
   whole cells stay single quads (cutting triangles split every cell their diagonal crossed);

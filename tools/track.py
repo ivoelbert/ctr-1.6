@@ -987,9 +987,11 @@ def place_pickups(route, g, by_model):
     return out
 
 
-def write_modes(outdir, name, out, nodes, spawns, nav, route, g, bases, vrms, minimap, build_name, clear_colors, keep_sky=True):
+def write_modes(outdir, name, out, nodes, spawns, nav, route, g, bases, vrms, minimap, build_name, clear_colors, keep_sky=True,
+                pickups=False):
     """The track as one LEV per mode, each grafted onto that mode's Dingo Canyon level, and that
-    mode's texture file with the track's minimap drawn in."""
+    mode's texture file with the track's minimap drawn in. Its weapon crates and fruit only with
+    pickups (races and battles: free drive has none, just the start banner)."""
     hitbox_of = {'crate_question': (76, 48), 'crate_fruit': (76, 48), 'fruit': (64, 64)}
     window, map_img = minimap
     info = None
@@ -999,22 +1001,22 @@ def write_modes(outdir, name, out, nodes, spawns, nav, route, g, bases, vrms, mi
             f.write(patch_vrm(vrms[entry], map_icon(base), map_img))
         by_model = base_instances(base)
         names = {i: n for n, ids in by_model.items() for i in ids}
-        pickups = place_pickups(route, g, by_model)
+        placed = [pk for pk in place_pickups(route, g, by_model) if pickups or names.get(pk['src']) == 'startbanner']
         hitboxes = []
-        for k, pk in enumerate(pickups):
+        for k, pk in enumerate(placed):
             kind = names.get(pk['src'])
             if kind in hitbox_of:
                 r, lift = hitbox_of[kind]
                 hitboxes.append(dict(inst=k, radius=r, lift=lift, flags=0x4C0))
         lv = Level(quads=out, nodes=nodes, spawns=spawns,
                    clear_colors=clear_colors,
-                   build_name=build_name, nav_paths=nav, base=base, keep_sky=keep_sky, instances=pickups, hitboxes=hitboxes,
+                   build_name=build_name, nav_paths=nav, base=base, keep_sky=keep_sky, instances=placed, hitboxes=hitboxes,
                    flyin=base_flyin(base), minimap=minimap_placement(window))
         data, mode_info = write_level(lv)
         data += b'\0' * ((-len(data)) % 2048)
         with open(os.path.join(outdir, f'{name}{suffix}.lev'), 'wb') as f:
             f.write(data)
-        print(f'  {name}{suffix}.lev: {len(pickups)} pickups, {len(data)} bytes')
+        print(f'  {name}{suffix}.lev: {len(placed)} instances, {len(data)} bytes')
         if info is None:
             info = dict(mode_info, bytes=len(data))
     return info

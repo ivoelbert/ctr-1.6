@@ -384,10 +384,9 @@
   // The engine suspends its game loop at each VBlank wait through JSPI.
   const hasJspi = typeof WebAssembly.Suspending === 'function' && typeof WebAssembly.promising === 'function';
 
-  // A map's free drive: one to four players in VS (laps 99: it never ends), with the map's
-  // weapon crates and fruit (Time Trial has none).
+  // A map's free drive: one player in Time Trial (laps 99: it never ends), two to four in VS.
   const freeDrive = (map, character, players) =>
-    ({ map, boot: { level: 0, mode: 2, character, laps: 99, players } });
+    ({ map, boot: { level: 0, mode: players === 1 ? 0 : 2, character, laps: 99, players } });
 
   // ?map=dust2[&players=N][&character=N] drives a map straight away; ?level=N&mode=0|1|2[&laps=N]
   // boots a CTR track (tests, links); with no parameters the launcher asks.

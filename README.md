@@ -87,8 +87,8 @@ A Counter-Strike 1.6 map is a module in `tools/maps/` named after its file (`de_
 `maps/de_dust2.bsp`) that says what to change for driving: its title, sky, texture density,
 entities to leave out, textures to swap, its water, and anything Counter-Strike keeps players up
 on with clip brushes, which the map file has no faces of (see `tools/maps/__init__.py`, and the
-rope bridge in `de_aztec.py`). Free drive starts at the map's T spawn and places its pickups on
-the way to the CT spawn and back. `play.sh` builds every map the install has, and the launcher
+rope bridge in `de_aztec.py`). Free drive starts at the map's T spawn, with no pickups (they're
+for races and battles). `play.sh` builds every map the install has, and the launcher
 lists what's been built.
 
 ## Bayview
