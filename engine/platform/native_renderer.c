@@ -1007,7 +1007,7 @@ const char *gte_shader_virtual_atlas = "	uniform sampler2D s_texture;\n"
 	"	gl_Position = Projection * vec4(a_position.xy + a_precise.xy + a_extra.zw * u_extraOffsetScale, 0.0, 1.0);\n"                       \
 	"	if (a_precise.z > 0.0) gl_Position *= a_precise.z;\n"
 
-// NOTE(ctr-dust2): a custom level's exact depth (a_precise.z: the vertex's z / 2^30, see
+// NOTE(ctr-dust2): a custom level's exact depth (a_precise.z: the vertex's z / 2^17, see
 // native_gpu.c) for the depth test its polygons get; the rest (depth test off) sits at the far end.
 #define GTE_EXACT_DEPTH                                                                                     \
 	"	if (a_precise.z > 0.0) gl_Position.z = (2.0 * min(a_precise.z, 1.0) - 1.0) * gl_Position.w;\n" \
