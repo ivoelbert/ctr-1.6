@@ -769,9 +769,12 @@ internal void NativeGpu_ApplyPrecise(GrVertex *v, const VERTTYPE *const *xy, int
 	for (int i = 0; i < n; i++)
 	{
 		// the depth on one scale for every face (perspective-correct texturing only needs it
-		// proportional within a face; the depth test, across faces): z / 2^30, 2^30 being
-		// 262144 units (z counts 4096 to the unit)
-		v[i].pw = (found == n && zmax > 0.0f) ? z[i] / 1073741824.0f : 0.0f;
+		// proportional within a face; the depth test, across faces): z / 2^17, z in units
+		// (native_gte_core.c divides out the GTE's 12 fraction bits), so the depth buffer's
+		// 24 bits span 131072 units, past the farthest level face, at 1/128 unit a step. It
+		// was z / 2^30, taken for z in 1/4096 units: a step was 64 units, a metre of a city,
+		// and faces closer than that (windows in their frames, trim) fought as the camera moved.
+		v[i].pw = (found == n && zmax > 0.0f) ? z[i] / 131072.0f : 0.0f;
 	}
 }
 

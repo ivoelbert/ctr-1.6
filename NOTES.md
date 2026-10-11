@@ -299,6 +299,9 @@ sector, sector count, name). The shared PS2 parts (the ISO reader, the GS swizzl
   or all but invisible (`blended_overlay`), they're left out. CTR doesn't blend a level's faces,
   so they were solid black wedges under the balconies (the depth buffer put them in front;
   painted in CTR's order the walls mostly hid them).
+- Flicker: the exact depth (native_gpu.c) was z / 2^30 with z already in units, so the depth
+  buffer's step was 64 units, a metre of the city: windows in their frames, trim and balconies
+  fought as the camera moved. It's z / 2^17 now (1/128 unit a step, 2 km deep).
 - Layers: the models lay trim, signs and window frames on their walls in the same plane (or a
   centimetre off, which CTR's 1.6 cm units round away), and the PS2 draws them after: with the
   depth buffer they fought, and flickered as the camera moved. `lift_layers` lifts each face
