@@ -9,6 +9,8 @@
 #                 (default: Steam's, ~/Library/Application Support/Steam/steamapps/common/Half-Life/cstrike)
 #   NFSU2_ISO=... your Need for Speed: Underground 2 disc image (PS2, NTSC-U), for Bayview
 #                 (default: ~/Documents/NFSU2/Need for Speed - Underground 2 (USA).iso; none, no Bayview)
+#   GTAVC_ISO=... your Grand Theft Auto: Vice City disc image (PS2, NTSC-U), for Vice City
+#                 (default: ~/Documents/GTAVC/Grand Theft Auto - Vice City.iso; none, no Vice City)
 #   PORT=8642
 #   NO_OPEN=1     serve without opening a browser
 #
@@ -21,6 +23,7 @@ cd "$ROOT"
 DISC="${CTR_DISC:-$HOME/Documents/CTRDUST2/CTR - Crash Team Racing/CTR - Crash Team Racing.bin}"
 CSTRIKE="${CSTRIKE:-$HOME/Library/Application Support/Steam/steamapps/common/Half-Life/cstrike}"
 NFSU2_ISO="${NFSU2_ISO:-$HOME/Documents/NFSU2/Need for Speed - Underground 2 (USA).iso}"
+GTAVC_ISO="${GTAVC_ISO:-$HOME/Documents/GTAVC/Grand Theft Auto - Vice City.iso}"
 PORT="${PORT:-8642}"
 URL="http://localhost:$PORT/"
 
@@ -62,9 +65,19 @@ done
 if [ -f "$NFSU2_ISO" ]; then
   index="$ROOT/build/lev/bayview_tiles/index.bin"
   # shellcheck disable=SC2086
-  if [ ! -f "$index" ] || newer "$index" $(python3 -I tools/deps.py tools/build_world.py); then
+  if [ ! -f "$index" ] || newer "$index" $(python3 -I tools/deps.py tools/build_world.py --skip tools/vicecity); then
     echo "Building Bayview from Need for Speed: Underground 2 (five to ten minutes)..."
     python3 -I tools/build_world.py "$NFSU2_ISO" "$DISC" "$ROOT/build/lev" bayview
+  fi
+fi
+
+# Vice City, from Grand Theft Auto: Vice City's disc: all of it, the same way.
+if [ -f "$GTAVC_ISO" ]; then
+  index="$ROOT/build/lev/vicecity_tiles/index.bin"
+  # shellcheck disable=SC2086
+  if [ ! -f "$index" ] || newer "$index" $(python3 -I tools/deps.py tools/build_world.py --skip tools/nfsu2); then
+    echo "Building Vice City from Grand Theft Auto: Vice City (five to ten minutes)..."
+    python3 -I tools/build_world.py "$GTAVC_ISO" "$DISC" "$ROOT/build/lev" vicecity
   fi
 fi
 

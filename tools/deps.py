@@ -1,7 +1,10 @@
 """The files under tools/ a builder runs: its own modules, followed through their imports, and
 the C sources they compile. play.sh rebuilds a level when one of them is newer than it.
 
-    python3 -I tools/deps.py tools/build_map.py [more.py ...]
+    python3 -I tools/deps.py tools/build_map.py [more.py ...] [--skip DIR ...]
+
+--skip leaves out what's under DIR (tools/build_world.py runs either city's reader: each city's
+level depends on its own).
 
 Reads the sources (ast), runs nothing.
 """
@@ -64,5 +67,13 @@ def deps(scripts):
 
 
 if __name__ == '__main__':
-    for f in deps(sys.argv[1:]):
-        print(os.path.relpath(f))
+    args, skip = [], []
+    it = iter(sys.argv[1:])
+    for a in it:
+        if a == '--skip':
+            skip.append(os.path.abspath(next(it)) + os.sep)
+        else:
+            args.append(a)
+    for f in deps(args):
+        if not any(f.startswith(d) for d in skip):
+            print(os.path.relpath(f))

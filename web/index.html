@@ -329,8 +329,9 @@
       for (let i = 3; i < pixels.length; i += 4) pixels[i] = alpha[i - 1];
     }
     const file = new Uint8Array(12 + pixels.length);
-    // "CTRV": textures lit by the vertex colours, alpha tested; "CTRA": light baked in
-    new DataView(file.buffer).setUint32(0, meta.atlas.vertexColors ? 0x56525443 : 0x41525443, true);
+    // "CTRV": textures lit by the vertex colours, alpha tested ("CTRW": without borders, the
+    // shader wraps them); "CTRA": light baked in
+    new DataView(file.buffer).setUint32(0, meta.atlas.vertexColors ? (meta.atlas.borderless ? 0x57525443 : 0x56525443) : 0x41525443, true);
     new DataView(file.buffer).setUint32(4, width, true);
     new DataView(file.buffer).setUint32(8, height, true);
     file.set(pixels, 12);

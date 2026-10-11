@@ -2,7 +2,7 @@
 
 A pack has a table of 124-byte entries (0x33310004: name, hash, offsets and sizes of the
 indices and palette, width, height, bits per pixel) and the data (0x33320002). Indices are
-stored as the GS holds them (see gs.py); 256-colour palettes in the GS's CSM1 order; alpha
+stored as the GS holds them (see ps2/gs.py); 256-colour palettes in the GS's CSM1 order; alpha
 0x80 is opaque.
 """
 import struct
@@ -10,18 +10,12 @@ from collections import namedtuple
 
 import numpy as np
 
-from . import bun, gs
+from ps2 import gs
+
+from . import bun
 
 Texture = namedtuple('Texture', 'name rgba')
 
-
-def csm1(pal):
-    """256-colour palettes: entries 8-15 and 16-23 of each 32 are swapped (CSM1)."""
-    if len(pal) != 256:
-        return pal
-    p = pal.reshape(8, 4, 8, 4).copy()
-    p[:, [1, 2]] = p[:, [2, 1]]
-    return p.reshape(256, 4)
 
 
 def read_pack(d, off, size):
@@ -48,7 +42,7 @@ def read_pack(d, off, size):
             idx = gs.write_read(raw, 16, max(1, w // 2), max(1, ht // 2), max(1, w // 128), 4, w, ht, max(2, w // 64))
         else:
             continue
-        pal = csm1(np.frombuffer(d, np.uint8, pal_size, base + pal_off).reshape(-1, 4).copy())
+        pal = gs.csm1(np.frombuffer(d, np.uint8, pal_size, base + pal_off).reshape(-1, 4).copy())
         pal[:, 3] = np.minimum(255, pal[:, 3].astype(int) * 2)
         out[h] = Texture(name, pal[np.minimum(idx, len(pal) - 1)])
     return out

@@ -1,21 +1,26 @@
-"""Builds Bayview bigger than one CTR level holds (all of it), as tiles the engine streams.
+"""Builds a city bigger than one CTR level holds (all of it), as tiles the engine streams:
+Bayview (Need for Speed: Underground 2's) or Vice City (Grand Theft Auto: Vice City's).
 
-    python3 -I tools/build_world.py NFSU2.iso CTR_DISC.bin OUTDIR [WORLD]
+    python3 -I tools/build_world.py GAME.iso CTR_DISC.bin OUTDIR [WORLD]
+
+GAME.iso is the disc of WORLD's game (bayview: NFSU2's, the default; vicecity: GTA Vice City's,
+PS2, NTSC-U, SLUS-20552).
 
 A level's positions are 16-bit: about a kilometre across at 64 units a metre. A world is cut
 into square tiles (TILE metres) in one coordinate system, each a mesh-only level file
 (OUTDIR/WORLD_tiles/T_I_J.lev, in coordinates from its own centre); the engine keeps the 3 x 3
 tiles round the kart put together as the level's mesh, centred on the middle one, and moves
 everything when the kart crosses into the next (engine/platform/native_world.c). The world
-starts as an area of tools/build_bayview.py (its start, respawns, minimap and the rest:
-WORLD_free.lev and its modes), built in the world's coordinates with the world's atlas; its own
+starts as one of its areas, built by tools/build_bayview.py (its start, respawns, minimap and the
+rest: WORLD_free.lev and its modes) in the world's coordinates with the world's atlas; its own
 mesh gives way to the tiles. OUTDIR/WORLD_tiles/index.bin lists the tiles.
 
     AROUND='bayview_free 15303,958,8413,2505 ...' python3 -I tools/build_world.py ...   (a P line)
 
 rebuilds just the tiles round there (AROUND_TILES out: 1, the 3 x 3; 0, the one) in a world
 built whole before with the same textures, and patches its index and minimap: seconds, not the
-whole city's minutes. TILES_ONLY=1 rebuilds every tile but not the start level.
+whole city's minutes. TILES_ONLY=1 rebuilds every tile but not the start level; START_ONLY=1
+the start level alone.
 
 The level holds data from both discs: keep it to yourself.
 """
@@ -34,11 +39,14 @@ import build_bayview as bb  # noqa: E402
 import levwriter  # noqa: E402
 import track  # noqa: E402
 from nfsu2.world import Bayview  # noqa: E402
+from vicecity.world import ViceCity  # noqa: E402
 
 TILE = 256.0            # metres: 16384 units, 3 x 3 of them within 16-bit positions
 WORLDS = {
     # all of it: the city's sections reach x -3133 to 1830, y -2069 to 3450
-    'bayview': dict(title='Bayview', start='citycore', bounds=(-3300.0, -2200.0, 2000.0, 3600.0)),
+    'bayview': dict(source=Bayview, bounds=(-3300.0, -2200.0, 2000.0, 3600.0)),
+    # the islands reach x -2458 to 1709, y -2027 to 1896; the sea round them, a tile's worth
+    'vicecity': dict(source=ViceCity, bounds=(-2600.0, -2150.0, 1850.0, 2000.0)),
 }
 LEAF_QUADS = 24         # quadblocks a BSP leaf holds, at least
 TILE_LEAVES = 512       # a window's BSP holds 16383 nodes: 9 tiles' (the kd-tree halves to a
@@ -79,7 +87,7 @@ def build_tile(ij):
     m = size / bb.SCALE
     x0 = center[0] + (i * size - half) / bb.SCALE
     y1 = center[1] - (j * size - half) / bb.SCALE
-    groups = world.triangles((x0, y1 - m, x0 + m, y1), bb.SKIP_SOLIDS)
+    groups = world.triangles((x0, y1 - m, x0 + m, y1), world.skip_solids)
     groups = {h: g for h, g in groups.items() if h in rects}
     if not groups:
         return None
@@ -121,9 +129,9 @@ def tile_map(world, groups, center, i, j, size):
     d = ImageDraw.Draw(img)
     x0, z0 = i * size - size // 2, j * size - size // 2
     k = 1.0 / (MAP_FINE * bb.SCALE)
-    for value, kinds in ((1, bb.GROUND_TEXTURES), (2, ('RDP',))):
+    for value, shown in ((1, world.is_map_ground), (2, world.is_map_road)):
         for h, (P, _, _, _) in groups.items():
-            if not world.textures[h].name.startswith(kinds):
+            if not shown(world.textures[h].name):
                 continue
             nz = np.cross(P[:, 1] - P[:, 0], P[:, 2] - P[:, 0])[:, 2]
             for tri in P[np.abs(nz) > 1e-9]:
@@ -162,20 +170,25 @@ def main(iso, disc, outdir, name='bayview'):
         if not found:
             sys.exit(f'build_world: AROUND={around!r} has no x,y,z')
         around = tuple(int(v) for v in found.groups())
-    world = Bayview(iso)
+    world = cfg['source'](iso)
     world.low_detail = False
     x0, y0, x1, y1 = cfg['bounds']
-    groups = world.triangles((x0, y0, x1, y1), bb.SKIP_SOLIDS)
-    groups = {h: g for h, g in groups.items() if h in world.textures and not world.textures[h].name.startswith(bb.SKIP_TEXTURES)}
+    groups = world.triangles((x0, y0, x1, y1), world.skip_solids)
+    groups = {h: g for h, g in groups.items() if h in world.textures and not world.textures[h].name.startswith(world.skip_textures)}
     print(f'{sum(len(g[0]) for g in groups.values())} triangles in the world, {len(groups)} textures')
     allp = np.concatenate([g[0].reshape(-1, 3) for g in groups.values()])
-    floor_z = float(np.percentile(allp[:, 2], 1))
+    floor_z = getattr(world, 'floor_z', None)
+    if floor_z is None:
+        floor_z = float(np.percentile(allp[:, 2], 1))
     del allp
     # the world's origin: the middle of its start area, where tile (0, 0) is centred
-    wps = np.array(bb.AREAS[cfg['start']]['waypoints'], dtype=float)
+    wps = np.array(world.areas[world.start]['waypoints'], dtype=float)
     center = ((wps[:, 0].min() + wps[:, 0].max()) / 2, (wps[:, 1].min() + wps[:, 1].max()) / 2)
-    cutouts = {h for h in groups if bb.is_cutout(world.textures[h].rgba) and not world.textures[h].name.startswith(bb.GROUND_TEXTURES)}
-    rects, layers = bb.pack_textures(world.textures, list(groups), cutouts)
+    cutouts = {h for h in groups if bb.is_cutout(world.textures[h].rgba) and not world.textures[h].name.startswith(world.ground_textures)}
+    # how much of the world each texture covers (square metres): the atlas keeps the most
+    # used ones' size when not all of them fit
+    area = {h: float(np.linalg.norm(np.cross(g[0][:, 1] - g[0][:, 0], g[0][:, 2] - g[0][:, 0]), axis=1).sum() / 2) for h, g in groups.items()}
+    rects, layers = bb.pack_textures(world.textures, list(groups), cutouts, importance=area, pad=getattr(world, 'atlas_border', bb.PAD))
     print(f'{len(rects)} textures in {len(layers)} atlas layers')
     del groups
 
@@ -188,8 +201,19 @@ def main(iso, disc, outdir, name='bayview'):
             sys.exit(f'build_world: {name} was built with other textures (or not at all): build all of it, without AROUND')
     elif os.environ.get('TILES_ONLY') != '1':
         # the starting level, in the world's coordinates, with the world's atlas
-        bb.main(iso, disc, outdir, cfg['start'], world=world, name=name, center=center, floor_z=floor_z,
+        built = json.load(open(meta_path)).get('world') if os.path.exists(meta_path) else None
+        bb.main(iso, disc, outdir, world.start, world=world, name=name, center=center, floor_z=floor_z,
                 atlas=(rects, layers), quick=True)
+        if os.environ.get('START_ONLY') == '1':
+            # the tiles stay as they are: the same textures, or they wouldn't match
+            if not built or built.get('atlas') != atlas_id:
+                sys.exit(f'build_world: {name} has no tiles with these textures: build all of it')
+            meta = json.load(open(meta_path))
+            meta['world'] = built
+            with open(meta_path, 'w') as f:
+                json.dump(meta, f, indent=1)
+            print(f'start level built in {time.time() - t_start:.0f} s')
+            return
     # the tiles, in track's settings as the start level leaves them (the world's centre and floor)
     track.SCALE, track.CENTER, track.FLOOR_Z = bb.SCALE, center, floor_z
     track.FLOOR_CELL, track.FLOOR_MAX_EDGE, track.MAX_EDGE = bb.FLOOR_CELL, bb.FLOOR_CELL * 1.6, 1200.0
@@ -265,8 +289,8 @@ def main(iso, disc, outdir, name='bayview'):
     if not around:
         listing = os.path.join(outdir, 'maps.json')
         built = json.load(open(listing))
-        built[name] = cfg['title']
-        for area in bb.AREAS:  # the city holds them all: their own levels leave the list
+        built[name] = world.title
+        for area in world.areas:  # the city holds them all: their own levels leave the list
             built.pop(area, None)
         with open(listing, 'w') as f:
             json.dump(dict(sorted(built.items())), f, indent=1)

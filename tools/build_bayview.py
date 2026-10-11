@@ -31,21 +31,9 @@ import track  # noqa: E402
 from nfsu2.world import BUILDING, PROP, TERRAIN, Bayview  # noqa: E402
 
 FLOOR = 3               # a corridor kind besides nfsu2.world's: the city's floors
+LOOSE = 4               # on a world's kinds: drawn, not collided with (what a car knocks over)
 SCALE = 64.0            # CTR units per metre: streets about as wide, to a kart, as Dust 2's
-# Stretches of the city (metres: x east, y north): a loop of streets through waypoints (free
-# drive starts at the first, facing the second), and what's along it.
-AREAS = {
-    'citycore': dict(title='City Core', waypoints=[(-955, -335), (-700, -515), (-640, -250)]),
-    'coalharbor': dict(title='Coal Harbor', waypoints=[(-1300, -1652), (-940, -1550), (-1004, -1660), (-1232, -1832)]),
-    'jackson': dict(title='Jackson Heights', waypoints=[(-2230, 2190), (-1810, 2160), (-1790, 1920), (-2120, 1870)]),
-}
-NIGHT = [(8, 10, 24, 1), (40, 34, 60, 1), (14, 16, 34, 1)]
-# Left out: race barriers (only up during races), the panoramas (skylines and hills for far
-# away, over the streets), and the light shafts and glows NFSU2 draws
-# additively (their textures aren't in the packs).
-SKIP_SOLIDS = ('XO_TRACKBARRIER', 'PAN_', 'LIGHTMASK', 'SFXFLARE')
-SKIP_TEXTURES = ('SFX_', 'HEADLIGHTGLOW', 'LIGHTGLOW')
-GROUND_TEXTURES = ('RDP', 'TRN', 'ARC_SIDEWALK', 'ARC_CURB', 'ARC_PAVE')
+AREAS = Bayview.areas
 NAV_CELL = 128          # CTR units
 # metres either side of the route kept: buildings and the city's own walls and terrain (its
 # floors less: what's farther is seen, not driven on), props only by the road
@@ -54,7 +42,6 @@ VERTICES = 400000
 PAD = 8                 # texels of each texture's wrap-around border in the atlas
 LAYERS = 59             # a "CTRV" atlas's layers (track.layout); the whole city's textures take 21
 CUTOUT = 0.02           # cutouts are more than this much see-through (see is_cutout): drawn, not collided with
-BRIGHTNESS, GAMMA = 1.15, 0.8
 VIEW_EVERY = 2          # chase views on every other grid cell (128 CTR units), 8 headings each
 MIN_PIXELS = 4
 FLOOR_CELL = 1536.0     # CTR units
@@ -71,12 +58,48 @@ def wrap_texture(im):
     return np.tile(im, (max(1, track.CTRV_ALIGN // h), max(1, track.CTRV_ALIGN // w), 1))
 
 
-def pack_textures(textures, used, cutouts):
-    """Places every used texture once in 1024 x 1024 layers, on shelves, its origin 32-aligned
-    (the atlas shader's page) and with a PAD-texel wrapped border (for filtering across its
-    repeats). Returns ({hash: (layer, x, y, w, h, scale)}, {layer: RGBA array}): scale is the
-    texture's original size over the size placed (its uvs, in repeats, times scale give
-    texels... of what is placed)."""
+def shelf_pack(imgs, pad=PAD):
+    """Where each image goes (on shelves, biggest first, pad texels round each): {hash: (layer,
+    x, y, w, h)}, or None when they don't fit in LAYERS layers."""
+    def up(v):
+        return -(-v // track.CTRV_ALIGN) * track.CTRV_ALIGN
+
+    rects = {}
+    layer, x, y, shelf = 1, 0, 0, 0
+    for h in sorted(imgs, key=lambda h: (-imgs[h].shape[0], -imgs[h].shape[1])):
+        th, tw = imgs[h].shape[:2]
+        ox, oy = up(x + pad), up(y + pad)
+        if ox + tw + pad > track.LAYER_SIZE:
+            x, y, shelf = 0, y + shelf, 0
+            ox, oy = up(pad), up(y + pad)
+        if oy + th + pad > track.LAYER_SIZE:
+            layer, x, y, shelf = layer + 1, 0, 0, 0
+            ox, oy = up(pad), up(pad)
+        if layer > LAYERS:
+            return None
+        rects[h] = (layer, ox, oy, tw, th)
+        x = ox + tw + pad
+        shelf = max(shelf, oy + th + pad - y)
+    return rects
+
+
+def paint(imgs, rects, pad=PAD):
+    """The layers ({layer: RGBA array}) with each image at its place, and its pad-texel wrapped
+    border round it."""
+    layers = {}
+    for h, (layer, ox, oy, tw, th) in rects.items():
+        canvas = layers.setdefault(layer, np.zeros((track.LAYER_SIZE, track.LAYER_SIZE, 4), np.uint8))
+        canvas[oy - pad:oy + th + pad, ox - pad:ox + tw + pad] = np.pad(imgs[h], ((pad, pad), (pad, pad), (0, 0)), mode='wrap')
+    return layers
+
+
+def pack_textures(textures, used, cutouts, importance=None, pad=PAD):
+    """Places every used texture once in 1024 x 1024 layers, on shelves, its origin 64-aligned
+    (track.CTRV_ALIGN) and with a pad-texel wrapped border (for filtering across its repeats;
+    none for a world whose atlas is borderless: the shader wraps its filtering itself).
+    Returns ({hash: (layer, x, y, w, h)}, {layer: RGBA array}). When they don't fit: with
+    importance ({hash: how much of the world it covers}), the least important are halved (to
+    64 texels) until they do; else the biggest, up to 4 times."""
     def opaque(h):
         im = textures[h].rgba
         if h in cutouts:
@@ -84,40 +107,42 @@ def pack_textures(textures, used, cutouts):
         im = im.copy()
         im[..., 3] = 255
         return im
-    imgs = {h: wrap_texture(opaque(h)) for h in used}
-    for _ in range(4):
-        rects, layers = {}, {}
-        layer, x, y, shelf = 1, 0, 0, 0
+    full = {h: wrap_texture(opaque(h)) for h in used}
+    if importance is None:
+        imgs = full
+        for _ in range(4):
+            rects = shelf_pack(imgs, pad)
+            if rects is not None:
+                return rects, paint(imgs, rects, pad)
+            biggest = max(im.shape[0] * im.shape[1] for im in imgs.values())
+            imgs = {h: (wrap_texture(np.asarray(Image.fromarray(im).resize((max(64, im.shape[1] // 2), max(64, im.shape[0] // 2)), Image.LANCZOS)))
+                        if im.shape[0] * im.shape[1] >= biggest // 2 else im) for h, im in imgs.items()}
+        raise SystemExit('the textures never fit the atlas')
 
-        def up(v):
-            return -(-v // track.CTRV_ALIGN) * track.CTRV_ALIGN
-
-        order = sorted(imgs, key=lambda h: (-imgs[h].shape[0], -imgs[h].shape[1]))
-        ok = True
-        for h in order:
-            im = imgs[h]
-            th, tw = im.shape[:2]
-            ox, oy = up(x + PAD), up(y + PAD)
-            if ox + tw + PAD > track.LAYER_SIZE:
-                x, y, shelf = 0, y + shelf, 0
-                ox, oy = up(PAD), up(y + PAD)
-            if oy + th + PAD > track.LAYER_SIZE:
-                layer, x, y, shelf = layer + 1, 0, 0, 0
-                ox, oy = up(PAD), up(PAD)
-            if layer > LAYERS:
-                ok = False
-                break
-            canvas = layers.setdefault(layer, np.zeros((track.LAYER_SIZE, track.LAYER_SIZE, 4), np.uint8))
-            canvas[oy - PAD:oy + th + PAD, ox - PAD:ox + tw + PAD] = np.pad(im, ((PAD, PAD), (PAD, PAD), (0, 0)), mode='wrap')
-            rects[h] = (layer, ox, oy, tw, th)
-            x = ox + tw + PAD
-            shelf = max(shelf, oy + th + PAD - y)
-        if ok:
-            return rects, layers
-        biggest = max(im.shape[0] * im.shape[1] for im in imgs.values())
-        imgs = {h: (wrap_texture(np.asarray(Image.fromarray(im).resize((max(64, im.shape[1] // 2), max(64, im.shape[0] // 2)), Image.LANCZOS)))
-                    if im.shape[0] * im.shape[1] >= biggest // 2 else im) for h, im in imgs.items()}
-    raise SystemExit('the textures never fit the atlas')
+    def halved(im):
+        while im.shape[0] > 64 or im.shape[1] > 64:
+            im = np.asarray(Image.fromarray(im).resize((max(64, im.shape[1] // 2), max(64, im.shape[0] // 2)), Image.LANCZOS))
+        return im
+    order = sorted(used, key=lambda h: (-importance.get(h, 0.0), str(h)))
+    rank = {h: i for i, h in enumerate(order)}
+    small = {h: halved(full[h]) for h in order}
+    # the most important keep their size: as many as still lets the rest, halved, fit (in the
+    # textures' own order: all kept, the same atlas as without importance)
+    lo, hi, best = 0, len(order), None
+    while lo <= hi:
+        keep = (lo + hi) // 2
+        imgs = {h: full[h] if rank[h] < keep else small[h] for h in used}
+        rects = shelf_pack(imgs, pad)
+        if rects is not None:
+            best, lo = (keep, imgs, rects), keep + 1
+        else:
+            hi = keep - 1
+    if best is None:
+        raise SystemExit('the textures never fit the atlas, even halved')
+    keep, imgs, rects = best
+    if keep < len(order):
+        print(f'{len(order) - keep} of {len(order)} textures halved to fit the atlas')
+    return rects, paint(imgs, rects, pad)
 
 
 def wrap_code(w, h):
@@ -178,16 +203,10 @@ def uv_shift(local):
 
 def is_cutout(rgba):
     """A see-through texture (foliage, fences): its alpha is all but on or off. NFSU2 gives
-    roads and pavements alpha too, but as how much they reflect: GROUND_TEXTURES are opaque
-    whatever their alpha."""
+    roads and pavements alpha too, but as how much they reflect: a world's ground_textures are
+    opaque whatever their alpha."""
     a = rgba[..., 3]
     return (a < 64).mean() > CUTOUT and ((a >= 64) & (a < 192)).mean() < 0.1
-
-
-def light(c):
-    """NFSU2's baked night light (0x80 = 1), brightened: the game adds reflections and glow
-    on top, CTR draws the colours alone."""
-    return np.minimum(128 * BRIGHTNESS * (c / 128.0) ** GAMMA, 255)
 
 
 def orient(groups, world, route):
@@ -204,7 +223,7 @@ def orient(groups, world, route):
         c = P.mean(axis=1)
         _, i = tree.query(c[:, :2])
         to_route = route[i] - c[:, :2]
-        ground = world.textures[h].name.startswith(GROUND_TEXTURES)
+        ground = world.textures[h].name.startswith(world.ground_textures)
         wall = np.abs(up) <= 0.7
         flip = (wall & (np.sum(n[:, :2] * to_route, axis=1) < 0)) | ((up < -0.7) & ground)
         P[flip] = P[flip][:, ::-1]
@@ -264,8 +283,9 @@ def make_tris(world, groups, rects, cutouts, near):
     """track.Tri for every piece: uv = atlas texels, then the vertex colours, the texture's
     origin and wrap code (track.WRAP_CHANNELS). Walls are drawn from both sides."""
     tris = []
-    one_sided = back_to_back(groups)
-    for th, (P, UV, C, _) in groups.items():
+    # a world whose walls face either way (its game drew both sides) keeps them two-sided
+    one_sided = back_to_back(groups) if getattr(world, 'back_to_back', True) else {h: np.zeros(len(g[0]), bool) for h, g in groups.items()}
+    for th, (P, UV, C, K) in groups.items():
         if th not in rects:
             continue
         layer, ox, oy, w, h = rects[th]
@@ -274,6 +294,7 @@ def make_tris(world, groups, rects, cutouts, near):
         sx, sy = min(tw, w), min(thh, h)
         code = wrap_code(w, h)
         cutout = th in cutouts
+        terrain = world.terrain(world.textures[th].name)
         for k in range(len(P)):
             n = np.cross(P[k, 1] - P[k, 0], P[k, 2] - P[k, 0])
             if np.linalg.norm(n) < 1e-6:
@@ -283,9 +304,9 @@ def make_tris(world, groups, rects, cutouts, near):
             # see-through walls (foliage, fences) are only drawn; floors always hold the kart;
             # walls lower than a kerb's height are driven over, as NFSU2's cars do
             low = np.ptp(P[k, :, 2]) < LOW_WALL
-            solid = floor or not (cutout or low)
-            rows = np.concatenate([P[k], UV[k] * (sx, sy), light(C[k, :, :3])], axis=1)
-            double = (cutout or not floor) and not one_sided[th][k]
+            solid = (floor or not (cutout or low)) and not K[k] & LOOSE
+            rows = np.concatenate([P[k], UV[k] * (sx, sy), world.light(C[k, :, :3])], axis=1)
+            double = (cutout or not floor or getattr(world, 'double_sided_floors', False)) and not one_sided[th][k]
             pieces = []
             for a in wrap_pieces(list(rows), 3, w):
                 pieces += wrap_pieces(a, 4, h)
@@ -310,6 +331,8 @@ def make_tris(world, groups, rects, cutouts, near):
                                               np.tile([ox, oy, code, shift], (3, 1))], axis=1)
                         t = track.Tri(track.to_ctr(p), tuv, layer, track.dir_to_ctr(n), p.copy(), n.copy())
                         t.solid = solid
+                        if floor:
+                            t.terrain = terrain
                         if double:
                             t.terrain |= track.DOUBLE_SIDED
                         tris.append(t)
@@ -382,14 +405,14 @@ def point_in(p, x, y):
 
 def nav_quads(groups, cutouts=()):
     """The drivable grid's input straight from the triangles (no textures, no cuts): a
-    triangle quadblock each, floor or wall (see-through foliage left out)."""
+    triangle quadblock each, floor or wall (see-through foliage and what's LOOSE left out)."""
     out = []
-    for h, (P, *_) in groups.items():
+    for h, (P, _, _, K) in groups.items():
         n = np.cross(P[:, 1] - P[:, 0], P[:, 2] - P[:, 0])
         ln = np.linalg.norm(n, axis=1)
         C = track.to_ctr(P)
         for k in range(len(P)):
-            if ln[k] < 1e-6:
+            if ln[k] < 1e-6 or K[k] & LOOSE:
                 continue
             floor = n[k, 2] / ln[k] > 0.7
             if h in cutouts and not floor:
@@ -400,16 +423,12 @@ def nav_quads(groups, cutouts=()):
     return out
 
 
-def is_road(name):
-    return name.startswith(('RDP', 'TRN_ROAD', 'TRN_ASPH')) or 'ROAD' in name
-
-
 def street_node(g, groups, world, x, y):
     """The drivable grid node on the road nearest map (x, y), on its lowest floor there (the
     street, not a bridge over it)."""
     best = None
     for h, (P, *_) in groups.items():
-        if not is_road(world.textures[h].name):
+        if not world.is_road(world.textures[h].name):
             continue
         n = np.cross(P[:, 1] - P[:, 0], P[:, 2] - P[:, 0])
         up = n[:, 2] > 0.7 * (np.linalg.norm(n, axis=1) + 1e-12)
@@ -431,7 +450,7 @@ def road_cells(g, groups, world):
     """The drivable grid's cells (cx, cz) that road surfaces cover."""
     cells = set()
     for h, (P, *_) in groups.items():
-        if not is_road(world.textures[h].name):
+        if not world.is_road(world.textures[h].name):
             continue
         C = track.to_ctr(P)
         for t in C:
@@ -518,7 +537,7 @@ def corridor(groups, route, reach):
         d = tree.query(pts[..., :2].reshape(-1, 2))[0].reshape(len(P), 4).min(axis=1)
         n = np.cross(P[:, 1] - P[:, 0], P[:, 2] - P[:, 0])
         floor = n[:, 2] > 0.7 * (np.linalg.norm(n, axis=1) + 1e-12)
-        keep = d <= np.where(floor & (K == TERRAIN), reach[FLOOR], np.array([reach[k] for k in range(3)])[K])
+        keep = d <= np.where(floor & (K & 3 == TERRAIN), reach[FLOOR], np.array([reach[k] for k in range(3)])[K & 3])
         # big triangles the route runs over, though their corners and middle are far from it
         big = np.max([np.linalg.norm(P[:, a, :2] - P[:, b, :2], axis=1) for a, b in ((0, 1), (1, 2), (0, 2))], axis=0)
         for k in np.nonzero(~keep & (big > 20.0))[0]:
@@ -582,7 +601,8 @@ def find_route(world, groups, cutouts, cfg, cache):
 def main(iso, disc, outdir, area='citycore', world=None, name=None, center=None, floor_z=None, atlas=None,
          quick=False):
     """Builds AREA into OUTDIR. For tools/build_world.py, which makes the area a bigger world's
-    starting level: world (an open Bayview), name (the files'), center and floor_z (the world's
+    starting level: world (an open Bayview, or another world with its settings: see
+    nfsu2.world.Bayview's), name (the files'), center and floor_z (the world's
     coordinates), atlas ((rects, layers) from pack_textures: the world's textures) and quick
     (no visibility pruning or painter's audit: the world's tiles replace the level's mesh)."""
     import navgrid
@@ -590,17 +610,18 @@ def main(iso, disc, outdir, area='citycore', world=None, name=None, center=None,
     # 2 m grid cells: a city is big, its streets wide
     navgrid.CELL = NAV_CELL
     t_start = time.time()
-    cfg = AREAS[area]
-    os.makedirs(outdir, exist_ok=True)
     world = world or Bayview(iso)
+    cfg = world.areas[area]
+    os.makedirs(outdir, exist_ok=True)
     wps = np.array(cfg['waypoints'], dtype=float)
-    margin = max(CORRIDOR.values()) + 20.0
+    corridor_reach = getattr(world, 'corridor', CORRIDOR)
+    margin = max(corridor_reach.values()) + 20.0
     bounds = (wps[:, 0].min() - margin, wps[:, 1].min() - margin, wps[:, 0].max() + margin, wps[:, 1].max() + margin)
     world.low_detail = False
     track.VERTEX_BUDGET = VERTICES
-    groups = world.triangles(bounds, SKIP_SOLIDS)
+    groups = world.triangles(bounds, world.skip_solids)
     # left out: untextured effects and the glows NFSU2 adds on top (their black is see-through)
-    groups = {h: g for h, g in groups.items() if h in world.textures and not world.textures[h].name.startswith(SKIP_TEXTURES)}
+    groups = {h: g for h, g in groups.items() if h in world.textures and not world.textures[h].name.startswith(world.skip_textures)}
     print(f'{sum(len(g[0]) for g in groups.values())} triangles round the waypoints, {len(groups)} textures')
     track.SCALE = SCALE
     allp = np.concatenate([g[0].reshape(-1, 3) for g in groups.values()])
@@ -615,17 +636,17 @@ def main(iso, disc, outdir, area='citycore', world=None, name=None, center=None,
     track.light_maps = None
 
     # the route: through the waypoints and back to the first, on the drivable grid
-    cutouts = {h for h in groups if is_cutout(world.textures[h].rgba) and not world.textures[h].name.startswith(GROUND_TEXTURES)}
+    cutouts = {h for h in groups if is_cutout(world.textures[h].rgba) and not world.textures[h].name.startswith(world.ground_textures)}
     route = find_route(world, groups, cutouts, cfg, os.path.join(outdir, '.tools', f'{area}_route.json'))
     length = float(np.sum(np.linalg.norm(np.diff(route[:, :2], axis=0), axis=1)))
     print(f'route: {len(wps)} waypoints, {length:.0f} m round')
-    groups, open_edges = corridor(groups, route[:, :2], CORRIDOR)
+    groups, open_edges = corridor(groups, route[:, :2], corridor_reach)
     orient(groups, world, route[:, :2])
     allp = np.concatenate([g[0].reshape(-1, 3) for g in groups.values()])
     kill_y = int((allp[:, 2].min() - track.FLOOR_Z) * SCALE) - 600
     print(f'{sum(len(g[0]) for g in groups.values())} triangles along it, {len(open_edges)} open floor edges')
 
-    rects, layers = atlas or pack_textures(world.textures, list(groups), cutouts)
+    rects, layers = atlas or pack_textures(world.textures, list(groups), cutouts, pad=getattr(world, 'atlas_border', PAD))
     print(f'{len(rects)} textures in {len(layers)} atlas layers')
     g = NavGrid(nav_quads(groups, cutouts))
     start = street_node(g, groups, world, *wps[0])
@@ -674,8 +695,8 @@ def main(iso, disc, outdir, area='citycore', world=None, name=None, center=None,
     for qi, q in enumerate(out):
         q.checkpoint = free_cp.get(qi, 0xFF)
     info = track.write_modes(outdir, f'{name}_free', out, free_nodes, spawns, nav, route_info, g, bases, vrms,
-                             (window, track.minimap_image(cells, window, route=route_info['path'], cell=NAV_CELL)), build_name='bayview',
-                             clear_colors=NIGHT, keep_sky=False)
+                             (window, track.minimap_image(cells, window, route=route_info['path'], cell=NAV_CELL)), build_name=world.name,
+                             clear_colors=world.clear_colors, keep_sky=False)
     print(info)
     with open(os.path.join(outdir, f'{name}_free_route.json'), 'w') as f:
         json.dump(route_info, f)
@@ -694,7 +715,8 @@ def main(iso, disc, outdir, area='citycore', world=None, name=None, center=None,
                    ((cell % track.ATLAS_COLS) * track.LAYER_SIZE, (cell // track.ATLAS_COLS) * track.LAYER_SIZE))
     mask.save(os.path.join(outdir, f'{name}_mask.png'), optimize=True)
     meta = dict(map=area, scale=SCALE, center=track.CENTER,
-                atlas=dict(image=f'{name}_atlas.jpg', mask=f'{name}_mask.png', vertexColors=True, width=size[0], height=size[1]),
+                atlas=dict(image=f'{name}_atlas.jpg', mask=f'{name}_mask.png', vertexColors=True, width=size[0], height=size[1],
+                           **({'borderless': True} if getattr(world, 'atlas_border', PAD) == 0 else {})),
                 spawn=spawns[0], info=info, landmarks=landmarks, tracks={}, modes=[suffix for suffix, _ in track.MODES])
     with open(os.path.join(outdir, f'{name}.json'), 'w') as f:
         json.dump(meta, f, indent=1)
