@@ -293,6 +293,16 @@ EMSCRIPTEN_KEEPALIVE void NativeWeb_Teleport(int x, int y, int z, int angle)
 	d->speed = 0;
 	d->speedApprox = 0;
 }
+
+// Gives player 1 a boost of `reserves` (960 a second), as a powerslide's or a turbo pad's would.
+EMSCRIPTEN_KEEPALIVE void NativeWeb_Boost(int reserves)
+{
+	struct Driver *d = sdata->gGT->drivers[0];
+	if (d != NULL)
+	{
+		VehFire_Increment(d, reserves, 0, 0);
+	}
+}
 #endif
 
 #if defined(__EMSCRIPTEN__)

@@ -53,6 +53,21 @@ enum
 	UI_SLIDE_METER_EMPTY_R = 0x80,
 	UI_SLIDE_METER_EMPTY_G = 0x80,
 	UI_SLIDE_METER_EMPTY_B = 0x80,
+
+	// The reserves bar under the slide meter: a full bar is two seconds of reserves; more
+	// stack on as brighter layers (orange, yellow, white), like a flame getting hotter.
+	UI_RESERVES_METER_FULL = 2 * UI_JUMP_METER_TIME_UNIT,
+	UI_RESERVES_METER_LAYERS = 3,
+	UI_RESERVES_METER_GAP_FULL = 2,
+	UI_RESERVES_METER_GAP_SPLIT = 1,
+	UI_RESERVES_METER_BAR_H_FULL = 4,
+	UI_RESERVES_METER_BAR_H_SPLIT = 2,
+};
+
+static const Color s_reservesLayerColors[UI_RESERVES_METER_LAYERS] = {
+    {.r = 0xff, .g = 0x80, .b = 0x00},
+    {.r = 0xff, .g = 0xe0, .b = 0x00},
+    {.r = 0xff, .g = 0xff, .b = 0xff},
 };
 
 
@@ -339,5 +354,66 @@ void UI_DrawSlideMeter(s16 posX, s16 posY, struct Driver *driver)
 		AddPrimitive(p, gGT->pushBuffer_UI.ptrOT);
 		colorCode = MakeColorCode(UI_SLIDE_METER_EMPTY_R, UI_SLIDE_METER_EMPTY_G, UI_SLIDE_METER_EMPTY_B, primCode);
 		meterLength = barWidth;
+	}
+
+	UI_DrawReservesMeter(posX, posY, driver);
+}
+
+// Not in the retail game: the driver's reserves (the boost still to burn), right under the
+// slide meter (posX, posY is its bottom right corner), filling from the right like it does.
+void UI_DrawReservesMeter(s16 posX, s16 posY, struct Driver *driver)
+{
+	struct GameTracker *gGT = sdata->gGT;
+	const int barWidth = UI_SLIDE_METER_BAR_W;
+	const int split = gGT->numPlyrCurrGame > 1;
+	const int barHeight = split ? UI_RESERVES_METER_BAR_H_SPLIT : UI_RESERVES_METER_BAR_H_FULL;
+	const s16 topY = posY + (split ? UI_RESERVES_METER_GAP_SPLIT : UI_RESERVES_METER_GAP_FULL);
+	const s16 bottomY = topY + barHeight;
+
+	int reserves = driver->reserves > 0 ? driver->reserves : 0;
+	int layer = reserves / UI_RESERVES_METER_FULL;
+	int length = (reserves % UI_RESERVES_METER_FULL) * barWidth / UI_RESERVES_METER_FULL;
+	if (layer >= UI_RESERVES_METER_LAYERS)
+	{
+		layer = UI_RESERVES_METER_LAYERS - 1;
+		length = barWidth;
+	}
+
+	RECT box = {.x = posX - barWidth, .y = topY, .w = barWidth, .h = barHeight};
+	Color black = MakeColor(0, 0, 0);
+	CTR_Box_DrawWireBox(&box, &black, gGT->pushBuffer_UI.ptrOT, &gGT->backBuffer->primMem);
+
+	// the part of this layer that's full, over the layer below it (or the empty bar)
+	const PrimCode primCode = {.kind.poly = {.quad = 1, .renderCode = RenderCode_Polygon}};
+	const Color *top = &s_reservesLayerColors[layer];
+	ColorCode colors[2] = {
+	    MakeColorCode(top->r, top->g, top->b, primCode),
+	    layer > 0 ? MakeColorCode(s_reservesLayerColors[layer - 1].r, s_reservesLayerColors[layer - 1].g, s_reservesLayerColors[layer - 1].b, primCode)
+	              : MakeColorCode(UI_SLIDE_METER_EMPTY_R, UI_SLIDE_METER_EMPTY_G, UI_SLIDE_METER_EMPTY_B, primCode),
+	};
+	int lengths[2] = {length, barWidth};
+
+	for (int i = 0; i < 2; i++)
+	{
+		PolyF4 *p;
+		GetPrimMem(p);
+		if (p == nullptr)
+		{
+			return;
+		}
+
+		p->colorCode = colors[i];
+
+		p->v[0].pos.y = topY;
+		p->v[1].pos.y = topY;
+		p->v[2].pos.y = bottomY;
+		p->v[3].pos.y = bottomY;
+
+		p->v[0].pos.x = posX - lengths[i];
+		p->v[1].pos.x = posX;
+		p->v[2].pos.x = posX - lengths[i];
+		p->v[3].pos.x = posX;
+
+		AddPrimitive(p, gGT->pushBuffer_UI.ptrOT);
 	}
 }
