@@ -1,10 +1,11 @@
 # CTR 1.6
 
 Crash Team Racing's kart, with the game's own driving code, on Counter-Strike 1.6's maps,
-built from the game's own map files: de_dust2, de_aztec and de_inferno so far. And on Bayview,
-Need for Speed: Underground 2's city, from its PS2 disc: all of it, about five kilometres
-across, streamed in as you drive. For now every map is a free drive, no laps: pick one and
-drive it round. Races come next, the same way for every map.
+built from the game's own map files: de_dust2, de_aztec and de_inferno so far. And on two whole
+cities from their PS2 discs, streamed in as you drive: Bayview, Need for Speed: Underground 2's,
+about five kilometres across, and Vice City, Grand Theft Auto: Vice City's, every island of it.
+For now every map is a free drive, no laps: pick one and drive it round. Races come next, the
+same way for every map.
 
 - `engine/` is [ctr-native](https://github.com/CTR-tools/ctr-native) (the CTR decompilation as a
   native port, GPL-3.0) with a WebAssembly platform layer: the kart physics, the collision and
@@ -31,6 +32,9 @@ opens it in Chrome. It needs:
 - for Bayview (optional), your Need for Speed: Underground 2 disc image (PS2, NTSC-U,
   SLUS-21065, an `.iso`), by default at `~/Documents/NFSU2/Need for Speed - Underground 2
   (USA).iso` (`NFSU2_ISO=...`);
+- for Vice City (optional), your Grand Theft Auto: Vice City disc image (PS2, NTSC-U,
+  SLUS-20552, an `.iso`), by default at `~/Documents/GTAVC/Grand Theft Auto - Vice City.iso`
+  (`GTAVC_ISO=...`);
 - Python 3 with numpy and Pillow, a C compiler (`cc`: on a Mac, Xcode's command line tools),
   Node.js, and a browser with WebAssembly JSPI (Chrome or Edge 137+). The first build fetches
   Emscripten 6.0.10 unless `$EMSDK` points at one.
@@ -103,11 +107,21 @@ the next ones as it drives, and moves everything back round the origin as it cro
 new tile (`engine/platform/native_world.c`). It starts on City Core's loop. NOTES.md has how
 the PS2 data is laid out.
 
+## Vice City
+
+`tools/vicecity/` reads Grand Theft Auto: Vice City's map from the disc image: the map files'
+placements, the RenderWare models and texture dictionaries in their PS2 form, and the sea, which
+the game draws at one level wherever the ground is lower (here it's water you drive on). The
+same world builder makes it tiles (`python3 -I tools/build_world.py GTAVC.iso CTR_DISC.bin
+build/lev vicecity`, which `play.sh` runs). It starts on Ocean Drive. NOTES.md has how the PS2
+data is laid out.
+
 ## Credits
 
 - Crash Team Racing © 1999 Sony Computer Entertainment / Naughty Dog.
 - Counter-Strike © Valve. de_dust2 by Dave Johnston; de_aztec (textures by Chris Ashton) and
   de_inferno by Christopher "Narby" Auty.
 - Need for Speed: Underground 2 © 2004 Electronic Arts, developed by EA Black Box.
+- Grand Theft Auto: Vice City © 2002 Rockstar Games, developed by Rockstar North.
 - [CTR-ModSDK](https://github.com/CTR-tools/CTR-ModSDK) and
   [ctr-native](https://github.com/CTR-tools/ctr-native): the decompilation and the native port.

@@ -928,11 +928,29 @@ const char *gte_shader_32_rgba = "	uniform sampler2D s_texture;\n"
 // never drawn), 4 to a row of the atlas. A "CTRV" atlas's textures are 64-aligned instead:
 // CLUT = layer << 8 | (y / 64) << 4 | (x / 64), up to 59 layers (a whole city's textures).
 // CLUT bits 10-13 all set (layer 15, the old way) is never drawn: collision-only quadblocks
-// (stair ramps) use it.
+// (stair ramps) use it. A "CTRW" atlas (atlasVertexColor 2) is a "CTRV" one without the
+// wrapped border round each texture (more of them fit): its repeating textures are filtered
+// here, each tap wrapped in the texture, from the mip levels round the footprint (a texture at
+// a 64-aligned origin, its size a power of two, has levels of its own up to its last texel).
 const char *gte_shader_virtual_atlas = "	uniform sampler2D s_texture;\n"
                                        "	uniform int psxDrawMaskSet;\n"
                                        "	uniform vec2 atlasSize;\n"
                                        "	uniform int atlasVertexColor;\n"
+                                       "	vec4 wrappedLevel(vec2 origin, vec2 uv, vec2 size, float level) {\n"
+                                       "		float s = exp2(level);\n"
+                                       "		vec2 sz = max(size / s, vec2(1.0));\n"
+                                       "		vec2 p = uv / s - 0.5;\n"
+                                       "		vec2 i = floor(p);\n"
+                                       "		vec2 f = p - i;\n"
+                                       "		vec2 o = origin / s;\n"
+                                       "		vec2 a = o + mod(i, sz), b = o + mod(i + 1.0, sz);\n"
+                                       "		int l = int(level);\n"
+                                       "		vec4 c00 = texelFetch(s_texture, ivec2(a.x, a.y), l);\n"
+                                       "		vec4 c10 = texelFetch(s_texture, ivec2(b.x, a.y), l);\n"
+                                       "		vec4 c01 = texelFetch(s_texture, ivec2(a.x, b.y), l);\n"
+                                       "		vec4 c11 = texelFetch(s_texture, ivec2(b.x, b.y), l);\n"
+                                       "		return mix(mix(c00, c10, f.x), mix(c01, c11, f.x), f.y);\n"
+                                       "	}\n"
                                        "	void main() {\n"
                                        "		float clutLo = mod(floor(v_page_clut.z * 64.0 + 0.5), 64.0);\n"
                                        "		float clutHi = floor(v_page_clut.w * 512.0 + 0.5);\n"
@@ -960,7 +978,17 @@ const char *gte_shader_virtual_atlas = "	uniform sampler2D s_texture;\n"
                                        "		if (atlasVertexColor != 0 && page > 15.5) {\n"
                                        "			uv = mod(uv, vec2(32.0 * exp2(mod(page, 4.0)), 32.0 * exp2(floor(mod(page, 16.0) / 4.0))));\n"
                                        "		}\n"
-                                       "		vec4 color = textureGrad(s_texture, (origin + uv) / atlasSize, gx, gy);\n"
+                                       "		vec4 color;\n"
+                                       "		if (atlasVertexColor == 2 && page > 15.5) {\n"
+                                       "			vec2 size = vec2(32.0 * exp2(mod(page, 4.0)), 32.0 * exp2(floor(mod(page, 16.0) / 4.0)));\n"
+                                       "			vec2 du = dFdx(v_texcoord.xy * uvScale), dv = dFdy(v_texcoord.xy * uvScale);\n"
+                                       "			float lod = clamp(0.5 * log2(max(max(dot(du, du), dot(dv, dv)), 1e-8)), 0.0, log2(min(size.x, size.y)));\n"
+                                       "			float l0 = min(floor(lod), log2(min(size.x, size.y)) - 1.0);\n"
+                                       "			l0 = max(l0, 0.0);\n"
+                                       "			color = mix(wrappedLevel(origin, uv, size, l0), wrappedLevel(origin, uv, size, l0 + 1.0), clamp(lod - l0, 0.0, 1.0));\n"
+                                       "		} else {\n"
+                                       "			color = textureGrad(s_texture, (origin + uv) / atlasSize, gx, gy);\n"
+                                       "		}\n"
                                        "		if (atlasVertexColor != 0) {\n"
                                        "			if (color.a < 0.5) discard;\n"
                                        "			color.rgb *= v_color.rgb;\n"
@@ -1219,9 +1247,9 @@ internal void NativeRenderer_InitialisePSXShaders(void)
 	}
 }
 
-// NOTE(ctr-dust2): Loads a custom level's texture atlas: "CTRA" (baked light) or "CTRV"
-// (lit by vertex colours, alpha tested), u32 width, u32 height, then width * height RGBA8
-// texels. Returns 1 when loaded.
+// NOTE(ctr-dust2): Loads a custom level's texture atlas: "CTRA" (baked light), "CTRV" (lit by
+// vertex colours, alpha tested) or "CTRW" (a "CTRV" without borders: see the shader), u32
+// width, u32 height, then width * height RGBA8 texels. Returns 1 when loaded.
 int NativeRenderer_LoadVirtualAtlas(const char *path)
 {
 	FILE *file = fopen(path, "rb");
@@ -1232,7 +1260,8 @@ int NativeRenderer_LoadVirtualAtlas(const char *path)
 		return 0;
 	}
 
-	if ((fread(header, sizeof(u32), 3, file) != 3) || ((header[0] != 0x41525443u) && (header[0] != 0x56525443u)) || (header[1] == 0) ||
+	if ((fread(header, sizeof(u32), 3, file) != 3) || ((header[0] != 0x41525443u) && (header[0] != 0x56525443u) && (header[0] != 0x57525443u)) ||
+	    (header[1] == 0) ||
 	    (header[2] == 0) || (header[1] > 16384) || (header[2] > 16384))
 	{
 		fclose(file);
@@ -1267,7 +1296,7 @@ int NativeRenderer_LoadVirtualAtlas(const char *path)
 	s_lastBoundTexture = (TextureID)-1;
 	free(texels);
 
-	s_virtualAtlasVertexColor = header[0] == 0x56525443u;
+	s_virtualAtlasVertexColor = header[0] == 0x57525443u ? 2 : header[0] == 0x56525443u;
 	s_virtualAtlasWidth = (int)header[1];
 	s_virtualAtlasHeight = (int)header[2];
 	NATIVE_RENDERER_LOG("virtual atlas %s: %dx%d\n", path, s_virtualAtlasWidth, s_virtualAtlasHeight);

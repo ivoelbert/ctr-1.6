@@ -713,10 +713,15 @@ def kill_plane(out, y=-1600, size=4096):
     n = np.array([0.0, 1.0, 0.0])
     for x in np.arange(x0, x1, size):
         for z in np.arange(z0, z1, size):
-            A = np.array([x, y, z])
-            B = np.array([x + size, y, z])
-            C = np.array([x, y, z + size])
-            D = np.array([x + size, y, z + size])
+            # positions are 16-bit: a level as wide as they reach keeps its plane within
+            xa, xb = max(x, -32767), min(x + size, 32767)
+            za, zb = max(z, -32767), min(z + size, 32767)
+            if xa >= xb or za >= zb:
+                continue
+            A = np.array([xa, y, za])
+            B = np.array([xb, y, za])
+            C = np.array([xa, y, zb])
+            D = np.array([xb, y, zb])
             corners = [A, B, C, D]
             if np.dot(np.cross(corners[2] - corners[0], corners[1] - corners[0]), n) < 0:
                 corners = [A, C, B, D]

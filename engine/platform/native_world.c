@@ -298,8 +298,9 @@ typedef struct NativeWorldWindow
 static NativeWorldTile s_tiles[NATIVE_WORLD_MAX_TILES];
 static int s_tileCount;
 static int s_tileSize;
-static u8 *s_tileArena;
-static u32 s_tileArenaSize;
+// each slot's buffer grows to the biggest tile it has held (a city's tiles differ tenfold)
+static u8 *s_slotBuf[NATIVE_WORLD_SLOTS];
+static u32 s_slotCap[NATIVE_WORLD_SLOTS];
 static u32 s_slotSize;
 static int s_slotOwner[NATIVE_WORLD_SLOTS];
 static NativeWorldWindow s_windows[2];
@@ -365,9 +366,12 @@ static u8 *NativeWorld_ReadFile(const char *path, u32 *size)
 
 static void NativeWorld_FreeTiles(void)
 {
-	free(s_tileArena);
-	s_tileArena = NULL;
-	s_tileArenaSize = 0;
+	for (int k = 0; k < NATIVE_WORLD_SLOTS; k++)
+	{
+		free(s_slotBuf[k]);
+		s_slotBuf[k] = NULL;
+		s_slotCap[k] = 0;
+	}
 	s_tileCount = 0;
 }
 
@@ -406,17 +410,14 @@ static int NativeWorld_LoadIndex(void)
 	}
 	free(index);
 	s_tileCount = count;
-	s_slotSize = (s_slotSize + 0xffff) & ~0xffffu;
-	s_tileArenaSize = s_slotSize * NATIVE_WORLD_SLOTS;
-	s_tileArena = (u8 *)malloc(s_tileArenaSize);
 	for (int k = 0; k < NATIVE_WORLD_SLOTS; k++)
 	{
 		s_slotOwner[k] = -1;
 	}
 	s_tilesLoaded = 0;
-	printf("[CTR Native] world: %d tiles of %d units, %d slots of %u KB\n", s_tileCount, s_tileSize, NATIVE_WORLD_SLOTS,
+	printf("[CTR Native] world: %d tiles of %d units, %d slots, the biggest tile %u KB\n", s_tileCount, s_tileSize, NATIVE_WORLD_SLOTS,
 	       s_slotSize >> 10);
-	return s_tileArena != NULL;
+	return 1;
 }
 
 static int NativeWorld_InRing(const NativeWorldTile *t, int ci, int cj, int r)
@@ -470,10 +471,23 @@ static int NativeWorld_LoadTile(int k)
 		old->mesh = NULL;
 		s_tilesLoaded--;
 	}
-	u8 *file = s_tileArena + (size_t)slot * s_slotSize;
-	size_t n = fread(file, 1, s_slotSize, f);
-	fclose(f);
 	s_slotOwner[slot] = -1;
+	if (s_slotCap[slot] < t->bytes)
+	{
+		free(s_slotBuf[slot]);
+		s_slotCap[slot] = (t->bytes + 0xffff) & ~0xffffu;
+		s_slotBuf[slot] = (u8 *)malloc(s_slotCap[slot]);
+		if (s_slotBuf[slot] == NULL)
+		{
+			s_slotCap[slot] = 0;
+			fclose(f);
+			printf("[CTR Native] world: no memory for a tile of %u KB\n", t->bytes >> 10);
+			return 0;
+		}
+	}
+	u8 *file = s_slotBuf[slot];
+	size_t n = fread(file, 1, s_slotCap[slot], f);
+	fclose(f);
 	if (n < 8 || n != t->bytes)
 	{
 		printf("[CTR Native] world: %s: %zu bytes, expected %u\n", path, n, t->bytes);
@@ -1020,9 +1034,12 @@ int NativeWorld_OwnsSpan(u32 ptr, u32 size)
 	{
 		return 0;
 	}
-	if (ptr >= (u32)(uintptr_t)s_tileArena && ptr + size <= (u32)(uintptr_t)s_tileArena + s_tileArenaSize)
+	for (int k = 0; k < NATIVE_WORLD_SLOTS; k++)
 	{
-		return 1;
+		if (s_slotBuf[k] != NULL && ptr >= (u32)(uintptr_t)s_slotBuf[k] && ptr + size <= (u32)(uintptr_t)s_slotBuf[k] + s_slotCap[k])
+		{
+			return 1;
+		}
 	}
 	for (int k = 0; k < 2; k++)
 	{

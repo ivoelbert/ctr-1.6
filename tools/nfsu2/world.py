@@ -17,6 +17,50 @@ TERRAIN, BUILDING, PROP = 0, 1, 2
 
 
 class Bayview:
+    # What the builders (build_bayview, build_world) take from a world. Stretches of the city
+    # (metres: x east, y north): a loop of streets through waypoints (free drive starts at the
+    # first, facing the second), and what's along it.
+    name, title, start = 'bayview', 'Bayview', 'citycore'
+    areas = {
+        'citycore': dict(title='City Core', waypoints=[(-955, -335), (-700, -515), (-640, -250)]),
+        'coalharbor': dict(title='Coal Harbor', waypoints=[(-1300, -1652), (-940, -1550), (-1004, -1660), (-1232, -1832)]),
+        'jackson': dict(title='Jackson Heights', waypoints=[(-2230, 2190), (-1810, 2160), (-1790, 1920), (-2120, 1870)]),
+    }
+    clear_colors = [(8, 10, 24, 1), (40, 34, 60, 1), (14, 16, 34, 1)]     # night
+    # Left out: race barriers (only up during races), the panoramas (skylines and hills for far
+    # away, over the streets), and the light shafts and glows NFSU2 draws additively (their
+    # textures aren't in the packs).
+    skip_solids = ('XO_TRACKBARRIER', 'PAN_', 'LIGHTMASK', 'SFXFLARE')
+    skip_textures = ('SFX_', 'HEADLIGHTGLOW', 'LIGHTGLOW')
+    ground_textures = ('RDP', 'TRN', 'ARC_SIDEWALK', 'ARC_CURB', 'ARC_PAVE')
+    BRIGHTNESS, GAMMA = 1.15, 0.8
+
+    @staticmethod
+    def is_road(name):
+        """A road's texture (the routes keep to them)."""
+        return name.startswith(('RDP', 'TRN_ROAD', 'TRN_ASPH')) or 'ROAD' in name
+
+    @classmethod
+    def is_map_ground(cls, name):
+        """What a world's minimap shows as ground (the pavements and the rest)."""
+        return name.startswith(cls.ground_textures)
+
+    @staticmethod
+    def is_map_road(name):
+        """And as road."""
+        return name.startswith('RDP')
+
+    @classmethod
+    def light(cls, c):
+        """NFSU2's baked night light (0x80 = 1), brightened: the game adds reflections and glow
+        on top, CTR draws the colours alone."""
+        return np.minimum(128 * cls.BRIGHTNESS * (c / 128.0) ** cls.GAMMA, 255)
+
+    @staticmethod
+    def terrain(name):
+        """The CTR terrain of a texture's floors (0: asphalt)."""
+        return 0
+
     def __init__(self, iso_path):
         game = Nfsu2(iso_path)
         self.stream = game.file('TRACKS\\STREAML4RA.BUN')

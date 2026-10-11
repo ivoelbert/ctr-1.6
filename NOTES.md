@@ -26,7 +26,11 @@ Dust 2 from a Sketchfab model of it, then moved every map to Counter-Strike's ow
     CLUT bits 14-15 scale the UVs by 1-8 before they wrap (the CLUT arrives as a signed short);
     its textures are 64-aligned, CLUT = layer << 8 | (y / 64) << 4 | (x / 64): 59 layers.
     The repeats are sampled with the unwrapped UVs' gradients (`textureGrad`), so the mipmap
-    doesn't jump at the seams.
+    doesn't jump at the seams. A "CTRW" atlas (Vice City) is a "CTRV" one without the 8-texel
+    wrapped border round each texture (with 64-aligned origins a border costs a 128-texel
+    texture a 192-texel slot): the shader filters its repeating textures itself, four
+    `texelFetch` taps wrapped in the texture on each of the two mip levels round the footprint
+    (a power-of-two texture at a 64-aligned origin has mip levels of its own down to one texel).
   - `LOAD_IsCustomLevel`: overridden levels get 2.5 MB of primitive memory and a 64000-word
     clip buffer (everything is visible from everywhere, unlike retail's PVS).
 
@@ -248,6 +252,58 @@ texels. Coplanar merging saves almost nothing on NFSU2's meshes (2%). The 2 m dr
 - 64 CTR units a metre: streets about as wide, to a kart, as Dust 2's.
 - All three run at 60 fps and the autopilot drives each loop round.
 
+## Vice City: Grand Theft Auto: Vice City's city (tools/vicecity/, tools/build_world.py)
+
+From the PS2 disc (NTSC-U, SLUS-20552): plain ISO 9660, the map's text files in `DATA/` and the
+models, textures and collision in `MODELS/GTA3.IMG` (indexed by `GTA3.DIR`: 32-byte entries,
+sector, sector count, name). The shared PS2 parts (the ISO reader, the GS swizzles) are in
+`tools/ps2/`.
+
+- The map: `DATA/GTA_VC.DAT` lists the IDE files (objs: id, model, texture dictionary, ...;
+  tobj: the same shown between two hours) and the IPL files (inst: id, model, interior,
+  position, scale, a quaternion x y z w, applied inverted). Outdoors is interior 0, and 13
+  (everywhere). Left out: the far stand-ins (`LOD...` and the islands' `islandlod...`), the
+  night versions of tobj, the ground shadows (`...shad...` models, see-through `shad` textures:
+  the PS2 multiplies them over the ground, CTR would draw them black). 7,122 placements,
+  2,162 models, 2.3 million triangles; the islands reach x -2458 to 1709, y -2027 to 1896.
+- Models (RenderWare 3.x clumps): frames (3 x 4 matrices, names in extension 0x253F2FE; a
+  model's `_l1` frames are its simpler level of detail, left out), geometries (the native ones,
+  flag 0x01000000, keep their vertices in the Native Data extension 0x510) and atomics. Per
+  mesh (BinMesh 0x50E: a strip or a list, its material) a DMA chain of VIF UNPACKs to the
+  default PS2 pipeline's layout: positions V3_32 at address 0, uvs V2_32 at 1, colours V4_8 at
+  2, normals V3_8 at 3. A strip comes in batches of up to 68 vertices, each starting with the
+  last two of the one before; a list in batches of 60, not overlapping (970 of the 11,597
+  meshes are lists: read as strips they were shards over the buildings). A strip's runs are
+  joined by degenerate triangles, and each run alternates its triangles' turn from its own
+  first. The winding is either way all the same (the PS2 doesn't cull): what's flat is turned
+  to face up, and walls are drawn from both sides (`back_to_back = False`). A few vertices'
+  uvs are junk (NaN, 1e21): they take a neighbour's (one made a tile's build cut a triangle
+  into millions of pieces).
+- Light: the colours are RenderWare's prelight (255 = 1.0); the game adds the hour's ambient
+  for the map (`TIMECYC.DAT`, midday's 125 120 85), up to 1.0. Read as the PS2's 0x80 = 1 they
+  were twice as bright.
+- Textures (dictionaries, 0x16, of native textures, 0x15, platform PS2): the GIF packets
+  that upload each (BITBLTBUF is the game's to choose, so it isn't in them: TRXREG gives the
+  size) and its TEX0. A transfer half the texture's width and height is a swizzled one: 8-bit
+  indices sent as 32-bit pixels, 4-bit as 16-bit (`ps2.gs.write_read`); palettes are 32-bit,
+  256-colour ones in CSM1 order; alpha 0x80 = opaque. The districts' dictionaries share images:
+  a texture is keyed by name and a hash of its pixels, 3,176 in all (7,089 by dictionary).
+- The sea isn't a model: one level, 6 m (`WATER.DAT`), wherever the ground is lower. The world
+  makes it 16 m floors of fast water (`waterclear256` from `PARTICLE.TXD`, tinted with
+  midday's WaterRGBA 90 170 170) in every cell nothing reaches above 6 m, and drops the seabed
+  under them. CTR's height 0 is the sea's (`floor_z`): the engine draws a kart on water only
+  above 0.
+- What `OBJECT.DAT` makes a physics object (under 9,999 kg: lamp posts, bins, benches, signs,
+  hydrants; 1,894 placements) is drawn but not solid (`build_bayview.LOOSE`), as a car knocks
+  them over: they walled off the pavements on the drivable grid.
+- The atlas: the 3,176 textures fit 40 layers borderless at full size (with borders, not even
+  all halved to 64 texels did). `pack_textures` halves the least used first when they don't fit.
+- Tiles: 1.36 million quadblocks, 391 MB, built in under 5 minutes; a dense tile is up to 25
+  MB (Bayview's up to 8), so each of the engine's 25 tile slots grows to the biggest tile it
+  has held instead of all being the biggest's size. The start level keeps 20 m round its loop
+  (the game's memory holds a level of about 30 MB; the tiles take its mesh's place).
+- Ocean Drive's start loop: down Ocean Drive and back up the streets behind it.
+
 ## Tools
 
 - `tools/navgrid.py`: the drivable grid (from the level's own collision data), A*, what's
@@ -275,7 +331,9 @@ Iterating on a report (a P line: `bayview_free 15303,958,8413,2505 level 0 mode 
 - `python3 -I tools/levinfo.py LEV [x,y,z [radius]]`: a built level's terrain, flags, extent and
   instances, or its quadblocks near a spot, without the game.
 - `tools/deps.py`: what each builder runs; play.sh rebuilds a level only when one of those is
-  newer (a fix to the city's builder leaves the Counter-Strike maps alone, and the other way).
+  newer (a fix to the city's builder leaves the Counter-Strike maps alone, and the other way;
+  `--skip` leaves the other city's reader out: a Vice City fix leaves Bayview alone).
+- `START_ONLY=1 python3 -I tools/build_world.py ...` rebuilds a world's start level alone.
 - `ctr.boost(reserves)` gives player 1 a boost (960 a second), for the reserves bar under the
   slide meter (`UI_DrawReservesMeter`, not in the retail game: a full bar is two seconds, more
   stack on in yellow, then white).
@@ -285,6 +343,8 @@ Iterating on a report (a P line: `bayview_free 15303,958,8413,2505 level 0 mode 
 - Bayview: more of the city (the downtown towers, the airport, Beacon Hill) as more loops; the
   panoramas as a skyline that doesn't collide; the glows and light shafts (additive); the decal
   textures (soft alpha) are drawn alpha-tested.
+- Vice City: the hours (the night versions, the lit windows), the cars, the interiors; some
+  facades show their recesses black where the game's look lighter.
 
 - Races, the same way for every map: a loop through landmarks, Time Trial, CTR's own menus with
   the maps in retail tracks' places. (Dust 2 had two loops from its model: long A, CT spawn,

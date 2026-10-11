@@ -1,6 +1,7 @@
 """The PS2 GS's local memory layouts (pages, blocks and columns per pixel format).
 
-The GS swizzles a texture as it stores it. NFSU2's texture packs hold the bytes as they lie in
+The GS swizzles a texture as it stores it. NFSU2's texture packs (and Vice City's textures,
+sent the same way) hold the bytes as they lie in
 GS memory after uploading 8-bit textures as 32-bit pixels and 4-bit ones as 16-bit pixels:
 write_read stores them back that way and reads them out as 8- or 4-bit indices.
 """
@@ -80,3 +81,13 @@ def write_read(data, wfmt, ww, wh, wbw, rfmt, w, h, rbw):
     a4 = np.minimum(addr4(xx, yy, rbw), mem.size * 2 - 1)
     byte = mem[a4 >> 1]
     return np.where(a4 & 1, byte >> 4, byte & 15).astype(np.uint8)
+
+
+def csm1(pal):
+    """256-colour palettes as the GS stores them (CSM1): entries 8-15 and 16-23 of each 32
+    swapped."""
+    if len(pal) != 256:
+        return pal
+    p = pal.reshape(8, 4, 8, 4).copy()
+    p[:, [1, 2]] = p[:, [2, 1]]
+    return p.reshape(256, 4)
