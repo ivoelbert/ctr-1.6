@@ -656,7 +656,9 @@ def main(iso, disc, outdir, area='citycore', world=None, name=None, center=None,
     tris = make_tris(world, groups, rects, cutouts, near)
     tri_near = lambda t: near(t.p)   # noqa: E731
     ramps = []
-    track.add_stair_ramps(tris, ramps)
+    track.add_stair_ramps(tris, ramps, unit=getattr(world, "stair_unit", None) or 1.0,
+                          floor_tol=getattr(world, "stair_floor_tol", None), floor_nz=getattr(world, "stair_floor_nz", None),
+                          either_way=getattr(world, "stair_unit", None) is not None and not getattr(world, "back_to_back", True))
     edge_walls(open_edges, ramps)
     polygons = track.level_polygons(tris, tri_near)
     out = track.emit_level(tris, ramps, near=tri_near, polygons=polygons)

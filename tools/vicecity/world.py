@@ -196,6 +196,10 @@ class ViceCity:
     floor_z = SEA_LEVEL
     double_sided_floors = True
     back_to_back = False    # the models' faces turn either way: every wall drawn from both sides
+    stair_unit = 0.0254     # metres an inch: ramps over the kerbs and steps (tools/stairs.py's sizes)
+    # its kerbs reach a few centimetres under the road, its pavements slope to drain: a step's
+    # floors within 6 inches of its riser's ends, up to 14 degrees off flat
+    stair_floor_tol, stair_floor_nz = 6.0, 0.97
 
     @staticmethod
     def is_road(name):
