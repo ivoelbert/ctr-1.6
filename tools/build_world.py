@@ -11,10 +11,18 @@ starts as an area of tools/build_bayview.py (its start, respawns, minimap and th
 WORLD_free.lev and its modes), built in the world's coordinates with the world's atlas; its own
 mesh gives way to the tiles. OUTDIR/WORLD_tiles/index.bin lists the tiles.
 
+    AROUND='bayview_free 15303,958,8413,2505 ...' python3 -I tools/build_world.py ...   (a P line)
+
+rebuilds just the tiles round there (AROUND_TILES out: 1, the 3 x 3; 0, the one) in a world
+built whole before with the same textures, and patches its index and minimap: seconds, not the
+whole city's minutes. TILES_ONLY=1 rebuilds every tile but not the start level.
+
 The level holds data from both discs: keep it to yourself.
 """
+import hashlib
 import json
 import os
+import re
 import struct
 import sys
 import time
@@ -147,6 +155,13 @@ def world_map(done, i0, j0, i1, j1, size, center):
 def main(iso, disc, outdir, name='bayview'):
     t_start = time.time()
     cfg = WORLDS[name]
+    # AROUND: a P line, or its x,y,z
+    around = os.environ.get('AROUND')
+    if around:
+        found = re.search(r'(-?\d+),(-?\d+),(-?\d+)', around)
+        if not found:
+            sys.exit(f'build_world: AROUND={around!r} has no x,y,z')
+        around = tuple(int(v) for v in found.groups())
     world = Bayview(iso)
     world.low_detail = False
     x0, y0, x1, y1 = cfg['bounds']
@@ -164,8 +179,15 @@ def main(iso, disc, outdir, name='bayview'):
     print(f'{len(rects)} textures in {len(layers)} atlas layers')
     del groups
 
-    # the starting level, in the world's coordinates, with the world's atlas
-    if os.environ.get('TILES_ONLY') != '1':
+    # the atlas the tiles' texture coordinates point into: a rebuild of some tiles needs the same
+    atlas_id = hashlib.sha1(json.dumps(sorted((str(h), list(r)) for h, r in rects.items())).encode()).hexdigest()[:16]
+    meta_path = os.path.join(outdir, f'{name}.json')
+    if around:
+        meta = json.load(open(meta_path)) if os.path.exists(meta_path) else {}
+        if meta.get('world', {}).get('atlas') != atlas_id:
+            sys.exit(f'build_world: {name} was built with other textures (or not at all): build all of it, without AROUND')
+    elif os.environ.get('TILES_ONLY') != '1':
+        # the starting level, in the world's coordinates, with the world's atlas
         bb.main(iso, disc, outdir, cfg['start'], world=world, name=name, center=center, floor_z=floor_z,
                 atlas=(rects, layers), quick=True)
     # the tiles, in track's settings as the start level leaves them (the world's centre and floor)
@@ -181,46 +203,75 @@ def main(iso, disc, outdir, name='bayview'):
     j0 = int(np.ceil((-(y1 - center[1]) * bb.SCALE - half) / size))
     j1 = int(np.floor((-(y0 - center[1]) * bb.SCALE + half) / size))
     cells = [(i, j) for j in range(j0, j1 + 1) for i in range(i0, i1 + 1)]
-    print(f'{len(cells)} tiles to look at ({i1 - i0 + 1} x {j1 - j0 + 1})', flush=True)
+    if around:
+        # a P line's position (the world's coordinates): its tile and those AROUND_TILES round it
+        x, _, z = around
+        reach = int(os.environ.get('AROUND_TILES', 1))
+        ci, cj = int(np.floor((x + half) / size)), int(np.floor((z + half) / size))
+        cells = [(i, j) for i, j in cells if abs(i - ci) <= reach and abs(j - cj) <= reach]
+        print(f'{len(cells)} tiles round {ci},{cj}', flush=True)
+    else:
+        print(f'{len(cells)} tiles to look at ({i1 - i0 + 1} x {j1 - j0 + 1})', flush=True)
     _JOB.update(world=world, rects=rects, cutouts=cutouts, center=center, size=size, tile_dir=tile_dir)
-    workers = int(os.environ.get('WORKERS', 6))
+    workers = min(int(os.environ.get('WORKERS', 6)), len(cells))
     if workers > 1:
         import multiprocessing
         with multiprocessing.get_context('fork').Pool(workers) as pool:
             done = pool.map(build_tile, cells, chunksize=1)
     else:
         done = [build_tile(c) for c in cells]
-    index = [d[:3] for d in done if d is not None]
+    index_path, map_path = os.path.join(tile_dir, 'index.bin'), os.path.join(tile_dir, 'map.bin')
+    # index.bin: 'WRLD', tile size (units), count, then per tile (i, j) s16 and its file's bytes
+    sizes = {}
+    if around:
+        raw = open(index_path, 'rb').read()
+        for k in range(struct.unpack_from('<i', raw, 8)[0]):
+            i, j, n = struct.unpack_from('<hhI', raw, 12 + 8 * k)
+            sizes[i, j] = n
+        for c in cells:
+            sizes.pop(c, None)
+            path = os.path.join(tile_dir, f'T_{c[0]}_{c[1]}.lev')
+            if os.path.exists(path) and not any(d is not None and d[:2] == c for d in done):
+                os.remove(path)  # empty now
+    sizes.update({(d[0], d[1]): d[2] for d in done if d is not None})
+    index = sorted(sizes.items(), key=lambda e: (e[0][1], e[0][0]))
+    with open(index_path, 'wb') as f:
+        f.write(struct.pack('<4sii', b'WRLD', size, len(index)))
+        for (i, j), n in index:
+            f.write(struct.pack('<hhI', i, j, n))
     # map.bin: 'WMAP', units a texel, the corner texel (0, 0) starts at (x, z), width, height,
     # then a byte a texel (the minimap's two-bit values), rows along z
-    grid = world_map(done, i0, j0, i1, j1, size, center)
-    with open(os.path.join(tile_dir, 'map.bin'), 'wb') as f:
-        f.write(struct.pack('<4siiiii', b'WMAP', int(MAP_TEXEL * bb.SCALE), i0 * size - size // 2, j0 * size - size // 2,
-                            grid.shape[1], grid.shape[0]))
+    if around:
+        raw = open(map_path, 'rb').read()
+        _, unit, mx, mz, w, h = struct.unpack_from('<4siiiii', raw, 0)
+        grid = np.frombuffer(raw, np.uint8, w * h, 24).reshape(h, w).copy()
+        for c in cells:
+            block = world_map([d for d in done if d is not None and d[:2] == c], c[0], c[1], c[0], c[1], size, center)
+            r0, c0 = (c[1] * size - half - mz) // unit, (c[0] * size - half - mx) // unit
+            grid[r0:r0 + block.shape[0], c0:c0 + block.shape[1]] = block
+    else:
+        grid = world_map(done, i0, j0, i1, j1, size, center)
+        unit, mx, mz = int(MAP_TEXEL * bb.SCALE), i0 * size - half, j0 * size - half
+    with open(map_path, 'wb') as f:
+        f.write(struct.pack('<4siiiii', b'WMAP', unit, mx, mz, grid.shape[1], grid.shape[0]))
         f.write(grid.tobytes())
     from PIL import Image
     Image.fromarray((grid * 80).astype(np.uint8)).save(os.path.join(outdir, '.tools', f'{name}_map.png'))
     print(f'map: {grid.shape[1]} x {grid.shape[0]} texels of {MAP_TEXEL:.0f} m')
-    # index.bin: 'WRLD', tile size (units), count, then per tile (i, j) s16 and its file's bytes
-    with open(os.path.join(tile_dir, 'index.bin'), 'wb') as f:
-        f.write(struct.pack('<4sii', b'WRLD', size, len(index)))
-        for i, j, n in index:
-            f.write(struct.pack('<hhI', i, j, n))
-    meta_path = os.path.join(outdir, f'{name}.json')
     meta = json.load(open(meta_path))
-    meta['world'] = dict(tiles=f'{name}_tiles', tile=size, count=len(index))
+    meta['world'] = dict(tiles=f'{name}_tiles', tile=size, count=len(index), atlas=atlas_id)
     with open(meta_path, 'w') as f:
         json.dump(meta, f, indent=1)
-    listing = os.path.join(outdir, 'maps.json')
-    built = json.load(open(listing))
-    built[name] = cfg['title']
-    for area in bb.AREAS:  # the city holds them all: their own levels leave the list
-        built.pop(area, None)
-    with open(listing, 'w') as f:
-        json.dump(dict(sorted(built.items())), f, indent=1)
-    print(f'{len(index)} tiles, {sum(d[3] for d in done if d) } quadblocks, {sum(d[2] for d in done if d) >> 20} MB; '
-          f'built in {time.time() - t_start:.0f} s')
-
+    if not around:
+        listing = os.path.join(outdir, 'maps.json')
+        built = json.load(open(listing))
+        built[name] = cfg['title']
+        for area in bb.AREAS:  # the city holds them all: their own levels leave the list
+            built.pop(area, None)
+        with open(listing, 'w') as f:
+            json.dump(dict(sorted(built.items())), f, indent=1)
+    print(f'{len(cells)} tiles looked at ({sum(1 for d in done if d)} with something in them), {sum(d[3] for d in done if d)} quadblocks, '
+          f'{sum(d[2] for d in done if d) >> 20} MB; {len(index)} in the world; built in {time.time() - t_start:.0f} s')
 
 if __name__ == '__main__':
     main(*sys.argv[1:5])

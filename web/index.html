@@ -215,6 +215,26 @@
       hold(...names) { Module._NativeWeb_SetButtons(names.reduce((m, n) => m | (BUTTONS[n] ?? n), 0)); },
       release() { Module._NativeWeb_SetButtons(0); },
       teleport(x, y, z, angle = 0) { Module._NativeWeb_Teleport(x | 0, y | 0, z | 0, angle | 0); },
+      // teleport by the world's coordinates (where()'s): in a world, a window at a time (from
+      // high up, while its tiles load) until the spot is in the one round the kart
+      async goto(x, y, z, angle = 0) {
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+        const clamp = (v) => Math.max(-11000, Math.min(11000, v));
+        for (let tries = 0; tries < 60; tries++) {
+          const o = window.ctr.origin();
+          if (Math.abs(x - o[0]) < 12000 && Math.abs(z - o[2]) < 12000) {
+            for (let k = 0; k < 3; k++) {
+              const p = window.ctr.origin();
+              window.ctr.teleport(x - p[0], y - p[1], z - p[2], angle);
+              await wait(250);
+            }
+            return true;
+          }
+          window.ctr.teleport(clamp(x - o[0]), 6000, clamp(z - o[2]), 0);
+          await wait(700);
+        }
+        return false;
+      },
       turbo(on) { Module.ctrTurbo = !!on; },
       // where player 1 is: "track x,y,z,angle level N mode M", for bug reports (P copies it)
       where() {

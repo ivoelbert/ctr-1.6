@@ -32,8 +32,16 @@ command -v node >/dev/null || die "needs Node.js (https://nodejs.org)"
 command -v python3 >/dev/null || die "needs Python 3"
 python3 -I -c 'import numpy, PIL' 2>/dev/null || die "needs numpy and Pillow: python3 -m pip install numpy pillow"
 
+# newer TARGET FILE...: is one of the files newer than TARGET?
+newer() {
+  local target="$1"; shift
+  for f in "$@"; do [ "$f" -nt "$target" ] && return 0; done
+  return 1
+}
+
 # Each map in tools/maps/ that the install has, when its level is missing or older than the
-# tools that write it.
+# tools that write it (tools/deps.py: the files build_map.py runs).
+MAP_DEPS="$(python3 -I tools/deps.py tools/build_map.py) tools/maps/__init__.py"
 for cfg in tools/maps/de_*.py tools/maps/cs_*.py; do
   [ -f "$cfg" ] || continue
   map="$(basename "$cfg" .py)"
@@ -42,7 +50,8 @@ for cfg in tools/maps/de_*.py tools/maps/cs_*.py; do
     continue
   fi
   lev="$ROOT/build/lev/${map#*_}_free.lev"
-  if [ ! -f "$lev" ] || [ "$cfg" -nt "$lev" ] || [ -n "$(find tools -maxdepth 1 -name '*.py' -newer "$lev" | head -1)" ]; then
+  # shellcheck disable=SC2086
+  if [ ! -f "$lev" ] || newer "$lev" "$cfg" $MAP_DEPS; then
     echo "Building $map from Counter-Strike's map file (a minute or two)..."
     python3 -I tools/build_map.py "$map" "$CSTRIKE" "$DISC" "$ROOT/build/lev"
   fi
@@ -52,7 +61,8 @@ done
 # as you drive (about 650 MB).
 if [ -f "$NFSU2_ISO" ]; then
   index="$ROOT/build/lev/bayview_tiles/index.bin"
-  if [ ! -f "$index" ] || [ -n "$(find tools -maxdepth 2 -name '*.py' -newer "$index" | head -1)" ]; then
+  # shellcheck disable=SC2086
+  if [ ! -f "$index" ] || newer "$index" $(python3 -I tools/deps.py tools/build_world.py); then
     echo "Building Bayview from Need for Speed: Underground 2 (five to ten minutes)..."
     python3 -I tools/build_world.py "$NFSU2_ISO" "$DISC" "$ROOT/build/lev" bayview
   fi

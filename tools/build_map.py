@@ -16,7 +16,6 @@ import collections
 import importlib
 import io
 import json
-import math
 import os
 import sys
 import time
@@ -40,11 +39,6 @@ ENTITY_KINDS = {'worldspawn': 'solid', 'func_wall': 'solid', 'func_breakable': '
 TERRAIN_WATER = 13
 WATER_BRIGHTNESS = 4.0
 DENSITY_WATER = 0.15    # water textures are small, uniform tiles
-# Floors the kart can get near are cut along the floor grid (a map's FLOOR_CELL), others (roofs,
-# ledges no one reaches) stay whole: near is within NEAR_XZ CTR units of a drivable cell the
-# kart can reach, and within NEAR_Y of its height.
-NEAR_XZ = 1024.0
-NEAR_Y = 640.0
 
 
 def wads_for(bsp_data, cstrike):
@@ -174,7 +168,7 @@ def make_tris(bsp, sel, charts, cfg, near=None):
             if pts is None:
                 continue
         floor = n[2] > 0.7
-        pieces = floor_cells(pts) if floor and (near is None or near(track.to_ctr(pts))) else [pts]
+        pieces = track.floor_cells(pts) if floor and (near is None or near(track.to_ctr(pts))) else [pts]
         solid = [kind != 'decor'] * len(pieces)
         if kind != 'decor' and split_face is not None:
             pieces, solid = split_face(pts, n) or (pieces, solid)
@@ -196,36 +190,6 @@ def make_tris(bsp, sel, charts, cfg, near=None):
                 tris.append(t)
     print(f'{len(tris)} triangles')
     return tris
-
-
-def floor_cells(pts):
-    """A floor polygon (map units) cut along the floor grid (track.FLOOR_CELL in CTR space, so the
-    same lines as track.grid_cut_floors): whole cells come out as single quads, so the pipeline's
-    pairing turns them back into one quadblock each, where cutting triangles one by one splits
-    every cell their diagonal crosses."""
-    step = track.FLOOR_CELL / track.SCALE
-    polys = [np.asarray(pts, dtype=np.float64)]
-    # CTR x = (x - cx) * scale, CTR z = -(y - cy) * scale: grid lines at x = cx + k * step and
-    # y = cy - k * step
-    for axis, base in ((0, track.CENTER[0]), (1, track.CENTER[1])):
-        done = []
-        for poly in polys:
-            lo = math.floor((poly[:, axis].min() - base) / step)
-            hi = math.ceil((poly[:, axis].max() - base) / step)
-            rest = poly
-            for k in range(lo + 1, hi):
-                c = base + k * step
-                below = goldsrc.clip_polygon(rest, axis, c, True)
-                above = goldsrc.clip_polygon(rest, axis, c, False)
-                if below is not None:
-                    done.append(below)
-                rest = above
-                if rest is None:
-                    break
-            if rest is not None:
-                done.append(rest)
-        polys = done
-    return polys
 
 
 def spawn_landmarks(bsp):
@@ -251,28 +215,6 @@ def landmark_positions(tris, landmarks):
         y = track.floor_height(tris, x, z, top)
         out[name] = [int(x), None if y is None else int(y), int(z), track.heading(deg)]
     return out
-
-
-def near_drivable(g, start):
-    """near(points (n, 3), CTR space): is a polygon within reach of a grid cell the kart can
-    drive to from `start`?"""
-    cell = NEAR_XZ
-    buckets = {}
-    for nid in g.reachable(start):
-        x, y, z = g.pos[nid]
-        buckets.setdefault((int(x // cell), int(z // cell)), []).append((x, y, z))
-
-    def near(p):
-        lo, hi = p.min(axis=0), p.max(axis=0)
-        for cx in range(int((lo[0] - cell) // cell), int((hi[0] + cell) // cell) + 1):
-            for cz in range(int((lo[2] - cell) // cell), int((hi[2] + cell) // cell) + 1):
-                for (x, y, z) in buckets.get((cx, cz), ()):
-                    dx = max(lo[0] - x, 0.0, x - hi[0])
-                    dz = max(lo[2] - z, 0.0, z - hi[2])
-                    if dx * dx + dz * dz <= cell * cell and lo[1] - NEAR_Y <= y <= hi[1] + NEAR_Y:
-                        return True
-        return False
-    return near
 
 
 def main(map_name, cstrike, disc, outdir):
@@ -311,7 +253,7 @@ def main(map_name, cstrike, disc, outdir):
     g = NavGrid([(q.flags, q.pos, q.triangle) for q in track.emit_level(tris, ramps)])
     landmarks = landmark_positions(tris, landmarks_h)
     s = landmarks[free_route[0]]
-    near = near_drivable(g, g.nearest(s[0], s[1] or 0, s[2]))
+    near = track.near_drivable(g, g.nearest(s[0], s[1] or 0, s[2]))
     tris = make_tris(bsp, sel, charts, cfg, near)
     tri_near = lambda t: near(t.p)   # noqa: E731 (the floor grid: leave the far floors whole)
     ramps = []
