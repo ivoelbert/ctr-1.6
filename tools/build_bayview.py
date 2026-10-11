@@ -636,7 +636,7 @@ def main(iso, disc, outdir, area='citycore', world=None, name=None, center=None,
     track.light_maps = None
 
     # the route: through the waypoints and back to the first, on the drivable grid
-    cutouts = {h for h in groups if is_cutout(world.textures[h].rgba) and not world.textures[h].name.startswith(world.ground_textures)}
+    cutouts = {h for h in groups if getattr(world, 'is_cutout', is_cutout)(world.textures[h].rgba) and not world.textures[h].name.startswith(world.ground_textures)}
     route = find_route(world, groups, cutouts, cfg, os.path.join(outdir, '.tools', f'{area}_route.json'))
     length = float(np.sum(np.linalg.norm(np.diff(route[:, :2], axis=0), axis=1)))
     print(f'route: {len(wps)} waypoints, {length:.0f} m round')

@@ -319,6 +319,15 @@ sector, sector count, name). The shared PS2 parts (the ISO reader, the GS swizzl
   line taken from its faces (`EXACT`: rebuilt from the rounded normal times its offset, 460 m
   from the origin, it landed metres off the stairs). A step's ramp starts a tread out; a kart
   with a run-up takes Ocean Drive's 27-step staircase and the hotels' front steps.
+- The generic dictionary is `MODELS/GENERIC.TXD` (40 textures, loaded at start), not
+  GTA3.IMG's generic.txd (10 of them): pavements, verges and medians all over the city used the
+  other 30, and were left out (holes the size of a median strip).
+- Cut-outs: a texture with a clearly see-through part and a clearly solid one (a tenth or more
+  each), whatever's between (the palms' soft edges failed `build_bayview.is_cutout` and were drawn
+  solid, black round the fronds); glass, see-through all over, is drawn solid.
+- Buried walls: foundations and kerb skirts hanging under the street, their top edge level with
+  a floor on either side (`buried_walls`), are drawn but not solid (LOOSE): the top edge caught
+  a kart driving over it, an invisible wall.
 - What `OBJECT.DAT` makes a physics object (under 9,999 kg: lamp posts, bins, benches, signs,
   hydrants; 1,894 placements) is drawn but not solid (`build_bayview.LOOSE`), as a car knocks
   them over: they walled off the pavements on the drivable grid.

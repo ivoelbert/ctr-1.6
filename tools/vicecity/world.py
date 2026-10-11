@@ -9,7 +9,7 @@ noon), the islands' own stand-ins (islandlod...) and the shadows the PS2 lays ov
 (models named ...shad..., and see-through textures named so: CTR would draw them black), and
 the other overlays the game blends (blended_overlay: grime, shade, tyre tracks). What
 OBJECT.DAT makes a physics object (lamp posts, bins, benches, signs) is LOOSE. A
-model's textures are in its own dictionary, else in generic.txd.
+model's textures are in its own dictionary, else in the generic one (MODELS/GENERIC.TXD).
 
 The sea is the game's own, not a model: one level, 6 m (DATA/WATER.DAT), everywhere the
 ground is lower. It is made here as square floors (WATER_CELL metres) with waterclear256 from
@@ -167,6 +167,59 @@ def lift_layers(parts, owners, boxes):
     return out
 
 
+BURIED_CELL = 1.0       # metres: the floors' grid the buried walls are looked for on
+BURIED_TOP = 0.08       # a wall whose top is within this of the floor on both sides is buried
+
+
+def buried_walls(P, floor):
+    """Which walls (of triangles P, (m, 3, 3); floor: which are floors) are under the ground: a
+    foundation or a kerb's skirt hanging under the street, its top edge level with a floor on
+    either side of it. Solid, its top edge caught a kart driving over it."""
+    cells = {}
+    F = P[floor]
+    for f, tri in enumerate(F):
+        lo, hi = np.floor(tri[:, :2].min(axis=0) / BURIED_CELL).astype(int), np.floor(tri[:, :2].max(axis=0) / BURIED_CELL).astype(int)
+        if (hi - lo).max() > 64:
+            continue
+        for i in range(lo[0], hi[0] + 1):
+            for j in range(lo[1], hi[1] + 1):
+                cells.setdefault((i, j), []).append(f)
+
+    def floor_near(q, top):
+        """A floor triangle over point q (x, y) within BURIED_TOP of height top."""
+        for f in cells.get(tuple(np.floor(q / BURIED_CELL).astype(int)), ()):
+            a, b, c = F[f]
+            v0, v1, d = b[:2] - a[:2], c[:2] - a[:2], q - a[:2]
+            den = v0[0] * v1[1] - v0[1] * v1[0]
+            if abs(den) < 1e-12:
+                continue
+            u = (d[0] * v1[1] - d[1] * v1[0]) / den
+            v = (v0[0] * d[1] - v0[1] * d[0]) / den
+            if u < -1e-6 or v < -1e-6 or u + v > 1 + 1e-6:
+                continue
+            h = a[2] + u * (b[2] - a[2]) + v * (c[2] - a[2])
+            if abs(h - top) <= BURIED_TOP:
+                return True
+        return False
+
+    out = np.zeros(len(P), bool)
+    for k in np.nonzero(~floor)[0]:
+        tri = P[k]
+        top = tri[:, 2].max()
+        if top - tri[:, 2].min() < 0.05:
+            continue
+        a, b = tri[np.argsort(tri[:, 2])[1:]]       # the top edge
+        if b[2] - a[2] > 0.05:
+            continue                                # a slanted top: not lying along a floor
+        mid = (a + b) / 2
+        e = (b - a)[:2]
+        if np.linalg.norm(e) < 1e-6:
+            continue
+        side = np.array([-e[1], e[0]]) / np.linalg.norm(e) * 0.3
+        out[k] = floor_near(mid[:2] + side, top) and floor_near(mid[:2] - side, top)
+    return out
+
+
 def skipped_model(name):
     return name.startswith(('lod', 'islandlod')) or 'shad' in name
 
@@ -216,6 +269,14 @@ class ViceCity:
     def light(c):
         """The colours as the game lights them at noon (see triangles), 0x80 = 1."""
         return np.minimum(c, 255)
+
+    @staticmethod
+    def is_cutout(rgba):
+        """A see-through texture drawn alpha-tested (leaves, fences): a clearly see-through part
+        and a clearly solid one, each a tenth of it or more, whatever's in between (the palms'
+        soft edges). Glass, see-through all over, is drawn solid."""
+        a = rgba[..., 3]
+        return (a < 64).mean() > 0.1 and (a >= 192).mean() > 0.1
 
     @staticmethod
     def terrain(name):
@@ -278,6 +339,11 @@ class ViceCity:
     def txd(self, name):
         if name not in self._txds:
             self._txds[name] = rw.read_txd(self.disc.file(name + '.txd')) if self.disc.has(name + '.txd') else {}
+            if name == 'generic':
+                # the game's generic dictionary is MODELS/GENERIC.TXD, loaded at start (40
+                # textures: the pavements, verges and dirt many districts' roads use); GTA3.IMG's
+                # generic.txd holds 10 of them
+                self._txds[name] = {**self._txds[name], **rw.read_txd(self.disc.text_bytes('MODELS/GENERIC.TXD'))}
         return self._txds[name]
 
     def texture_key(self, txd, tex):
@@ -428,14 +494,22 @@ class ViceCity:
         out = {}
         if pieces:
             lift = lift_layers([p[1] for p in pieces], [(p[6], p[7]) for p in pieces], b)
+            # the walls under the ground: drawn, not solid (LOOSE)
+            allP = np.concatenate([p[1] for p in pieces])
+            n = np.cross(allP[:, 1] - allP[:, 0], allP[:, 2] - allP[:, 0])
+            floor = n[:, 2] > 0.7 * np.linalg.norm(n, axis=1)
+            buried = buried_walls(allP, floor)
+            at = 0
             for (key, P, T, C, kind, inside, k, mi), dp in zip(pieces, lift):
+                under = buried[at:at + len(P)]
+                at += len(P)
                 if not inside.any():
                     continue
                 lst = out.setdefault(key, ([], [], [], []))
                 lst[0].append((P + dp[:, None, :])[inside])
                 lst[1].append(T[inside])
                 lst[2].append(C[inside])
-                lst[3].append(np.full(int(inside.sum()), kind))
+                lst[3].append(np.where(under[inside], kind | LOOSE, kind))
         P, uv, col = self.water(bounds)
         if len(P):
             if WATER_TEXTURE not in self.textures:
