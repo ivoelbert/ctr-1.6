@@ -276,6 +276,9 @@ Iterating on a report (a P line: `bayview_free 15303,958,8413,2505 level 0 mode 
   instances, or its quadblocks near a spot, without the game.
 - `tools/deps.py`: what each builder runs; play.sh rebuilds a level only when one of those is
   newer (a fix to the city's builder leaves the Counter-Strike maps alone, and the other way).
+- `ctr.boost(reserves)` gives player 1 a boost (960 a second), for the reserves bar under the
+  slide meter (`UI_DrawReservesMeter`, not in the retail game: a full bar is two seconds, more
+  stack on in yellow, then white).
 
 ## Left to do
 
