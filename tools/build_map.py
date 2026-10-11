@@ -34,9 +34,10 @@ SCALE = 4.0             # CTR units per map unit
 ENTITY_KINDS = {'worldspawn': 'solid', 'func_wall': 'solid', 'func_breakable': 'solid',
                 'func_illusionary': 'decor', 'func_water': 'water'}
 # Water: Counter-Strike swims in it; CTR drives on shallow water (Papu's Pyramid), so a water
-# surface is a floor with the water terrain (70% speed, the water sound), drawn with the water
-# texture brightened (GoldSrc draws it fullbright and see-through over the bottom).
-TERRAIN_WATER = 4
+# surface is a floor with the fast-water terrain (the water's sound and the kart half under, at
+# full speed: plain water is 70%), drawn with the water texture brightened (GoldSrc draws it
+# fullbright and see-through over the bottom).
+TERRAIN_WATER = 13
 WATER_BRIGHTNESS = 4.0
 DENSITY_WATER = 0.15    # water textures are small, uniform tiles
 # Floors the kart can get near are cut along the floor grid (a map's FLOOR_CELL), others (roofs,

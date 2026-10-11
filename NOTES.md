@@ -160,8 +160,8 @@ in place of the canyon's.
   the map file keeps only in its collision hulls (planes, no faces; a point probe of hull 1
   shows where). A map's module lays its own invisible floors and walls there (extra_quads).
 - Water: the engine draws a kart on water/mud terrain only above y 0 (half sunk), so a map with
-  water is shifted so its surface is at y 0, and the surface is a floor with the water terrain
-  (70% speed, the water sound). A liquid brush is drawn from both sides: only each one's top
+  water is shifted so its surface is at y 0, and the surface is a floor with the fast-water
+  terrain (the water sound at full speed; plain water is 70%). A liquid brush is drawn from both sides: only each one's top
   is the water floor (its inside-out bottom painted over the real one everywhere). Everything
   under the surface is clipped off: never seen, and painted after it (out of order) it showed.
 - Spawns: free drive starts in the middle of the T spawn points, facing the way most of them
