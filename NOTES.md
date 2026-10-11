@@ -31,8 +31,9 @@ Dust 2 from a Sketchfab model of it, then moved every map to Counter-Strike's ow
     texture a 192-texel slot): the shader filters its repeating textures itself, four
     `texelFetch` taps wrapped in the texture on each of the two mip levels round the footprint
     (a power-of-two texture at a 64-aligned origin has mip levels of its own down to one texel).
-  - `LOAD_IsCustomLevel`: overridden levels get 2.5 MB of primitive memory and a 64000-word
-    clip buffer (everything is visible from everywhere, unlike retail's PVS).
+  - `LOAD_IsCustomLevel`: overridden levels get 2.5 MB of primitive memory and a 256,000-word
+    clip buffer (64,000 ran out on Vice City's big floors near the camera: the faces past the
+    end were left out, chunks of road gone for a frame) (everything is visible from everywhere, unlike retail's PVS).
 
 - The level has no depth buffer (painter's algorithm). Each face goes into an ordering-table
   slot by its farthest corner's depth >> 6 (plus its draw-order byte); a face subdivided near
@@ -298,6 +299,15 @@ sector, sector count, name). The shared PS2 parts (the ISO reader, the GS swizzl
   or all but invisible (`blended_overlay`), they're left out. CTR doesn't blend a level's faces,
   so they were solid black wedges under the balconies (the depth buffer put them in front;
   painted in CTR's order the walls mostly hid them).
+- Layers: the models lay trim, signs and window frames on their walls in the same plane (or a
+  centimetre off, which CTR's 1.6 cm units round away), and the PS2 draws them after: with the
+  depth buffer they fought, and flickered as the camera moved. `lift_layers` lifts each face
+  that lies on another (the later mesh of a model, or the smaller model's) 5 cm per layer, away
+  from the lower one's model, or up.
+- The backdrop under the horizon (`clear_colors`' second: `CAM_ClearScreen` paints the first
+  above the camera's horizon and the second under it, the third isn't used) is a grey between
+  the roads' and the sea's: the hairline cracks between the models' pieces showed it, bright
+  sky blue, all along the roads.
 - What `OBJECT.DAT` makes a physics object (under 9,999 kg: lamp posts, bins, benches, signs,
   hydrants; 1,894 placements) is drawn but not solid (`build_bayview.LOOSE`), as a car knocks
   them over: they walled off the pavements on the drivable grid.

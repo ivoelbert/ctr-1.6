@@ -3,10 +3,11 @@
 int MainDB_GetClipSize(u32 levelID, int numPlyrCurrGame)
 {
 #if defined(CTR_NATIVE)
-	// NOTE(ctr-dust2): see LOAD_IsCustomLevel.
+	// NOTE(ctr-dust2): see LOAD_IsCustomLevel. A city's big floors near the camera fill
+	// 64000 words: the faces past the end were left out (chunks of road gone for a frame).
 	if (LOAD_IsCustomLevel(levelID))
 	{
-		return 64000;
+		return 256000;
 	}
 #endif
 

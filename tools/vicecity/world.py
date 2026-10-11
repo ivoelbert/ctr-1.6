@@ -77,6 +77,96 @@ def blended_overlay(name, rgba):
     return soft > 0.3 and (a.mean() < 64 or rgba[..., :3].mean() < 12)
 
 
+LAYER_GAP = 0.04        # metres: faces this close in the same plane are layers of each other
+LAYER_LIFT = 0.05       # and the upper ones go this far off, per layer (CTR's unit is 1.6 cm)
+LAYER_MARGIN = 2.0      # metres round the bounds looked at for what's under a face
+LAYER_CELL = 8.0        # metres: the squares a plane's triangles are compared within
+
+
+def lift_layers(parts, owners, boxes):
+    """The game lays details on its faces in the same plane (trim, signs, window frames over a
+    wall) and draws them after, so they win; with a depth buffer two faces in one plane fight,
+    and flicker as the camera moves. For each part's triangles (parts: (m, 3, 3) arrays, owners:
+    their (instance, mesh)), the offset that lifts the upper of each such pair off the lower:
+    LAYER_LIFT for each layer under it, away from the lower one's model (its box's middle) or
+    up. Upper: the later mesh in one model (drawn later), else the smaller model's (a sign on a
+    building)."""
+    P = np.concatenate(parts)
+    owner = np.concatenate([np.full((len(p), 2), o) for p, o in zip(parts, owners)])
+    n = np.cross(P[:, 1] - P[:, 0], P[:, 2] - P[:, 0])
+    ln = np.linalg.norm(n, axis=1)
+    ok = ln > 1e-4
+    n = n / np.maximum(ln, 1e-12)[:, None]
+    n *= np.sign(n[np.arange(len(n)), np.abs(n).argmax(axis=1)])[:, None]
+    d = (n * P[:, 0]).sum(axis=1)
+    box = boxes[owner[:, 0]]
+    size = np.maximum(box[:, 2] - box[:, 0], box[:, 3] - box[:, 1])
+    middle = np.stack([(box[:, 0] + box[:, 2]) / 2, (box[:, 1] + box[:, 3]) / 2], axis=1)
+    groups = {}
+    for i in np.nonzero(ok)[0]:
+        groups.setdefault(tuple(np.round(n[i] * 50).astype(int)), []).append(i)
+    under = {}          # triangle: the owners of the faces it lies on
+    for g, idx in groups.items():
+        if len(idx) < 2:
+            continue
+        idx = np.array(idx)
+        idx = idx[np.argsort(d[idx])]
+        # the plane's own axes: its triangles' extents in it
+        nn = n[idx[0]]
+        u = np.cross(nn, [0.0, 0.0, 1.0] if abs(nn[2]) < 0.9 else [1.0, 0.0, 0.0])
+        u /= np.linalg.norm(u)
+        v = np.cross(nn, u)
+        Q = P[idx]
+        qu, qv = Q @ u, Q @ v
+        lo = np.stack([qu.min(axis=1), qv.min(axis=1)], axis=1)
+        hi = np.stack([qu.max(axis=1), qv.max(axis=1)], axis=1)
+        dd = d[idx]
+        # the plane's triangles by LAYER_CELL squares of it: only those sharing one are compared
+        cells = {}
+        c0 = np.floor(lo / LAYER_CELL).astype(int)
+        c1 = np.minimum(np.floor(hi / LAYER_CELL).astype(int), c0 + 8)
+        for a in range(len(idx)):
+            for cu in range(c0[a, 0], c1[a, 0] + 1):
+                for cv in range(c0[a, 1], c1[a, 1] + 1):
+                    cells.setdefault((cu, cv), []).append(a)
+        seen = set()
+        for members in cells.values():
+            if len(members) < 2:
+                continue
+            for x, a in enumerate(members):         # in order of d: idx is sorted
+                for c in members[x + 1:]:
+                    if dd[c] - dd[a] >= LAYER_GAP:
+                        break
+                    if (a, c) in seen:
+                        continue
+                    seen.add((a, c))
+                    i, j = idx[a], idx[c]
+                    if (owner[i] == owner[j]).all():
+                        continue
+                    if not ((lo[a] < hi[c] - 0.01).all() and (lo[c] < hi[a] - 0.01).all()):
+                        continue
+                    if owner[i, 0] == owner[j, 0]:
+                        top, low = (i, j) if owner[i, 1] > owner[j, 1] else (j, i)
+                    else:
+                        top, low = (i, j) if size[i] < size[j] else (j, i)
+                    under.setdefault(top, {})[tuple(owner[low])] = low
+    offset = np.zeros((len(P), 3))
+    for top, lows in under.items():
+        low = next(iter(lows.values()))
+        nn = n[top]
+        if abs(nn[2]) > 0.7:
+            side = 1.0      # flat: up (its normal points up)
+        else:
+            out = P[top].mean(axis=0)[:2] - middle[low]
+            side = 1.0 if out @ nn[:2] >= 0 else -1.0
+        offset[top] = nn * side * LAYER_LIFT * len(lows)
+    out, at = [], 0
+    for p in parts:
+        out.append(offset[at:at + len(p)])
+        at += len(p)
+    return out
+
+
 def skipped_model(name):
     return name.startswith(('lod', 'islandlod')) or 'shad' in name
 
@@ -88,7 +178,10 @@ class ViceCity:
     areas = {
         'oceandrive': dict(title='Ocean Drive', waypoints=[(291, -1000), (255, -1350), (70, -1250), (90, -950)]),
     }
-    clear_colors = [(90, 180, 255, 1), (150, 210, 240, 1), (90, 200, 255, 1)]   # midday
+    # the backdrop (CAM_ClearScreen: the first colour above the horizon, the second under it):
+    # midday's sky, and under the horizon a grey between the roads' and the sea's, so the
+    # hairline cracks between the models' pieces don't show bright blue
+    clear_colors = [(90, 180, 255, 1), (80, 96, 96, 1), (90, 200, 255, 1)]
     # what the start level keeps along its loop, metres (by kind: build_bayview.CORRIDOR's): the
     # streets. Vice City is dense, the game's memory holds a level of about 30 MB, and in the
     # world the tiles take the start level's mesh's place: its route and respawns are what count
@@ -286,12 +379,15 @@ class ViceCity:
     def triangles(self, bounds, skip=()):
         """The city's triangles with their middles in bounds (x0, y0, x1, y1), by texture key:
         {key: (positions (m, 3, 3), uv (m, 3, 2), rgba (m, 3, 4), kind (m,))}, the models
-        whose names start with any of skip left out. Colours have midday's ambient added."""
+        whose names start with any of skip left out. Colours have midday's ambient added; the
+        layers laid on other faces are lifted off them (lift_layers)."""
         x0, y0, x1, y1 = bounds
+        # a margin, for the faces under those at the edge (the lifts are the same either side)
+        m = LAYER_MARGIN
         b = self.boxes()
-        hit = np.nonzero((b[:, 2] >= x0) & (b[:, 0] <= x1) & (b[:, 3] >= y0) & (b[:, 1] <= y1))[0]
+        hit = np.nonzero((b[:, 2] >= x0 - m) & (b[:, 0] <= x1 + m) & (b[:, 3] >= y0 - m) & (b[:, 1] <= y1 + m))[0]
         amb = np.array(AMBIENT, float)
-        out = {}
+        pieces = []     # (key, P, uv, rgba, kind, middle in bounds, instance, mesh)
         for k in hit:
             name, txd, pos, rot, scale = self.instances[k]
             if name.startswith(tuple(skip)):
@@ -300,7 +396,7 @@ class ViceCity:
             kind = TERRAIN if size >= TERRAIN_SIZE else PROP if size < PROP_SIZE else BUILDING
             if name in self.loose:
                 kind |= LOOSE
-            for P0, uv, col, tris, tex, _ in self.model(name):
+            for mi, (P0, uv, col, tris, tex, _) in enumerate(self.model(name)):
                 if not len(tris):
                     continue
                 key = self.texture_key(txd, tex)
@@ -308,25 +404,34 @@ class ViceCity:
                     continue
                 P = ((P0 * scale) @ rot + pos)[tris]
                 c = P.mean(axis=1)
-                keep = (c[:, 0] >= x0) & (c[:, 0] <= x1) & (c[:, 1] >= y0) & (c[:, 1] <= y1)
-                keep[keep] &= ~self.under_sea(P[keep])
-                if not keep.any():
+                near = (c[:, 0] >= x0 - m) & (c[:, 0] <= x1 + m) & (c[:, 1] >= y0 - m) & (c[:, 1] <= y1 + m)
+                near[near] &= ~self.under_sea(P[near])
+                if not near.any():
                     continue
-                C = col[tris][keep].copy()
+                P = P[near]
+                c = c[near]
+                C = col[tris][near].copy()
                 C[..., :3] = np.minimum(C[..., :3] + amb, 255) * (128.0 / 255.0 * BRIGHTNESS)
-                T = uv[tris][keep]
-                P = P[keep]
+                T = uv[tris][near]
                 # the PS2 doesn't cull, and the models' strips start either way round: what's
                 # flat faces up (ceilings too: build_bayview draws this world's floors from both
                 # sides)
                 n = np.cross(P[:, 1] - P[:, 0], P[:, 2] - P[:, 0])
                 down = n[:, 2] < -0.7 * np.linalg.norm(n, axis=1)
                 P[down], T[down], C[down] = P[down][:, ::-1], T[down][:, ::-1], C[down][:, ::-1]
+                inside = (c[:, 0] >= x0) & (c[:, 0] <= x1) & (c[:, 1] >= y0) & (c[:, 1] <= y1)
+                pieces.append((key, P, T, C, kind, inside, k, mi))
+        out = {}
+        if pieces:
+            lift = lift_layers([p[1] for p in pieces], [(p[6], p[7]) for p in pieces], b)
+            for (key, P, T, C, kind, inside, k, mi), dp in zip(pieces, lift):
+                if not inside.any():
+                    continue
                 lst = out.setdefault(key, ([], [], [], []))
-                lst[0].append(P)
-                lst[1].append(T)
-                lst[2].append(C)
-                lst[3].append(np.full(int(keep.sum()), kind))
+                lst[0].append((P + dp[:, None, :])[inside])
+                lst[1].append(T[inside])
+                lst[2].append(C[inside])
+                lst[3].append(np.full(int(inside.sum()), kind))
         P, uv, col = self.water(bounds)
         if len(P):
             if WATER_TEXTURE not in self.textures:

@@ -216,7 +216,8 @@ def main(iso, disc, outdir, name='bayview'):
             return
     # the tiles, in track's settings as the start level leaves them (the world's centre and floor)
     track.SCALE, track.CENTER, track.FLOOR_Z = bb.SCALE, center, floor_z
-    track.FLOOR_CELL, track.FLOOR_MAX_EDGE, track.MAX_EDGE = bb.FLOOR_CELL, bb.FLOOR_CELL * 1.6, 1200.0
+    floor_cell = getattr(world, 'floor_cell', bb.FLOOR_CELL)
+    track.FLOOR_CELL, track.FLOOR_MAX_EDGE, track.MAX_EDGE = floor_cell, floor_cell * 1.6, getattr(world, 'max_edge', 1200.0)
     track.light_maps = None
     size = int(TILE * bb.SCALE)
     half = size // 2
