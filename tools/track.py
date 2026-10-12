@@ -1018,7 +1018,7 @@ def place_pickups(route, g, by_model):
 
 
 def write_modes(outdir, name, out, nodes, spawns, nav, route, g, bases, vrms, minimap, build_name, clear_colors, keep_sky=True,
-                pickups=False):
+                pickups=False, banner=True):
     """The track as one LEV per mode, each grafted onto that mode's Dingo Canyon level, and that
     mode's texture file with the track's minimap drawn in. Its weapon crates and fruit only with
     pickups (races and battles: free drive has none, just the start banner)."""
@@ -1031,7 +1031,7 @@ def write_modes(outdir, name, out, nodes, spawns, nav, route, g, bases, vrms, mi
             f.write(patch_vrm(vrms[entry], map_icon(base), map_img))
         by_model = base_instances(base)
         names = {i: n for n, ids in by_model.items() for i in ids}
-        placed = [pk for pk in place_pickups(route, g, by_model) if pickups or names.get(pk['src']) == 'startbanner']
+        placed = [pk for pk in place_pickups(route, g, by_model) if pickups or (banner and names.get(pk['src']) == 'startbanner')]
         hitboxes = []
         for k, pk in enumerate(placed):
             kind = names.get(pk['src'])

@@ -181,6 +181,8 @@ def main(iso, disc, outdir, name='bayview'):
             sys.exit(f'build_world: AROUND={around!r} has no x,y,z')
         around = tuple(int(v) for v in found.groups())
     world = cfg['source'](iso)
+    # a world's own scale (CTR units a metre: THPS4's parks are bigger against the kart)
+    bb.SCALE = getattr(world, 'scale', bb.SCALE)
     world.low_detail = False
     x0, y0, x1, y1 = getattr(world, 'bounds', None) or cfg['bounds']
     groups = world.triangles((x0, y0, x1, y1), world.skip_solids)
@@ -229,7 +231,7 @@ def main(iso, disc, outdir, name='bayview'):
     floor_cell = getattr(world, 'floor_cell', bb.FLOOR_CELL)
     track.FLOOR_CELL, track.FLOOR_MAX_EDGE, track.MAX_EDGE = floor_cell, floor_cell * 1.6, getattr(world, 'max_edge', 1200.0)
     track.light_maps = None
-    size = int(TILE * bb.SCALE)
+    size = min(int(TILE * bb.SCALE), 16384)    # a tile's units: 3 x 3 of them within 16-bit positions
     half = size // 2
     tile_dir = os.path.join(outdir, f'{name}_tiles')
     os.makedirs(tile_dir, exist_ok=True)

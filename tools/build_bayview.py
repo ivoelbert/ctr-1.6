@@ -729,7 +729,8 @@ def main(iso, disc, outdir, area='citycore', world=None, name=None, center=None,
         q.checkpoint = free_cp.get(qi, 0xFF)
     info = track.write_modes(outdir, f'{name}_free', out, free_nodes, spawns, nav, route_info, g, bases, vrms,
                              (window, track.minimap_image(cells, window, route=route_info['path'], cell=NAV_CELL)), build_name=world.name,
-                             clear_colors=world.clear_colors, keep_sky=False)
+                             clear_colors=world.clear_colors, keep_sky=False,
+                             banner=getattr(world, 'start_banner', True))
     print(info)
     with open(os.path.join(outdir, f'{name}_free_route.json'), 'w') as f:
         json.dump(route_info, f)
