@@ -1307,6 +1307,15 @@ internal b32 COLL_FIXED_PlayerSearch_CheckMaskGrabProgress(struct Driver *d, str
 		{
 			d->lastValid = quad;
 		}
+#if defined(CTR_NATIVE)
+		// NOTE: a streamed world drops lastValid when the kart is in the air as the
+		// window moves to new tiles, and floors off its route have no checkpoint, so
+		// lastValid stayed NULL: a kart that fell out was never mask-grabbed back.
+		else if (d->lastValid == NULL)
+		{
+			d->lastValid = quad;
+		}
+#endif
 		return 0;
 	}
 

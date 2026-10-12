@@ -183,6 +183,8 @@ def main(iso, disc, outdir, name='bayview'):
     world = cfg['source'](iso)
     # a world's own scale (CTR units a metre: THPS4's parks are bigger against the kart)
     bb.SCALE = getattr(world, 'scale', bb.SCALE)
+    # how steep a face can be and still be ground (THPS4's quarter pipes: Sewer Speedway's pipes)
+    track.GROUND_NY = getattr(world, 'ground_ny', track.GROUND_NY)
     world.low_detail = False
     x0, y0, x1, y1 = getattr(world, 'bounds', None) or cfg['bounds']
     groups = world.triangles((x0, y0, x1, y1), world.skip_solids)

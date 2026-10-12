@@ -67,6 +67,9 @@ class Thps4Level:
     scale = 128.0
     # metres: farther BSP leaves aren't drawn (a park's views filled the frame's primitive memory)
     draw_distance = 120.0
+    # faces up to about 70 degrees steep are ground: the kart rides up a quarter pipe and rolls
+    # back, as on Sewer Speedway's (steeper, it stuck upside down on the coping)
+    ground_ny = 0.35
     start_banner = False      # no start line in a skate park (in the skate shop it filled the view)
     start = 'start'
     auto_waypoints = True     # the start loop's other waypoints: places the start reaches
