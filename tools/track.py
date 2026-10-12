@@ -487,31 +487,34 @@ def emit_ramp(ramp_h, out):
             out.append(invisible_quad([bilinear(corners, *grid[k]) for k in range(9)], n))
 
 
-def add_stair_ramps(tris, out, unit=1.0, floor_tol=None, floor_nz=None, either_way=False):
+def add_stair_ramps(tris, out, unit=1.0, floor_tol=None, floor_nz=None, either_way=False, run_per_rise=None):
     """Ramps over the steps and staircases (tools/stairs.py), their risers left out of the
     collision. unit: the map's units in Hammer units' size (stairs.py's sizes are Counter-Strike's:
-    0.0254 for a map in metres); floor_tol, floor_nz: stairs.FLOOR_TOL and FLOOR_NZ for it;
+    0.0254 for a map in metres); floor_tol, floor_nz, run_per_rise: stairs.FLOOR_TOL, FLOOR_NZ
+    and RUN_PER_RISE for it;
     either_way: the map's faces turn either way (stairs.py takes a riser's normal to point down
     the steps), so each is looked at both ways round (the floors decide)."""
     import stairs as st_mod
     from stairs import drivable_stairs, ramp_for
-    saved = st_mod.FLOOR_TOL, st_mod.FLOOR_NZ, st_mod.SIDES, st_mod.EXACT
+    saved = st_mod.FLOOR_TOL, st_mod.FLOOR_NZ, st_mod.SIDES, st_mod.EXACT, st_mod.RUN_PER_RISE, st_mod.MIN_RUN
     st_mod.FLOOR_TOL = saved[0] if floor_tol is None else floor_tol
     st_mod.FLOOR_NZ = saved[1] if floor_nz is None else floor_nz
     st_mod.SIDES = either_way
     st_mod.EXACT = unit != 1.0
+    st_mod.RUN_PER_RISE = saved[4] if run_per_rise is None else run_per_rise
+    st_mod.MIN_RUN = run_per_rise is not None
     try:
         faces = [(t.ph / unit, t.nh) for t in tris]
         if either_way:
             faces = [f for P, n in faces for f in ((P, n), (P, -n))]
         stairs = drivable_stairs(faces)
+        for st in stairs:
+            for r in st:
+                for i in r.tris:
+                    tris[i // 2 if either_way else i].solid = False
+            emit_ramp([p * unit for p in ramp_for(st)], out)
     finally:
-        st_mod.FLOOR_TOL, st_mod.FLOOR_NZ, st_mod.SIDES, st_mod.EXACT = saved
-    for st in stairs:
-        for r in st:
-            for i in r.tris:
-                tris[i // 2 if either_way else i].solid = False
-        emit_ramp([p * unit for p in ramp_for(st)], out)
+        st_mod.FLOOR_TOL, st_mod.FLOOR_NZ, st_mod.SIDES, st_mod.EXACT, st_mod.RUN_PER_RISE, st_mod.MIN_RUN = saved
     print(f'{len(stairs)} staircases and steps get ramps ({sum(len(s) for s in stairs)} risers)')
 
 

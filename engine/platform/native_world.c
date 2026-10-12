@@ -10,6 +10,17 @@ static int s_worldShiftPending;
 static Vec3 s_worldShift;
 static Vec3 s_worldOrigin;
 static int s_worldActive;
+static int s_drawDistance;
+
+int NativeWorld_DrawDistance(void)
+{
+	return s_worldActive ? s_drawDistance : 0;
+}
+
+void NativeWorld_SetDrawDistance(int units)
+{
+	s_drawDistance = units > 0 ? units : 0;
+}
 static struct Level *s_worldLevel;
 // a world's pickup hitboxes, one of each (ended by a zero flag): every window leaf's list
 static struct BSP *s_worldHitboxes;

@@ -79,6 +79,7 @@ def blended_overlay(name, rgba):
 
 LAYER_GAP = 0.04        # metres: faces this close in the same plane are layers of each other
 LAYER_LIFT = 0.05       # and the upper ones go this far off, per layer (CTR's unit is 1.6 cm)
+EDGE_LIFT = 0.025       # metres: what lies on another face only at a mesh's edge goes this far
 LAYER_MARGIN = 2.0      # metres round the bounds looked at for what's under a face
 LAYER_CELL = 8.0        # metres: the squares a plane's triangles are compared within
 
@@ -160,10 +161,25 @@ def lift_layers(parts, owners, boxes):
             out = P[top].mean(axis=0)[:2] - middle[low]
             side = 1.0 if out @ nn[:2] >= 0 else -1.0
         offset[top] = nn * side * LAYER_LIFT * len(lows)
+    # A mesh most of which lies on something (a road marking, a window frame, trim) moves as one,
+    # by its faces' mean lift: lifting some of its triangles alone tore them off the rest (cracks
+    # in the roads). A mesh only part of which does (an alley's ground under the next street's
+    # pavement) lifts just those triangles, by EDGE_LIFT: enough for the depth buffer, too little
+    # (a CTR unit or so) for a crack to show.
     out, at = [], 0
     for p in parts:
-        out.append(offset[at:at + len(p)])
+        off = offset[at:at + len(p)]
         at += len(p)
+        lifted = np.linalg.norm(off, axis=1) > 0
+        if lifted.sum() * 2 < len(p):
+            small = off.copy()
+            small[lifted] *= (EDGE_LIFT / np.linalg.norm(off[lifted], axis=1))[:, None]
+            out.append(small)
+            continue
+        d = off[lifted].mean(axis=0)
+        size = np.linalg.norm(off[lifted], axis=1).max()
+        d = d / max(np.linalg.norm(d), 1e-9) * size
+        out.append(np.broadcast_to(d, off.shape).copy())
     return out
 
 
@@ -249,10 +265,15 @@ class ViceCity:
     floor_z = SEA_LEVEL
     double_sided_floors = True
     back_to_back = False    # the models' faces turn either way: every wall drawn from both sides
+    # metres: farther BSP leaves aren't drawn (the densest views, Ocean Drive's, otherwise run out
+    # of the frame's primitive memory: faces right in front dropped)
+    draw_distance = 300.0
     stair_unit = 0.0254     # metres an inch: ramps over the kerbs and steps (tools/stairs.py's sizes)
     # its kerbs reach a few centimetres under the road, its pavements slope to drain: a step's
     # floors within 6 inches of its riser's ends, up to 14 degrees off flat
     stair_floor_tol, stair_floor_nz = 6.0, 0.97
+    # a kerb's ramp runs 8 times its height (about 7 degrees): 3 times, a kart lost half its speed
+    stair_run_per_rise = 8.0
 
     @staticmethod
     def is_road(name):

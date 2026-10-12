@@ -102,7 +102,8 @@ def build_tile(ij):
     ramps = []
     if getattr(world, 'stair_unit', None):
         track.add_stair_ramps(tris, ramps, unit=world.stair_unit, floor_tol=getattr(world, 'stair_floor_tol', None),
-                              floor_nz=getattr(world, 'stair_floor_nz', None), either_way=not getattr(world, 'back_to_back', True))
+                              floor_nz=getattr(world, 'stair_floor_nz', None), either_way=not getattr(world, 'back_to_back', True),
+                              run_per_rise=getattr(world, 'stair_run_per_rise', None))
     out = track.emit_level(tris, ramps, near=lambda t: True)
     off = np.array([i * size, 0, j * size])
     for q in out:
@@ -290,6 +291,8 @@ def main(iso, disc, outdir, name='bayview'):
     print(f'map: {grid.shape[1]} x {grid.shape[0]} texels of {MAP_TEXEL:.0f} m')
     meta = json.load(open(meta_path))
     meta['world'] = dict(tiles=f'{name}_tiles', tile=size, count=len(index), atlas=atlas_id)
+    if getattr(world, 'draw_distance', None):
+        meta['world']['drawDistance'] = int(world.draw_distance * bb.SCALE)
     with open(meta_path, 'w') as f:
         json.dump(meta, f, indent=1)
     if not around:

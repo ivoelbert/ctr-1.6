@@ -105,6 +105,21 @@ EMSCRIPTEN_KEEPALIVE void NativeWeb_SetLevelDepth(int on)
 
 extern int g_nativeGpuAtlasPolys, g_nativeGpuAtlasExact;
 // atlas polygons drawn since the last call, and how many had exact depths (and reset)
+// a world's draw distance (units, 0: none; native_world.h)
+EMSCRIPTEN_KEEPALIVE void NativeWeb_SetDrawDistance(int units)
+{
+	NativeWorld_SetDrawDistance(units);
+}
+
+extern int g_nativePrimMemPeak, g_nativePrimMemSize;
+// out: the most primitive memory a frame used since the last read, and the buffer's size
+EMSCRIPTEN_KEEPALIVE void NativeWeb_PrimMem(int *out)
+{
+	out[0] = g_nativePrimMemPeak;
+	out[1] = g_nativePrimMemSize;
+	g_nativePrimMemPeak = 0;
+}
+
 EMSCRIPTEN_KEEPALIVE int NativeWeb_AtlasExact(int *out)
 {
 	out[0] = g_nativeGpuAtlasPolys;

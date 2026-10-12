@@ -20,6 +20,10 @@ void NativeWorld_LevelStart(struct GameTracker *gGT);
 void NativeWorld_LevelReady(struct GameTracker *gGT);
 int NativeWorld_OwnsSpan(unsigned int ptr, unsigned int size);
 int NativeWorld_Info(int *out);
+// the level's draw distance (units; 0: none): a world's leaves farther from the camera are left
+// out (RenderLists.c), or a dense city's frame runs out of primitive memory
+int NativeWorld_DrawDistance(void);
+void NativeWorld_SetDrawDistance(int units);
 struct UIMap;
 int NativeWorld_MapIconPos(const struct UIMap *map, int *posX, int *posY);
 

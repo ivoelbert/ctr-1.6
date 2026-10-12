@@ -103,6 +103,26 @@ static int RenderLists_BoxPassesFrustum(struct PushBuffer *pb, const struct Boun
 	return 1;
 }
 
+// NOTE(ctr-dust2): a world's draw distance (native_world.h): whether a leaf's box is farther from
+// the camera than it, in x and z
+static int RenderLists_BeyondDrawDistance(struct PushBuffer *pb, const struct BoundingBox *box)
+{
+#if defined(CTR_NATIVE)
+	int far = NativeWorld_DrawDistance();
+	if (far <= 0 || pb == 0)
+	{
+		return 0;
+	}
+	int dx = box->min.x > pb->pos.x ? box->min.x - pb->pos.x : (pb->pos.x > box->max.x ? pb->pos.x - box->max.x : 0);
+	int dz = box->min.z > pb->pos.z ? box->min.z - pb->pos.z : (pb->pos.z > box->max.z ? pb->pos.z - box->max.z : 0);
+	return dx * dx + dz * dz > far * far;
+#else
+	(void)pb;
+	(void)box;
+	return 0;
+#endif
+}
+
 static int RenderLists_ProjectDistance(struct PushBuffer *pb, const struct BoundingBox *box)
 {
 	s16 point[3];
@@ -302,7 +322,7 @@ static int RenderLists_Walk1P2P(struct BSP *bspRoot, const int *visLeafList, str
 				goto nextBranch;
 			}
 
-			if (!RenderLists_BoxPassesFrustum(pb, &record.box))
+			if (!RenderLists_BoxPassesFrustum(pb, &record.box) || RenderLists_BeyondDrawDistance(pb, &record.box))
 			{
 				continue;
 			}
@@ -356,7 +376,7 @@ static int RenderLists_Walk3P4P(struct BSP *bspRoot, const int *visLeafList, str
 				goto nextBranch;
 			}
 
-			if (!RenderLists_BoxPassesFrustum(pb, &record.box))
+			if (!RenderLists_BoxPassesFrustum(pb, &record.box) || RenderLists_BeyondDrawDistance(pb, &record.box))
 			{
 				continue;
 			}

@@ -328,6 +328,16 @@ sector, sector count, name). The shared PS2 parts (the ISO reader, the GS swizzl
 - Buried walls: foundations and kerb skirts hanging under the street, their top edge level with
   a floor on either side (`buried_walls`), are drawn but not solid (LOOSE): the top edge caught
   a kart driving over it, an invisible wall.
+- Draw distance: a frame's primitive memory is 7 MB (two of them nearly fill the 24-bit GPU
+  links' 16 MB), and Ocean Drive's views filled it: the faces past the end were dropped (the road
+  in front of the kart, half a hotel). A world's `draw_distance` (Vice City's 300 m, `drawDistance`
+  in its json) leaves farther BSP leaves out (`RenderLists.c`): the densest view now takes 5.6 MB.
+  `NativeWeb_PrimMem` reports a frame's peak, for tests.
+- Layers lift as whole meshes (a marking, trim) or, where only part of a mesh lies on another
+  (a road's border on the next), just those triangles by 2.5 cm: lifting them 5 cm tore cracks.
+- Kerbs: a kerb is a lip and a step half a metre apart; their chain's ramp was three times as
+  steep as it should be. Ramps rising under 12 inches run at least 8 times their rise
+  (`stair_run_per_rise`, `stairs.MIN_RUN`); the settings now hold while the ramps are shaped too.
 - What `OBJECT.DAT` makes a physics object (under 9,999 kg: lamp posts, bins, benches, signs,
   hydrants; 1,894 placements) is drawn but not solid (`build_bayview.LOOSE`), as a car knocks
   them over: they walled off the pavements on the drivable grid.
