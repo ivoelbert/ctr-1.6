@@ -423,9 +423,9 @@ def nav_quads(groups, cutouts=()):
     return out
 
 
-def street_node(g, groups, world, x, y):
+def street_node(g, groups, world, x, y, z=None):
     """The drivable grid node on the road nearest map (x, y), on its lowest floor there (the
-    street, not a bridge over it)."""
+    street, not a bridge over it); with z, on the floor nearest that height."""
     best = None
     for h, (P, *_) in groups.items():
         if not world.is_road(world.textures[h].name):
@@ -433,7 +433,7 @@ def street_node(g, groups, world, x, y):
         n = np.cross(P[:, 1] - P[:, 0], P[:, 2] - P[:, 0])
         up = n[:, 2] > 0.7 * (np.linalg.norm(n, axis=1) + 1e-12)
         c = P.mean(axis=1)
-        d = np.hypot(c[:, 0] - x, c[:, 1] - y) + np.where(up, 0, 1e9) + c[:, 2] * 0.01
+        d = np.hypot(c[:, 0] - x, c[:, 1] - y) + np.where(up, 0, 1e9) + (c[:, 2] * 0.01 if z is None else np.abs(c[:, 2] - z) * 2)
         k = int(np.argmin(d))
         if best is None or d[k] < best[0]:
             best = (d[k], c[k])
@@ -589,8 +589,37 @@ def find_route(world, groups, cutouts, cfg, cache):
             return route
     wps = np.array(cfg['waypoints'], dtype=float)
     g = NavGrid(nav_quads(groups, cutouts))
-    wp_nodes = [street_node(g, groups, world, x, y) for x, y in wps]
-    loop = plan_loop(g, wp_nodes, road_cells(g, groups, world))
+    wp_nodes = [street_node(g, groups, world, *w) for w in wps]
+    roads = road_cells(g, groups, world)
+    try:
+        loop = plan_loop(g, wp_nodes, roads)
+    except SystemExit:
+        if not getattr(world, 'auto_waypoints', False):
+            raise
+        # the start: of the world's candidates (a restart can be on a ledge), the one whose floor
+        # reaches farthest and back; then the two places it reaches and is reached from that lie
+        # farthest apart
+        best = None
+        for c in [wps[0]] + list(getattr(world, 'start_candidates', []))[:12]:
+            try:
+                node = street_node(g, groups, world, *c)
+            except SystemExit:
+                continue
+            reach = sorted(g.reachable(node))
+            sample = reach[::max(1, len(reach) // 40)]
+            mutual = [k for k in sample if k != node and node in g.reachable(k)]
+            if mutual and (best is None or len(reach) * len(mutual) / len(sample) > best[0]):
+                best = (len(reach) * len(mutual) / len(sample), node, reach, mutual)
+        if best is None:
+            raise SystemExit('nowhere to drive round the start')
+        _, node, reach, mutual = best
+        p0 = np.array(g.pos[node])
+        a = max(mutual, key=lambda k: np.hypot(g.pos[k][0] - p0[0], g.pos[k][2] - p0[2]))
+        pa = np.array(g.pos[a])
+        b = max(mutual, key=lambda k: np.hypot(g.pos[k][0] - pa[0], g.pos[k][2] - pa[2]))
+        wp_nodes = [node, a] + ([b] if b not in (a, node) else [])
+        print(f'waypoints: the start and two places it reaches ({len(reach)} grid cells)')
+        loop = plan_loop(g, wp_nodes, roads)
     route = np.array([[g.pos[n][0] / SCALE + track.CENTER[0], -g.pos[n][2] / SCALE + track.CENTER[1],
                        g.pos[n][1] / SCALE + track.FLOOR_Z] for n in loop])
     os.makedirs(os.path.dirname(cache), exist_ok=True)
@@ -649,7 +678,8 @@ def main(iso, disc, outdir, area='citycore', world=None, name=None, center=None,
     rects, layers = atlas or pack_textures(world.textures, list(groups), cutouts, pad=getattr(world, 'atlas_border', PAD))
     print(f'{len(rects)} textures in {len(layers)} atlas layers')
     g = NavGrid(nav_quads(groups, cutouts))
-    start = street_node(g, groups, world, *wps[0])
+    first = route[0] if getattr(world, 'auto_waypoints', False) else wps[0]     # the start the route found
+    start = street_node(g, groups, world, *first)
     near = track.near_drivable(g, start)
     if os.environ.get('VISIBILITY') != '0' and not quick:
         groups = visible_only(groups, cutouts, g, start, outdir)
@@ -667,7 +697,7 @@ def main(iso, disc, outdir, area='citycore', world=None, name=None, center=None,
     if os.environ.get('DRY') == '1':
         return
     g = NavGrid([(q.flags, q.pos, q.triangle) for q in out])
-    start = street_node(g, groups, world, *wps[0])
+    start = street_node(g, groups, world, *first)
     # the free route's landmarks: the loop every 150 m or so, on the drivable cell nearest
     # each point (at its height) that the start reaches
     reach = g.reachable(start)
@@ -676,7 +706,7 @@ def main(iso, disc, outdir, area='citycore', world=None, name=None, center=None,
     walked = 0.0
     for a, b in zip(route, route[1:]):
         walked += float(np.linalg.norm(b[:2] - a[:2]))
-        if walked >= 150.0:
+        if walked >= getattr(world, 'landmark_spacing', 150.0):
             walked = 0.0
             c = track.to_ctr(b)
             d = np.hypot(reach_pos[:, 0] - c[0], reach_pos[:, 2] - c[2]) + np.abs(reach_pos[:, 1] - c[1]) * 2

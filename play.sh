@@ -11,6 +11,8 @@
 #                 (default: ~/Documents/NFSU2/Need for Speed - Underground 2 (USA).iso; none, no Bayview)
 #   GTAVC_ISO=... your Grand Theft Auto: Vice City disc image (PS2, NTSC-U), for Vice City
 #                 (default: ~/Documents/GTAVC/Grand Theft Auto - Vice City.iso; none, no Vice City)
+#   THPS4_DATA=.. Tony Hawk's Pro Skater 4's data folder (PC: its levels/ in it), for its levels
+#                 (default: ~/Documents/THPS4/data; none, no THPS4 levels)
 #   PORT=8642
 #   NO_OPEN=1     serve without opening a browser
 #
@@ -24,6 +26,7 @@ DISC="${CTR_DISC:-$HOME/Documents/CTRDUST2/CTR - Crash Team Racing/CTR - Crash T
 CSTRIKE="${CSTRIKE:-$HOME/Library/Application Support/Steam/steamapps/common/Half-Life/cstrike}"
 NFSU2_ISO="${NFSU2_ISO:-$HOME/Documents/NFSU2/Need for Speed - Underground 2 (USA).iso}"
 GTAVC_ISO="${GTAVC_ISO:-$HOME/Documents/GTAVC/Grand Theft Auto - Vice City.iso}"
+THPS4_DATA="${THPS4_DATA:-$HOME/Documents/THPS4/data}"
 PORT="${PORT:-8642}"
 URL="http://localhost:$PORT/"
 
@@ -65,7 +68,7 @@ done
 if [ -f "$NFSU2_ISO" ]; then
   index="$ROOT/build/lev/bayview_tiles/index.bin"
   # shellcheck disable=SC2086
-  if [ ! -f "$index" ] || newer "$index" $(python3 -I tools/deps.py tools/build_world.py --skip tools/vicecity); then
+  if [ ! -f "$index" ] || newer "$index" $(python3 -I tools/deps.py tools/build_world.py --skip tools/vicecity --skip tools/thps4); then
     echo "Building Bayview from Need for Speed: Underground 2 (five to ten minutes)..."
     python3 -I tools/build_world.py "$NFSU2_ISO" "$DISC" "$ROOT/build/lev" bayview
   fi
@@ -75,10 +78,25 @@ fi
 if [ -f "$GTAVC_ISO" ]; then
   index="$ROOT/build/lev/vicecity_tiles/index.bin"
   # shellcheck disable=SC2086
-  if [ ! -f "$index" ] || newer "$index" $(python3 -I tools/deps.py tools/build_world.py --skip tools/nfsu2); then
+  if [ ! -f "$index" ] || newer "$index" $(python3 -I tools/deps.py tools/build_world.py --skip tools/nfsu2 --skip tools/thps4); then
     echo "Building Vice City from Grand Theft Auto: Vice City (five to ten minutes)..."
     python3 -I tools/build_world.py "$GTAVC_ISO" "$DISC" "$ROOT/build/lev" vicecity
   fi
+fi
+
+# Tony Hawk's Pro Skater 4's levels, from the game's data folder: each a world of its own (a
+# minute or two each).
+if [ -d "$THPS4_DATA/levels" ]; then
+  # shellcheck disable=SC2086
+  THPS4_DEPS="$(python3 -I tools/deps.py tools/build_world.py --skip tools/nfsu2 --skip tools/vicecity)"
+  for code in alc cnv hof jnk kon lon motox sch sf2 zoo skateshop; do
+    index="$ROOT/build/lev/thps4_${code}_tiles/index.bin"
+    # shellcheck disable=SC2086
+    if [ ! -f "$index" ] || newer "$index" $THPS4_DEPS; then
+      echo "Building THPS4's $code from Tony Hawk's Pro Skater 4..."
+      python3 -I tools/build_world.py "$THPS4_DATA" "$DISC" "$ROOT/build/lev" "thps4_$code"
+    fi
+  done
 fi
 
 # The game, when it's missing or older than its sources.

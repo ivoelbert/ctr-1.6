@@ -32,6 +32,8 @@ opens it in Chrome. It needs:
 - for Bayview (optional), your Need for Speed: Underground 2 disc image (PS2, NTSC-U,
   SLUS-21065, an `.iso`), by default at `~/Documents/NFSU2/Need for Speed - Underground 2
   (USA).iso` (`NFSU2_ISO=...`);
+- for the THPS4 levels (optional), Tony Hawk's Pro Skater 4 for PC: its `data/levels` folder
+  in `~/Documents/THPS4/data` (`THPS4_DATA=...`; see below);
 - for Vice City (optional), your Grand Theft Auto: Vice City disc image (PS2, NTSC-U,
   SLUS-20552, an `.iso`), by default at `~/Documents/GTAVC/Grand Theft Auto - Vice City.iso`
   (`GTAVC_ISO=...`);
@@ -116,6 +118,17 @@ same world builder makes it tiles (`python3 -I tools/build_world.py GTAVC.iso CT
 build/lev vicecity`, which `play.sh` runs). It starts on Ocean Drive. NOTES.md has how the PS2
 data is laid out.
 
+## Tony Hawk's Pro Skater 4
+
+`tools/thps4/` reads the PC version's levels (Aspyr's port: Neversoft's Xbox formats) from the
+game's data folder: textures (DXT), the scene (materials, sectors, triangle strips) and each
+level's script (its restart points: the start). Every level is a world of its own
+(`python3 -I tools/build_world.py THPS4_DATA CTR_DISC.bin build/lev thps4_alc`, which `play.sh`
+runs for each): College, San Francisco, Alcatraz, Kona, Shipyard, London, Zoo, Carnival,
+Chicago, the motocross track and the skate shop. On the PC install disc the files are in the Mac
+(HFS) partition: copy `data/levels` from the mounted disc (or from an installed game) to
+`~/Documents/THPS4/data/levels` (`THPS4_DATA=...`).
+
 ## Credits
 
 - Crash Team Racing © 1999 Sony Computer Entertainment / Naughty Dog.
@@ -123,5 +136,6 @@ data is laid out.
   de_inferno by Christopher "Narby" Auty.
 - Need for Speed: Underground 2 © 2004 Electronic Arts, developed by EA Black Box.
 - Grand Theft Auto: Vice City © 2002 Rockstar Games, developed by Rockstar North.
+- Tony Hawk's Pro Skater 4 © 2002 Activision, developed by Neversoft; PC version by Aspyr.
 - [CTR-ModSDK](https://github.com/CTR-tools/CTR-ModSDK) and
   [ctr-native](https://github.com/CTR-tools/ctr-native): the decompilation and the native port.
