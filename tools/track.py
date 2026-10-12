@@ -210,10 +210,13 @@ def uv_scale(uv):
 FACE_CORNERS = [(0, 4, 5, 6), (4, 1, 6, 7), (5, 6, 2, 8), (6, 7, 8, 3)]
 
 
+GROUND_NY = 0.7        # a face is ground (driven on) when its normal's up part is over this
+
+
 def surface_flags(n, solid=True):
     if not solid:
         return 0, 0  # drawn only: no collision search wants it
-    if n[1] > 0.7:
+    if n[1] > GROUND_NY:
         return FLAG_GROUND | FLAG_CAMERA_SEARCH, 0
     return FLAG_COLLISION_SURFACE, 0
 
