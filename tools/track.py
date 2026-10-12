@@ -702,6 +702,10 @@ def free_setup(out, g):
     for (cx, cz, k), nid in g.node.items():
         if cx % FREE_NODE_CELLS == 0 and cz % FREE_NODE_CELLS == 0 and g.wall_dist[nid] >= 3:
             picks.append(nid)
+    if not picks:
+        # narrow ground everywhere (a skate park's paths): the roomiest cells, spread out
+        ids = sorted(g.node.values(), key=lambda nid: -g.wall_dist[nid])
+        picks = ids[::max(1, len(ids) // 64)][:64]
     picks = picks[:127]
     pos = np.array([g.pos[n] for n in picks], dtype=float)
     # Each node's next is a twin straight above it: the wrong-way test (VehLap_UpdateProgress)

@@ -349,6 +349,37 @@ sector, sector count, name). The shared PS2 parts (the ISO reader, the GS swizzl
   (the game's memory holds a level of about 30 MB; the tiles take its mesh's place).
 - Ocean Drive's start loop: down Ocean Drive and back up the streets behind it.
 
+## Tony Hawk's Pro Skater 4 (tools/thps4/, tools/build_world.py)
+
+The PC version (Aspyr): the install disc is a hybrid, its ISO 9660 side all stubs (extents at
+0); the files are in its Mac (HFS) partition, `Win/program files/Aspyr/Tony Hawks Pro Skater 4/
+Game/data`. The play disc's `.TGR` files are Bink videos. A level is `data/levels/Lvl/` (any
+case): `lvlscn.dat`, `lvltex.dat`, `lvl.qb`, `lvlcol.dat` (collision; not read).
+
+- tex.dat: version, count; per texture checksum, width, height, mip levels, depths,
+  compression, palette size, palette, then each level's size and data. DXT1 (size w*h/2:
+  compression 1 or 2, the one-bit alpha read either way), DXT5 (w*h), or 32-bit.
+- scn.dat: three version words and the material count; a material: checksum, passes, alpha
+  cutoff, sorted (byte), draw order (float), single-sided (byte), grassify (byte: then height
+  and layers, 8 bytes); a pass: texture checksum, flags, has-colour (byte), colour, blend (8),
+  addressing, envmap multiples, filtering (77 bytes so far), UV wibble (flags & 1: 32 bytes),
+  VC wibble (flags & 2: sequences of key count, phase and (time, colour) keys), mipmap settings
+  (16). Then the sectors: checksum, bone, flags, mesh count, box, sphere, vertex count and
+  stride, positions, normals (flags & 4), texture coordinate sets (flags & 1), BGRA colours
+  (flags & 2, 0x80 = 1), VC wibble bytes (flags & 0x800); a mesh: flags, material, index count,
+  16-bit strip indices joined by repeats. All eleven levels parse to their files' last word.
+- qb: tokens and a table of names (0x2B checksum, name). A node's struct starts with
+  Position (0x16 name, 0x07 =, 0x1E vector); its Name, Class and the names it lists follow up
+  to the next node's Position. The start: a Restart node that lists Player1.
+- Inches, y up: metres, z up, is (x, -z, y) * 0.0254 (a turn: (x, z, y) mirrored the levels,
+  the signs read backwards). Faces that look down are turned up, walls
+  drawn from both sides (as Vice City's). Alcatraz's bay is a ring of flat sectors 1.3 km
+  across: big flat sectors are fast water, and the world's height 0.
+- The start loop: a skate park's drivable grid is islands between ledges and ramps, so the
+  restarts nearest the start can't be routed between; `auto_waypoints` takes, of the restarts
+  (the start's first), the one whose floor reaches farthest and back, and the two places
+  farthest apart that it reaches and is reached from.
+
 ## Tools
 
 - `tools/navgrid.py`: the drivable grid (from the level's own collision data), A*, what's

@@ -40,6 +40,7 @@ import levwriter  # noqa: E402
 import track  # noqa: E402
 from nfsu2.world import Bayview  # noqa: E402
 from vicecity.world import ViceCity  # noqa: E402
+from thps4.world import LEVELS as THPS4_LEVELS, Thps4Level  # noqa: E402
 
 TILE = 256.0            # metres: 16384 units, 3 x 3 of them within 16-bit positions
 WORLDS = {
@@ -48,6 +49,9 @@ WORLDS = {
     # the islands reach x -2458 to 1709, y -2027 to 1896; the sea round them, a tile's worth
     'vicecity': dict(source=ViceCity, bounds=(-2600.0, -2150.0, 1850.0, 2000.0)),
 }
+# Tony Hawk's Pro Skater 4's levels, each a world (GAME.iso: the game's data folder; bounds: its own)
+for _code in THPS4_LEVELS:
+    WORLDS['thps4_' + _code] = dict(source=lambda path, code=_code: Thps4Level(path, code), bounds=None)
 LEAF_QUADS = 24         # quadblocks a BSP leaf holds, at least
 TILE_LEAVES = 512       # a window's BSP holds 16383 nodes: 9 tiles' (the kd-tree halves to a
                         # power of two leaves: 1023 nodes) and the top
@@ -178,7 +182,7 @@ def main(iso, disc, outdir, name='bayview'):
         around = tuple(int(v) for v in found.groups())
     world = cfg['source'](iso)
     world.low_detail = False
-    x0, y0, x1, y1 = cfg['bounds']
+    x0, y0, x1, y1 = getattr(world, 'bounds', None) or cfg['bounds']
     groups = world.triangles((x0, y0, x1, y1), world.skip_solids)
     groups = {h: g for h, g in groups.items() if h in world.textures and not world.textures[h].name.startswith(world.skip_textures)}
     print(f'{sum(len(g[0]) for g in groups.values())} triangles in the world, {len(groups)} textures')
