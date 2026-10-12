@@ -26,6 +26,9 @@ SIDES = False
 # stairs. EXACT takes the line from its faces instead: their mean normal, offset and extent (the
 # Counter-Strike maps keep the old way: their stairs are near the origin, and along the axes)
 EXACT = False
+# every ramp at least RUN_PER_RISE times its rise long (a city's kerbs; see ramp_for)
+MIN_RUN = False
+MIN_RUN_RISE = 12.0  # inches: the kerbs and single steps it applies to, not staircases
 
 
 class Riser:
@@ -152,6 +155,10 @@ def ramp_for(stair):
         tread = (first.offset() - last.offset()) / (len(stair) - 1)
     else:
         tread = (first.z1 - first.z0) * RUN_PER_RISE
+    if MIN_RUN and last.z1 - first.z0 <= MIN_RUN_RISE:
+        # a gentle ramp whatever the chain: at least RUN_PER_RISE times its whole rise (a kerb
+        # is a lip and a step half a metre apart: its tread made a ramp 3 times too steep)
+        tread = max(tread, (last.z1 - first.z0) * RUN_PER_RISE - (first.offset() - last.offset()))
     foot_off = first.offset() + tread
     head_off = last.offset()
     foot = [n * foot_off + t * lo, n * foot_off + t * hi]

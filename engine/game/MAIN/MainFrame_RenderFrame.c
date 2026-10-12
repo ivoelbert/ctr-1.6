@@ -1278,8 +1278,21 @@ void RenderFMV()
 }
 #endif
 
+#if defined(CTR_NATIVE)
+// NOTE(ctr-dust2): the most primitive memory a frame has used, and its size (bytes), for tests
+int g_nativePrimMemPeak, g_nativePrimMemSize;
+#endif
+
 void RenderSubmit(struct GameTracker *gGT)
 {
+#if defined(CTR_NATIVE)
+	{
+		struct PrimMem *pm = &gGT->backBuffer->primMem;
+		int used = (int)((char *)pm->cursor - (char *)pm->start);
+		g_nativePrimMemPeak = used > g_nativePrimMemPeak ? used : g_nativePrimMemPeak;
+		g_nativePrimMemSize = (int)((char *)pm->guardEnd - (char *)pm->start);
+	}
+#endif
 	// 1 VSYNC = 60fps
 	// 2 VSYNCs = 30fps
 
