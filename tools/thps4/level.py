@@ -32,7 +32,7 @@ import numpy as np
 Texture = namedtuple('Texture', 'name rgba')
 Sector = namedtuple('Sector', 'checksum flags positions uv colors meshes')    # meshes: [(material, flags, indices)]
 Material = namedtuple('Material', 'checksum passes grass')                     # passes: [(texture checksum, flags, blend)]
-Node = namedtuple('Node', 'cls name position angles refs')    # refs: every name the node's struct uses
+Node = namedtuple('Node', 'cls name position angles refs checksum')    # refs: every name the node's struct uses; checksum: its name's
 
 INCH = 0.0254
 
@@ -247,7 +247,8 @@ def read_nodes(path):
             a = seg.find(want[key] + b'\x07\x16')
             return table.get(struct.unpack_from('<I', seg, a + 7)[0], '') if 0 <= a <= len(seg) - 11 else ''
         refs = {table.get(struct.unpack_from('<I', seg, m.start() + 1)[0], '') for m in re.finditer(b'\x16', seg) if m.start() + 5 <= len(seg)}
-        out.append(Node(val('Class'), val('Name'), pos, ang, refs - {''}))
+        name = val('Name')
+        out.append(Node(val('Class'), name, pos, ang, refs - {''}, inv.get(name.lower())))
     return out
 
 

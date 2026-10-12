@@ -375,6 +375,15 @@ case): `lvlscn.dat`, `lvltex.dat`, `lvl.qb`, `lvlcol.dat` (collision; not read).
   the signs read backwards). Faces that look down are turned up, walls
   drawn from both sides (as Vice City's). Alcatraz's bay is a ring of flat sectors 1.3 km
   across: big flat sectors are fast water, and the world's height 0.
+- What the level holds at its start: a sector whose LevelGeometry node (the node named as the
+  sector's checksum) isn't CreatedAtStart comes with a goal or a cheat (Alcatraz's loop, the
+  broken windows' other halves, race planes): left out.
+- Light: the PC's vertex colours have 255 = 1 (read as 0x80 = 1 every level was blinding);
+  CTR's 0x80 = 1, times 1.2 (the materials' darkening passes aren't drawn).
+- Scale 128 units a metre (the cities' 64): the kart half as big. A tile is then 128 m (16384
+  units at most, for 16-bit positions). Draw distance 120 m: Alcatraz's view filled the frame's
+  primitive memory (the yard's floor dropped: the "holes"); now 2-2.5 MB at most. No start
+  banner (the skate shop's filled the view).
 - The start loop: a skate park's drivable grid is islands between ledges and ramps, so the
   restarts nearest the start can't be routed between; `auto_waypoints` takes, of the restarts
   (the start's first), the one whose floor reaches farthest and back, and the two places

@@ -63,6 +63,11 @@ class Thps4Level:
     stair_floor_tol, stair_floor_nz = 6.0, 0.97
     stair_run_per_rise = 8.0
     corridor = {0: 40.0, 1: 40.0, 2: 40.0, 3: 40.0}
+    # CTR units a metre: twice the cities' 64, so the kart is half as big against a skate park
+    scale = 128.0
+    # metres: farther BSP leaves aren't drawn (a park's views filled the frame's primitive memory)
+    draw_distance = 120.0
+    start_banner = False      # no start line in a skate park (in the skate shop it filled the view)
     start = 'start'
     auto_waypoints = True     # the start loop's other waypoints: places the start reaches
     landmark_spacing = 25.0   # metres between the respawn landmarks along the (short) start loop
@@ -81,7 +86,9 @@ class Thps4Level:
 
     @staticmethod
     def light(c):
-        return np.minimum(c * 1.1, 255)
+        """The baked light: 255 is full on the PC (128 on the PS2); CTR's 0x80 = 1, a little more
+        (it draws the material's darkening passes no more than its decals)."""
+        return np.minimum(c * (128.0 / 255.0) * 1.2, 255)
 
     def terrain(self, name):
         return 13 if name in self.water_textures else 0     # fast water: full speed
@@ -100,6 +107,11 @@ class Thps4Level:
         self.textures = {f'{k:08x}': t for k, t in found.items()}
         self.materials, self.sectors = L.read_scene(scn, found)
         self.nodes = L.read_nodes(qb) if qb else []
+        # what the level holds at its start: a sector whose LevelGeometry node isn't
+        # CreatedAtStart comes with a goal or a cheat (Alcatraz's loop, the broken windows'
+        # other halves, race planes)
+        later = {n.checksum for n in self.nodes if n.cls == 'LevelGeometry' and 'CreatedAtStart' not in n.refs}
+        self.sectors = [s_ for s_ in self.sectors if s_.checksum not in later]
         self.low_detail = False
         self.water_textures = set()
         start = L.player_start(self.nodes)
