@@ -112,7 +112,7 @@ export class View {
   }
 
   makeGround(texId) {
-    const size = 2 * FIELD;
+    const size = 2 * (FIELD + 4096);      // with the ring round the field, as the game's (compile.js)
     const geo = new THREE.PlaneGeometry(size, size, 1, 1);
     geo.rotateX(-Math.PI / 2);
     const uv = geo.attributes.uv;

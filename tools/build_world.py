@@ -306,7 +306,7 @@ def main(iso, disc, outdir, name='bayview'):
         meta['world']['drawDistance'] = int(world.draw_distance * bb.SCALE)
     with open(meta_path, 'w') as f:
         json.dump(meta, f, indent=1)
-    if not around:
+    if not around and getattr(world, 'listed', True):
         listing = os.path.join(outdir, 'maps.json')
         built = json.load(open(listing))
         built[name] = world.title

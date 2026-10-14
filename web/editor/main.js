@@ -141,19 +141,26 @@ const editor = {
     this.frameTrack();
     this.refresh();
     this.bindInput();
+    try {
+      if (!localStorage.getItem('ctr-editor-seen-help')) {
+        this.toggleHelp(true);
+        localStorage.setItem('ctr-editor-seen-help', '1');
+      }
+    } catch { /* fine */ }
     // the game boots into the track behind the editor; it's held once it's racing
     const wait = () => {
       const s = window.ctr && window.ctr.state ? window.ctr.state() : null;
       if (s && s.kart && s.eventTime > 0 && (s.gameMode1 & 0x40) === 0) {
         this.ready = true;
-        if (this.mode === 'edit') game.pause(true);
+        // ?drive (the launcher's Drive): straight into the race
+        if (new URLSearchParams(location.search).has('drive')) this.drive();
+        else game.pause(true);
         this.status();
         return;
       }
       setTimeout(wait, 100);
     };
     wait();
-    if (new URLSearchParams(location.search).has('drive')) this.drive();
   },
 
   loadPrefs() {
@@ -785,7 +792,9 @@ const editor = {
       test = { p: [p[0], p[1] + 80, p[2]], yaw: Math.atan2(-f.x, -f.z) };
     }
     if (!this.ready) { this.toast('The game is still loading…'); return; }
+    try { localStorage.setItem(AUTOSAVE, this.snapshot()); } catch { /* full */ }
     const out = game.drive(this.track, test);
+    if (!out) return;
     window.ctrEditor.last = out;
     this.mode = 'drive';
     this.view.visible = false;

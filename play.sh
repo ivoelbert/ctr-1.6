@@ -68,7 +68,7 @@ done
 if [ -f "$NFSU2_ISO" ]; then
   index="$ROOT/build/lev/bayview_tiles/index.bin"
   # shellcheck disable=SC2086
-  if [ ! -f "$index" ] || newer "$index" $(python3 -I tools/deps.py tools/build_world.py --skip tools/vicecity --skip tools/thps4); then
+  if [ ! -f "$index" ] || newer "$index" $(python3 -I tools/deps.py tools/build_world.py --skip tools/vicecity --skip tools/thps4 --skip tools/editor); then
     echo "Building Bayview from Need for Speed: Underground 2 (five to ten minutes)..."
     python3 -I tools/build_world.py "$NFSU2_ISO" "$DISC" "$ROOT/build/lev" bayview
   fi
@@ -78,7 +78,7 @@ fi
 if [ -f "$GTAVC_ISO" ]; then
   index="$ROOT/build/lev/vicecity_tiles/index.bin"
   # shellcheck disable=SC2086
-  if [ ! -f "$index" ] || newer "$index" $(python3 -I tools/deps.py tools/build_world.py --skip tools/nfsu2 --skip tools/thps4); then
+  if [ ! -f "$index" ] || newer "$index" $(python3 -I tools/deps.py tools/build_world.py --skip tools/nfsu2 --skip tools/thps4 --skip tools/editor); then
     echo "Building Vice City from Grand Theft Auto: Vice City (five to ten minutes)..."
     python3 -I tools/build_world.py "$GTAVC_ISO" "$DISC" "$ROOT/build/lev" vicecity
   fi
@@ -88,7 +88,7 @@ fi
 # minute or two each).
 if [ -d "$THPS4_DATA/levels" ]; then
   # shellcheck disable=SC2086
-  THPS4_DEPS="$(python3 -I tools/deps.py tools/build_world.py --skip tools/nfsu2 --skip tools/vicecity)"
+  THPS4_DEPS="$(python3 -I tools/deps.py tools/build_world.py --skip tools/nfsu2 --skip tools/vicecity --skip tools/editor)"
   for code in alc cnv hof jnk kon lon motox sch sf2 zoo skateshop; do
     index="$ROOT/build/lev/thps4_${code}_tiles/index.bin"
     # shellcheck disable=SC2086
@@ -97,6 +97,15 @@ if [ -d "$THPS4_DATA/levels" ]; then
       python3 -I tools/build_world.py "$THPS4_DATA" "$DISC" "$ROOT/build/lev" "thps4_$code"
     fi
   done
+fi
+
+# The track editor's field (tools/editor/): the start level the editor's tracks are driven in
+# (seconds; it needs nothing but the CTR disc).
+index="$ROOT/build/lev/editor_tiles/index.bin"
+# shellcheck disable=SC2086
+if [ ! -f "$index" ] || newer "$index" $(python3 -I tools/deps.py tools/build_world.py --skip tools/nfsu2 --skip tools/vicecity --skip tools/thps4); then
+  echo "Building the track editor's field..."
+  python3 -I tools/build_world.py none "$DISC" "$ROOT/build/lev" editor
 fi
 
 # The game, when it's missing or older than its sources.

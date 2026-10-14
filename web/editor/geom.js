@@ -39,11 +39,13 @@ export const apply3 = (M, v) => [
 export function transformOf(piece) {
   const R = rotation(piece.yaw || 0, piece.pitch || 0, piece.roll || 0);
   const t = [piece.x || 0, piece.y || 0, piece.z || 0];
+  const RT = [[R[0][0], R[1][0], R[2][0]], [R[0][1], R[1][1], R[2][1]], [R[0][2], R[1][2], R[2][2]]];
   return {
     R,
     t,
     point: (p) => add(apply3(R, p), t),
     dir: (d) => apply3(R, d),
+    invDir: (d) => apply3(RT, d),
   };
 }
 

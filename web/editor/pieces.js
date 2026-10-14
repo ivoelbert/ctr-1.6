@@ -233,6 +233,8 @@ function emitSweep(pc, E) {
       return { p: madd(at(u, t), fr.u, -thick), uv: [(t + 1) * W / 2 / TEXEL, arcAt(u) / TEXEL] };
     }, { tex: pc.sideTex || 'concrete', kind: 'wall', out: (p, u) => scale(sweepFrame(pc, u).u, -1), underside: true });
   }
+  // pillars down to the ground under a raised road (the piece's place, E.world, says how far)
+  if (pc.supports !== false && E.world) emitSupports(pc, E, at, thick);
   // a start line: a checker band across the road at the middle
   if (pc.type === 'start') {
     const s0 = 0.5 - 96 / L, s1 = 0.5 + 96 / L;
@@ -250,6 +252,31 @@ function emitSweep(pc, E) {
       const fr = sweepFrame(pc, s);
       return { p: madd(at(s, t), fr.u, 4), uv: [v * 256, u * 256] };
     }, { tex: 'boost', kind: 'boost', out: (p, u) => sweepFrame(pc, s0 + (s1 - s0) * u).u, super: pc.boost === 'super' });
+  }
+}
+
+// pillars every couple of blocks under a sweep that's off the ground: from its underside straight
+// down (in the world) to the ground, drawn in the piece's own coordinates
+function emitSupports(pc, E, at, thick) {
+  const W = E.world;
+  const L = sweepLength(pc);
+  const n = Math.max(1, Math.round(L / (2.5 * BLOCK)));
+  const r = Math.min(160, (pc.width || BLOCK) * 0.09);
+  for (let k = 0; k < n; k++) {
+    const s = (k + 0.5) / n;
+    const fr = sweepFrame(pc, s);
+    const top = madd(fr.p, fr.u, -thick);
+    const wtop = W.point(top);
+    const h = wtop[1] - E.groundY;
+    if (h < 300) continue;
+    // straight down in the world, in the piece's terms
+    const down = W.invDir([0, -h, 0]);
+    const seg = 8;
+    E.surface(seg, Math.max(1, Math.ceil(h / 1024)), (u, v) => {
+      const a = u * 2 * Math.PI;
+      const ring = W.invDir([Math.cos(a) * r, 0, -Math.sin(a) * r]);
+      return { p: add(add(top, ring), scale(down, v)), uv: [u * 2 * Math.PI * r / TEXEL, v * h / TEXEL] };
+    }, { tex: pc.supportTex || 'concrete', kind: 'wall', out: (p, u) => W.invDir([Math.cos(u * 2 * Math.PI), 0, -Math.sin(u * 2 * Math.PI)]) });
   }
 }
 

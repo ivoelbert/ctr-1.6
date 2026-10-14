@@ -31,10 +31,14 @@ class Emitter {
     this.xf = null;
     this.piece = null;
   }
-  begin(piece) {
+  // world: the piece's real place (supports reach the ground from it); the quadblocks are
+  // made in the piece's place too, unless local (the editor's view moves them as a whole)
+  begin(piece, local = false) {
     this.piece = piece;
     const T = transformOf(piece);
-    this.stack = [{ point: T.point, dir: T.dir }];
+    this.world = T;
+    this.groundY = GROUND_Y;
+    this.stack = local ? [{ point: (p) => p, dir: (d) => d }] : [{ point: T.point, dir: T.dir }];
   }
   get top() { return this.stack[this.stack.length - 1]; }
   // draws fn in a frame of the piece's (fr: p, f, r, u: local -z is f)
@@ -109,7 +113,7 @@ export function asBuilt(pc) {
 export function localQuads(pc) {
   const E = new Emitter({});
   const built = asBuilt(pc);
-  E.begin({ ...built, x: 0, y: 0, z: 0, yaw: 0, pitch: 0, roll: 0 });
+  E.begin(built, true);
   emitPiece(built, E);
   return E.quads;
 }
@@ -149,6 +153,28 @@ export function findRoute(pieces) {
         next = { piece: pc, dir: -1, end: { p: a.p, f: scale(a.f, -1) } };
         break;
       }
+    }
+    if (!closed && !next) {
+      // a jump: an entry ahead (up to 10 blocks), near the line the end points along, facing on
+      let best = null, bd = Infinity;
+      const fh = norm([end.f[0], 0, end.f[2]]);
+      for (const pc of sweeps) {
+        const w = W.get(pc);
+        for (const [s, dir] of [[0, 1], [1, -1]]) {
+          if (pc !== start && used.has(pc)) continue;
+          if (pc === start && s !== 0) continue;
+          const c = w.at(s);
+          const cf = dir > 0 ? c.f : scale(c.f, -1);
+          const d = sub(c.p, end.p);
+          const ahead = d[0] * fh[0] + d[2] * fh[2];
+          const side = Math.abs(d[0] * fh[2] - d[2] * fh[0]);
+          if (ahead < 256 || ahead > 10 * 1024 || side > 768 + ahead * 0.15 || dot(norm([cf[0], 0, cf[2]]), fh) < 0.7) continue;
+          const score = ahead + side * 3;
+          if (score < bd) { bd = score; best = { piece: pc, dir, end: dir > 0 ? w.at(1) : { p: w.at(0).p, f: scale(w.at(0).f, -1) } }; }
+        }
+      }
+      if (best && best.piece === start) { closed = true; break; }
+      if (best) next = best;
     }
     if (closed || !next) break;
     used.add(next.piece);
@@ -295,12 +321,22 @@ export function compileTrack(track, atlas, textures, test = null) {
     return Math.max(24, Math.min(255, Math.round(128 * k)));
   };
   if (track.ground !== false) {
-    const G = 1024, n = (2 * FIELD) / G;
     const r = rect(groundTex);
     const c = shadeOf([0, 1, 0], 'floor');
-    for (let a = 0; a < n; a++) {
-      for (let b = 0; b < n; b++) {
-        const x0 = -FIELD + a * G, z0 = -FIELD + b * G;
+    const cells = [];
+    const G = 1024, n = (2 * FIELD) / G;
+    for (let a = 0; a < n; a++) for (let b = 0; b < n; b++) cells.push([-FIELD + a * G, -FIELD + b * G, G]);
+    // past the field, a ring of bigger squares towards the horizon: as far as the window's
+    // 16-bit positions go (the engine puts the 3 x 3 tiles together round the middle one's)
+    const H = 4096, OUT = FIELD + H;
+    for (let x0 = -OUT; x0 < OUT; x0 += H) {
+      for (let z0 = -OUT; z0 < OUT; z0 += H) {
+        if (x0 >= -FIELD && x0 + H <= FIELD && z0 >= -FIELD && z0 + H <= FIELD) continue;
+        cells.push([x0, z0, H]);
+      }
+    }
+    for (const [x0, z0, G] of cells) {
+      {
         const pos = new Array(9), uv = new Array(9);
         for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) {
           // u along x, v along z: the front, (v) x (u), faces up

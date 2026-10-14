@@ -2,9 +2,11 @@
 origin, and its start in the middle. The page draws its own tiles over it (web/editor/), so all
 this gives the game is a start level: where the karts start, the respawns, the minimap, the modes.
 """
+from collections import namedtuple
+
 import numpy as np
 
-from thps4.level import Texture
+Texture = namedtuple('Texture', 'name rgba')
 
 FIELD = 240.0       # metres across (the editor's build area is 3 x 3 tiles of 256 m: this sits inside)
 CELL = 20.0         # metres a ground triangle pair
@@ -22,6 +24,7 @@ def grass(n=64, seed=7):
 class EditorField:
     name = 'editor'
     title = 'Track Editor'
+    listed = False      # not a map of the list: the launcher's editor panel opens it
     clear_colors = [(110, 170, 230, 1), (150, 150, 150, 1), (110, 170, 230, 1)]
     skip_solids = ()
     skip_textures = ()

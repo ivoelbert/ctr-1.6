@@ -46,30 +46,34 @@ export function openEnds(track) {
     d.f[0] * c.f[0] + d.f[1] * c.f[1] + d.f[2] * c.f[2] < -0.9));
 }
 
-// a loop to start from: the start, and round
+// a loop to start from: up onto pillars, a banked curve, a jump over a gap, a half pipe, a boost,
+// and a bridge back round to the start
 export function demoTrack() {
   const t = newTrack('Demo loop');
   const add = (pc) => { t.pieces.push(pc); return pc; };
-  let pc = add(makePiece('start', { x: 0, y: 0, z: 2048, yaw: 0 }));
-  const next = (type, extra) => {
-    const ends = worldConnectors(pc).filter((c) => c.end === 1);
-    pc = add(attachTo(ends[0], type, extra));
-    return pc;
-  };
-  // a rectangle of curves (radius 2048) and sides of 6144 and 4096: it closes on the start
+  const exit = (pc) => worldConnectors(pc).find((c) => c.end === 1);
+  const start = add(makePiece('start', { x: 0, y: 0, z: 6144, yaw: 0 }));
+  let pc = start;
+  const next = (type, extra) => { pc = add(attachTo(exit(pc), type, extra)); return pc; };
+  next('straight2');
+  next('curve2');
   next('slopeUp');
-  next('straight');
-  next('straight');
-  next('curve2');
   next('straight2');
-  next('curve2', { bank: 20, bankMode: 'arc' });
-  next('slopeDown');
+  next('bankedCurve');
+  next('straight');
+  next('kicker');
+  // the jump: a kart at full speed clears a block's gap off it, landing two levels down
+  const e = exit(pc);
+  const fh = norm([e.f[0], 0, e.f[2]]);
+  pc = add(makePiece('straight2', { x: e.p[0] + fh[0] * 1024, y: e.p[1] - 2 * 256, z: e.p[2] + fh[2] * 1024, yaw: yawOf(fh) }));
+  next('slopeDown', { rise: -256 });
+  next('curve2');
+  next('halfpipe');
+  next('straight');
   next('boost');
-  next('straight');
-  next('straight');
-  next('straight');
-  next('curve2');
-  next('straight2');
-  next('curve2');
+  next('curve4');
+  // and back to the start's line
+  const startIn = worldConnectors(start).find((c) => c.end === 0);
+  add(bridge(exit(pc), startIn));
   return t;
 }

@@ -47,6 +47,15 @@ export class Game {
 
   // drive the track now: compiled, swapped in, the race started over (no countdown)
   drive(track, test = null) {
+    // the game left the editor's level (its pause menu's Quit): back in with a reload, the
+    // track autosaved
+    const s = window.ctr && window.ctr.state();
+    if (s && s.level !== 0) {
+      const q = new URLSearchParams(location.search);
+      q.set('drive', '');
+      location.search = q.toString();
+      return null;
+    }
     const out = this.write(track, test);
     this.M._NativeWeb_EditorRestart(1);
     this.pause(false);

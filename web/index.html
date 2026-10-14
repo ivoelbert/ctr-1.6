@@ -53,6 +53,13 @@
     background: rgba(20, 14, 8, .92); color: var(--text); border: 1px solid var(--accent); border-radius: 8px;
     padding: 8px 14px; font: 13px/1.4 ui-monospace, monospace; pointer-events: none; opacity: 0; transition: opacity .3s; }
   #toast.show { opacity: 1; }
+  #editorPanel { grid-column: 1 / -1; }
+  .ed-open { width: 100%; padding: 11px; font: 700 15px/1 system-ui, sans-serif; color: #1a0f04; background: linear-gradient(180deg, var(--accent-2), var(--accent)); border: 0; border-radius: 10px; cursor: pointer; }
+  #trackList { margin-top: 10px; display: grid; gap: 6px; }
+  #trackList .trk { display: flex; gap: 8px; align-items: center; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; }
+  #trackList .trk span { flex: 1; font-weight: 600; }
+  #trackList .trk button { background: #3a2916; color: var(--text); border: 1px solid #6a4f2f; border-radius: 7px; padding: 5px 10px; cursor: pointer; font: inherit; }
+  #trackList .trk button:hover { border-color: var(--accent); }
 </style>
 </head>
 <body>
@@ -99,6 +106,13 @@
           </label>
         </div>
         <button id="go">Drive</button>
+      </div>
+      <div class="panel" id="editorPanel">
+        <h2>Track editor</h2>
+        <p class="note" style="margin-top:0">Build your own track, Trackmania style, and drive it: <kbd>Tab</kbd> switches
+          between the editor and the race at once.</p>
+        <button id="openEditor" class="ed-open">Open the track editor</button>
+        <div id="trackList"></div>
       </div>
       <div class="panel">
         <h2>Controls</h2>
@@ -450,6 +464,26 @@
       document.getElementById('nomaps').hidden = mapSel.options.length > 0;
       document.getElementById('go').disabled = mapSel.options.length === 0;
     });
+    // the track editor, and the tracks made in it (tools/serve.mjs keeps them in tracks/)
+    const charParam = () => `&character=${document.getElementById('character').value}`;
+    document.getElementById('openEditor').addEventListener('click', () => { location.search = '?editor' + charParam(); });
+    fetch('tracks/', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : [])).then((list) => {
+      const box = document.getElementById('trackList');
+      for (const t of list) {
+        const row = document.createElement('div');
+        row.className = 'trk';
+        const name = document.createElement('span');
+        name.textContent = t.name;
+        const drive = document.createElement('button');
+        drive.textContent = 'Drive';
+        drive.addEventListener('click', () => { location.search = `?editor&drive&track=${encodeURIComponent(t.name)}` + charParam(); });
+        const edit = document.createElement('button');
+        edit.textContent = 'Edit';
+        edit.addEventListener('click', () => { location.search = `?editor&track=${encodeURIComponent(t.name)}` + charParam(); });
+        row.append(name, drive, edit);
+        box.appendChild(row);
+      }
+    }).catch(() => {});
     playersSel.addEventListener('change', () => {
       document.getElementById('playersNote').hidden = playersSel.value === '1';
     });
