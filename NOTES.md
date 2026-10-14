@@ -418,7 +418,23 @@ case): `lvlscn.dat`, `lvltex.dat`, `lvl.qb`, `lvlcol.dat` (collision; not read).
 - Textures are drawn by code (textures.js) into a borderless "CTRW" atlas; the editor's view
   (three.js) draws the same quadblocks with the same canvases.
 - `Module.ctrPaused` holds the game at its VBlank wait while you build, and
-  `NativeWeb_PauseAudio` its sound (the SPU renders in SDL's callback, on its own).
+  `NativeWeb_PauseAudio` its sound (the SPU renders in SDL's callback, on its own). Key-ups go
+  on to the game while you build (a key let go then stayed down in it).
+- The route file also carries the sky (the level's clear colours; split screen's one clear
+  colour and Dingo Canyon's glow gradient too, or the views below the first show its sunset),
+  the grid (two columns of four behind the line) and the weather: retail's rain buffer (Tiger
+  Temple's rain, Blizzard Bluff's snow) and every quadblock's weather_intensity at retail's 60.
+  A banked level's quadblocks hold their vertex bank where retail keeps the weather's vanish
+  rate, so the frame takes the editor's from `NativeWorld_WeatherVanish`.
+- CTR's textures (tools/editor/ctrtex.py): a quadblock face's IconGroup4 holds three levels of
+  detail of one texture (16, 32, 64 texels: far, middle, near) and a spare; the near one is read
+  out of the level's VRM (TIM-like blocks of VRAM: x, y, w, h in 16-bit words) through its
+  4- or 8-bit palette (colour 0 see-through). Cut-outs and flat colours are left out.
+- Signs: each different text is drawn into one of 16 slots of the atlas; the game reloads the
+  atlas when they change (`NativeWeb_ReloadAtlas`). The editor's view reads textures top-down
+  as the atlas does (three.js's flipY off).
+- The engine's window is 16-bit round the middle tile: the ground ring stops at 28672 units, and
+  the compiler drops any quadblock past 32000 (one wrapped round wrecks the window's BSP).
 
 ## Tools
 
