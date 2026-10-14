@@ -389,6 +389,37 @@ case): `lvlscn.dat`, `lvltex.dat`, `lvl.qb`, `lvlcol.dat` (collision; not read).
   (the start's first), the one whose floor reaches farthest and back, and the two places
   farthest apart that it reaches and is reached from.
 
+## The track editor (web/editor/, tools/editor/)
+
+- The field is a world (tools/editor/world.py, built by play.sh in seconds: Dingo Canyon's four
+  modes, its start, respawns and minimap) whose tiles the page replaces: `compile.js` turns the
+  track's pieces into quadblocks, tile LEVs (`lev.js`, levwriter's mesh-only level ported),
+  index.bin, map.bin and route.bin in ~50 ms, and `NativeWeb_EditorRestart` restarts the race on
+  them (`MainMain`'s state 2, as the pause menu's Restart once the flag covers the screen):
+  `NativeWorld_LevelStart` reads the index and tiles again (the page writes each tile when the
+  engine asks, `ctrFetchTile`), route.bin puts the editor's start, checkpoints and sky in place
+  of the level's, and a quick start skips the countdown (the lights at -960, the clock at 0:
+  it's only zeroed while they count; the race HUD on, as the fly-in's end does). Tab to racing:
+  ~40 ms.
+- The field is the 3 x 3 tiles round the origin (48 x 48 blocks of 1024 units), the whole of one
+  window: it never follows the kart (`s_fixedWindow`), so the origin stays put, and the route's
+  16-bit positions with it. Nothing may reach past +-32767 of the middle: the window's vertices
+  are 16-bit (a ground ring to 40960 wrapped round, and the ground went, collision and all).
+- Laps: a lap counts when the distance to the finish jumps from under 1200 to over 32000
+  (PlayLevel.c), so a short track's distances are stretched to 40000. The route follows the
+  pieces' connectors from the start round back to it, and on over a gap to a road ahead (a
+  jump: a kart at full speed off the Jump clears a block). Floors off the route take the node
+  behind their nearest route point (mask grab calls a big shortcut, as retail).
+- Pieces are sweeps (a cross section along a line: straight, arc, or a cubic for the bridge,
+  with a slope profile and a bank profile), boxes, wedges, quarter pipes, cylinders, trees,
+  gates; 3 x 3 samples a quadblock, its front chosen by the side the piece says is out. Floors
+  up to ~72 degrees are ground (quarter pipes ride up and back). Turbo pads are retail's: a
+  drawn quadblock with the trigger flag (0xA040, terrain 1; 2 super).
+- Textures are drawn by code (textures.js) into a borderless "CTRW" atlas; the editor's view
+  (three.js) draws the same quadblocks with the same canvases.
+- `Module.ctrPaused` holds the game at its VBlank wait while you build, and
+  `NativeWeb_PauseAudio` its sound (the SPU renders in SDL's callback, on its own).
+
 ## Tools
 
 - `tools/navgrid.py`: the drivable grid (from the level's own collision data), A*, what's

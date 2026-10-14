@@ -309,6 +309,25 @@ EMSCRIPTEN_KEEPALIVE void NativeWeb_Teleport(int x, int y, int z, int angle)
 	d->speedApprox = 0;
 }
 
+// The track editor's test drive (web/editor/): the race starts again at once on the tiles,
+// map and route the page has just written (native_world.h), without the countdown when quick.
+EMSCRIPTEN_KEEPALIVE void NativeWeb_EditorRestart(int quick)
+{
+	NativeWorld_RequestReload(quick);
+	// as the pause menu's restart does once the checkered flag covers the screen
+	sdata->mainGameState = 2;
+	sdata->Loading.stage = LOAD_IDLE;
+	sdata->gGT->gameMode1 &= ~(LOADING | PAUSE_ALL | END_OF_RACE);
+}
+
+// The custom level's texture atlas again (the editor's, once it's redrawn assets/dust2/atlas.rgba).
+EMSCRIPTEN_KEEPALIVE int NativeWeb_ReloadAtlas(void)
+{
+	char path[512];
+	snprintf(path, sizeof(path), "%s/dust2/atlas.rgba", NativeAssets_GetAssetDir());
+	return NativeRenderer_LoadVirtualAtlas(path);
+}
+
 // Gives player 1 a boost of `reserves` (960 a second), as a powerslide's or a turbo pad's would.
 EMSCRIPTEN_KEEPALIVE void NativeWeb_Boost(int reserves)
 {

@@ -10,3 +10,5 @@
 *.pyc
 __pycache__/
 .DS_Store
+# Your tracks from the track editor (tools/serve.mjs saves them here): yours to keep
+/tracks/

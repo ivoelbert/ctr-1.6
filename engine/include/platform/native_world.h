@@ -24,6 +24,10 @@ int NativeWorld_Info(int *out);
 // out (RenderLists.c), or a dense city's frame runs out of primitive memory
 int NativeWorld_DrawDistance(void);
 void NativeWorld_SetDrawDistance(int units);
+// The track editor (web/editor/): the page writes new tiles, index, map and route into
+// assets/world/ and asks for a restart; the restart reads them all again (the route: the start
+// and the checkpoints in place of the level's) and, quick, starts without the countdown.
+void NativeWorld_RequestReload(int quick);
 struct UIMap;
 int NativeWorld_MapIconPos(const struct UIMap *map, int *posX, int *posY);
 

@@ -2307,6 +2307,27 @@ internal int NativeAudio_DrainRenderedFramesNoLock(s16 *out, int frameCount)
 	return framesDrained;
 }
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+// NOTE(ctr-dust2): the track editor holds the game while you build (Module.ctrPaused); the
+// sound would play on (the SPU renders in SDL's callback), so the device stops with it.
+EMSCRIPTEN_KEEPALIVE void NativeWeb_PauseAudio(int paused)
+{
+	if (s_audio.output.stream == NULL)
+	{
+		return;
+	}
+	if (paused)
+	{
+		SDL_PauseAudioStreamDevice(s_audio.output.stream);
+	}
+	else
+	{
+		SDL_ResumeAudioStreamDevice(s_audio.output.stream);
+	}
+}
+#endif
+
 internal void SDLCALL NativeAudio_StreamCallback(void *userdata, SDL_AudioStream *stream, int additional_amount, int total_amount)
 {
 	const int frameBytes = (int)sizeof(s16) * NATIVE_AUDIO_CHANNELS;

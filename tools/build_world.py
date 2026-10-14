@@ -41,6 +41,7 @@ import track  # noqa: E402
 from nfsu2.world import Bayview  # noqa: E402
 from vicecity.world import ViceCity  # noqa: E402
 from thps4.world import LEVELS as THPS4_LEVELS, Thps4Level  # noqa: E402
+from editor.world import EditorField  # noqa: E402
 
 TILE = 256.0            # metres: 16384 units, 3 x 3 of them within 16-bit positions
 WORLDS = {
@@ -49,6 +50,8 @@ WORLDS = {
     # the islands reach x -2458 to 1709, y -2027 to 1896; the sea round them, a tile's worth
     'vicecity': dict(source=ViceCity, bounds=(-2600.0, -2150.0, 1850.0, 2000.0)),
 }
+# the track editor's field (GAME.iso: unused; the page draws the track's tiles over it)
+WORLDS['editor'] = dict(source=EditorField, bounds=None)
 # Tony Hawk's Pro Skater 4's levels, each a world (GAME.iso: the game's data folder; bounds: its own)
 for _code in THPS4_LEVELS:
     WORLDS['thps4_' + _code] = dict(source=lambda path, code=_code: Thps4Level(path, code), bounds=None)
@@ -303,7 +306,7 @@ def main(iso, disc, outdir, name='bayview'):
         meta['world']['drawDistance'] = int(world.draw_distance * bb.SCALE)
     with open(meta_path, 'w') as f:
         json.dump(meta, f, indent=1)
-    if not around:
+    if not around and getattr(world, 'listed', True):
         listing = os.path.join(outdir, 'maps.json')
         built = json.load(open(listing))
         built[name] = world.title
