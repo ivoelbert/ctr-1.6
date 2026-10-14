@@ -1092,10 +1092,11 @@ const editor = {
       else handled = false;
       if (handled) ev.preventDefault();
     }, true);
+    // key-ups go on to the game, held or not: a key let go while you build (the gas held through
+    // Tab) would stay down in it otherwise
     window.addEventListener('keyup', (ev) => {
       keys.delete(ev.code);
       if (ev.code === 'Space') { spaceHeld = false; leftButton(false); }
-      if (this.mode === 'edit') ev.stopImmediatePropagation();
     }, true);
 
     window.addEventListener('blur', () => keys.clear());
