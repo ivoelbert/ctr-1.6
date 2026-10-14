@@ -19,6 +19,25 @@ export function attachTo(c, type, extra = {}) {
   return makePiece(type, { x: c.p[0], y: c.p[1], z: c.p[2], yaw, pitch: Math.abs(pitch) < 0.01 ? 0 : pitch, ...extra });
 }
 
+// a bridge from connector a (out of its piece) to b: a road along a cubic that leaves a's
+// piece the way it faces and arrives into b's (b: a connector, or { p, f } a free end facing f)
+export function bridge(a, b, extra = {}) {
+  const yaw = yawOf(a.f);
+  const fromPitch = Math.asin(Math.max(-1, Math.min(1, a.f[1]))) / DEG;
+  const pc = makePiece('bridge', { x: a.p[0], y: a.p[1], z: a.p[2], yaw, pitch: 0, ...extra });
+  const T = transformOf(pc);
+  const inv = (v) => {
+    // R is a turn about y: its inverse, its transpose
+    const R = T.R;
+    return [R[0][0] * v[0] + R[1][0] * v[1] + R[2][0] * v[2], R[0][1] * v[0] + R[1][1] * v[1] + R[2][1] * v[2], R[0][2] * v[0] + R[1][2] * v[1] + R[2][2] * v[2]];
+  };
+  const to = inv([b.p[0] - a.p[0], b.p[1] - a.p[1], b.p[2] - a.p[2]]);
+  const arrive = inv(b.end === undefined ? b.f : [-b.f[0], -b.f[1], -b.f[2]]);
+  const toYaw = yawOf(arrive);
+  const toPitch = Math.asin(Math.max(-1, Math.min(1, arrive[1] / (Math.hypot(...arrive) || 1)))) / DEG;
+  return Object.assign(pc, { to: to.map((v) => Math.round(v * 100) / 100), fromPitch, toYaw, toPitch });
+}
+
 // the connectors no other piece's connector meets: where the track goes on
 export function openEnds(track) {
   const all = track.pieces.flatMap(worldConnectors);

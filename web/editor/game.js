@@ -49,11 +49,13 @@ export class Game {
   drive(track, test = null) {
     const out = this.write(track, test);
     this.M._NativeWeb_EditorRestart(1);
-    this.M.ctrPaused = false;
+    this.pause(false);
     return out;
   }
 
   pause(on) {
     this.M.ctrPaused = !!on;
+    // the sound stops with it (it plays on in SDL's callback otherwise)
+    if (this.M._NativeWeb_PauseAudio) this.M._NativeWeb_PauseAudio(on ? 1 : 0);
   }
 }

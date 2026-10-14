@@ -43,7 +43,32 @@ const BANKS = {
 
 // The middle line of a sweep at s (0..1): position, forward (with the slope), right (level)
 // and up, before the bank. Curves turn left for a positive angle.
+// a bridge's line: a cubic from the origin, leaving forward (its fromPitch up), to `to`,
+// arriving along (toYaw, toPitch); the handles as long as the gap times its tension
+function bezierAt(pc, s) {
+  const P1 = pc.to || [0, 0, -BLOCK];
+  const k = Math.hypot(P1[0], P1[1], P1[2]) * (pc.tension ?? 1);
+  const fp = (pc.fromPitch || 0) * DEG, ty = (pc.toYaw || 0) * DEG, tp = (pc.toPitch || 0) * DEG;
+  const t0 = [0, Math.sin(fp) * k, -Math.cos(fp) * k];
+  const t1 = [-Math.sin(ty) * Math.cos(tp) * k, Math.sin(tp) * k, -Math.cos(ty) * Math.cos(tp) * k];
+  const s2 = s * s, s3 = s2 * s;
+  const h10 = s3 - 2 * s2 + s, h01 = -2 * s3 + 3 * s2, h11 = s3 - s2;
+  const d10 = 3 * s2 - 4 * s + 1, d01 = -6 * s2 + 6 * s, d11 = 3 * s2 - 2 * s;
+  const p = [0, 1, 2].map((i) => h10 * t0[i] + h01 * P1[i] + h11 * t1[i]);
+  const d = [0, 1, 2].map((i) => d10 * t0[i] + d01 * P1[i] + d11 * t1[i]);
+  return { p, d };
+}
+
 export function sweepFrame(pc, s) {
+  if (pc.path === 'bezier') {
+    const { p, d } = bezierAt(pc, s);
+    const f = norm(d);
+    const h = Math.hypot(f[0], f[2]) > 1e-6 ? norm([-f[2], 0, f[0]]) : [1, 0, 0];
+    const up = norm(cross(h, f));
+    const bank = (pc.bank || 0) * (BANKS[pc.bankMode || 'const'] || BANKS.const)(s) * DEG;
+    const rb = norm(add(scale(h, Math.cos(bank)), scale(up, Math.sin(bank))));
+    return { p, f, r: rb, u: norm(cross(rb, f)), along: sweepLength(pc) };
+  }
   const angle = (pc.angle || 0) * DEG;
   const rise = pc.rise || 0;
   const prof = PROFILES[pc.profile || 'smooth'] || PROFILES.smooth;
@@ -72,6 +97,15 @@ export function sweepFrame(pc, s) {
 }
 
 export function sweepLength(pc) {
+  if (pc.path === 'bezier') {
+    let L = 0, prev = bezierAt(pc, 0).p;
+    for (let i = 1; i <= 48; i++) {
+      const cur = bezierAt(pc, i / 48).p;
+      L += Math.hypot(cur[0] - prev[0], cur[1] - prev[1], cur[2] - prev[2]);
+      prev = cur;
+    }
+    return L;
+  }
   const angle = (pc.angle || 0) * DEG;
   const flat = Math.abs(angle) < 1e-6 ? (pc.length || BLOCK) : (pc.radius || BLOCK) * Math.abs(angle);
   return Math.hypot(flat, pc.rise || 0);
@@ -108,9 +142,19 @@ function sectionLen(pc) {
 function emitSweep(pc, E) {
   const W = pc.width || BLOCK;
   const L = sweepLength(pc);
-  // the outer edge of a curve is longer
-  const outer = Math.abs(pc.angle || 0) > 0 ? ((pc.radius || BLOCK) + W / 2) * Math.abs(pc.angle) * DEG : L;
-  const nu = Math.max(1, Math.ceil(Math.max(L, outer) / QB));
+  // the longer edge (a curve's outer one) sets how many quadblocks along
+  let outer = L;
+  for (const side of [-1, 1]) {
+    let e = 0, prev = null;
+    for (let i = 0; i <= 32; i++) {
+      const fr = sweepFrame(pc, i / 32);
+      const q = add(fr.p, scale(fr.r, side * W / 2));
+      if (prev) e += Math.hypot(q[0] - prev[0], q[1] - prev[1], q[2] - prev[2]);
+      prev = q;
+    }
+    outer = Math.max(outer, e);
+  }
+  const nu = Math.max(1, Math.ceil(outer / QB));
   const sl = sectionLen(pc);
   const nv = Math.max(1, Math.ceil(sl / QB));
   const tex = pc.tex || 'road';
@@ -341,6 +385,7 @@ export const CATALOGUE = {
   quarter: { group: 'Stunt', label: 'Quarter pipe', kind: 'quarter', width: 2 * BLOCK, radius: BLOCK, length: 0, tex: 'concrete' },
   wedge: { group: 'Stunt', label: 'Ramp', kind: 'wedge', width: BLOCK, length: 2 * BLOCK, rise: LEVEL * 2, tex: 'hazard' },
 
+  bridge: { group: 'Road', label: 'Bridge: join ends', ...road({ path: 'bezier', to: [0, 0, -2 * BLOCK], tension: 1 }) },
   start: { group: 'Race', label: 'Start / finish', ...road({ length: 2 * BLOCK, tex: 'road', wallL: 0, wallR: 0 }), gate: 'checker' },
   checkpoint: { group: 'Race', label: 'Checkpoint', ...road({ tex: 'road' }), gate: 'blue' },
 

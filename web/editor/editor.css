@@ -1,0 +1,70 @@
+/* The track editor's panels, over its 3D view (web/editor/main.js). */
+#ed { position: fixed; inset: 0; z-index: 10; color: #f3e6d0; font: 13px/1.35 system-ui, -apple-system, Segoe UI, sans-serif; user-select: none; }
+#ed[hidden] { display: none; }
+#ed .ed-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; outline: none; }
+#ed .bar { position: absolute; left: 0; right: 0; display: flex; gap: 8px; align-items: center; padding: 8px 10px;
+  background: linear-gradient(180deg, rgba(24,17,10,.92), rgba(24,17,10,.78)); border-bottom: 1px solid #4a3622; }
+#ed .top { top: 0; flex-wrap: wrap; }
+#ed .title { font-weight: 800; letter-spacing: .5px; color: #ff8a1f; margin-right: 4px; white-space: nowrap; }
+#ed input[type=text], #ed input[type=number], #ed select {
+  background: #2b1e12; color: #f3e6d0; border: 1px solid #5a4329; border-radius: 6px; padding: 5px 7px; font: inherit; }
+#ed input[type=number] { width: 78px; }
+#ed select { min-width: 0; }
+#ed input[type=text].name { width: 180px; font-weight: 600; }
+#ed button { background: #3a2916; color: #f3e6d0; border: 1px solid #6a4f2f; border-radius: 7px; padding: 6px 10px; font: inherit; cursor: pointer; white-space: nowrap; }
+#ed button:hover { background: #4a351c; border-color: #ff8a1f; }
+#ed button.on { background: #ff8a1f; color: #1a0f04; border-color: #ffd34d; font-weight: 700; }
+#ed button.go { background: linear-gradient(180deg, #ffd34d, #ff8a1f); color: #1a0f04; font-weight: 800; border: 0; padding: 8px 16px; font-size: 14px; }
+#ed button.go:hover { filter: brightness(1.08); }
+#ed button:disabled { opacity: .45; cursor: default; }
+#ed .sep { width: 1px; align-self: stretch; background: #4a3622; margin: 0 2px; }
+#ed .grow { flex: 1; }
+#ed .muted { color: #b9a385; }
+#ed .bottom { bottom: 0; top: auto; flex-direction: column; align-items: stretch; gap: 6px; border-top: 1px solid #4a3622; border-bottom: 0;
+  background: linear-gradient(0deg, rgba(24,17,10,.95), rgba(24,17,10,.82)); padding: 6px 10px 8px; }
+#ed .tabs { display: flex; gap: 4px; align-items: center; }
+#ed .tabs button { padding: 4px 12px; border-radius: 6px 6px 0 0; }
+#ed .palette { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: thin; }
+#ed .tile { flex: 0 0 auto; width: 96px; background: #2b1e12; border: 1px solid #4a3622; border-radius: 8px; padding: 2px; cursor: pointer; text-align: center; }
+#ed .tile img { width: 92px; height: 69px; display: block; border-radius: 6px; background: radial-gradient(circle at 50% 40%, #6f8fa8, #34495a); }
+#ed .tile span { display: block; font-size: 11.5px; padding: 2px 0 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#ed .tile:hover { border-color: #ff8a1f; }
+#ed .tile.on { border-color: #ffd34d; background: #4a351c; box-shadow: 0 0 0 2px #ff8a1f inset; }
+#ed .status { display: flex; gap: 14px; align-items: center; font-size: 12.5px; color: #d8c4a5; flex-wrap: wrap; }
+#ed .status b { color: #ffd34d; }
+#ed .ok { color: #3dff8a; }
+#ed .warn { color: #ffa53d; }
+#ed .props { position: absolute; right: 8px; top: 60px; width: 268px; max-height: calc(100% - 270px); overflow: auto;
+  background: rgba(32,22,13,.94); border: 1px solid #4a3622; border-radius: 10px; padding: 10px; }
+#ed .props[hidden] { display: none; }
+#ed .props h3 { margin: 4px 0 6px; font-size: 11.5px; letter-spacing: 1.3px; text-transform: uppercase; color: #b9a385; }
+#ed .props .row { display: grid; grid-template-columns: 92px 1fr; gap: 6px; align-items: center; margin: 4px 0; }
+#ed .props .row label { color: #d8c4a5; }
+#ed .props .row .ctl { display: flex; gap: 6px; align-items: center; }
+#ed .props input[type=range] { flex: 1; min-width: 0; accent-color: #ff8a1f; }
+#ed .props .row input[type=number] { width: 70px; }
+#ed .props .buttons { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+#ed .swatches { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; }
+#ed .swatch { aspect-ratio: 1; border-radius: 5px; border: 2px solid transparent; cursor: pointer; background-size: cover; }
+#ed .swatch.on { border-color: #ffd34d; }
+#ed .swatch:hover { border-color: #ff8a1f; }
+#ed .help { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(760px, calc(100% - 32px)); max-height: calc(100% - 140px); overflow: auto;
+  background: rgba(24,17,10,.97); border: 1px solid #ff8a1f; border-radius: 12px; padding: 18px 20px; }
+#ed .help[hidden] { display: none; }
+#ed .help h2 { margin: 0 0 8px; color: #ff8a1f; }
+#ed .help table { width: 100%; border-collapse: collapse; }
+#ed .help td { padding: 4px 6px; border-bottom: 1px solid #3a2916; vertical-align: top; }
+#ed .help td:first-child { white-space: nowrap; color: #ffd34d; width: 34%; }
+#ed kbd { background: #2b1e12; border: 1px solid #5a4329; border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; font: 11.5px ui-monospace, monospace; }
+#ed .dialog { position: absolute; left: 50%; top: 80px; transform: translateX(-50%); width: min(520px, calc(100% - 32px)); max-height: calc(100% - 200px); overflow: auto;
+  background: rgba(24,17,10,.97); border: 1px solid #ff8a1f; border-radius: 12px; padding: 14px; }
+#ed .dialog[hidden] { display: none; }
+#ed .dialog .item { display: flex; gap: 8px; align-items: center; padding: 6px; border-bottom: 1px solid #3a2916; }
+#ed .dialog .item .n { flex: 1; font-weight: 600; cursor: pointer; }
+#ed .dialog .item .n:hover { color: #ffd34d; }
+#ed .toast { position: absolute; left: 50%; top: 64px; transform: translateX(-50%); background: rgba(20,14,8,.94); border: 1px solid #ff8a1f;
+  border-radius: 8px; padding: 6px 14px; pointer-events: none; opacity: 0; transition: opacity .25s; white-space: nowrap; }
+#ed .toast.show { opacity: 1; }
+#drivehint { position: fixed; left: 50%; top: 10px; transform: translateX(-50%); z-index: 9; background: rgba(20,14,8,.85); color: #f3e6d0;
+  border: 1px solid #ff8a1f; border-radius: 8px; padding: 5px 12px; font: 13px system-ui, sans-serif; pointer-events: none; transition: opacity .6s; }
+#drivehint.fade { opacity: 0; }

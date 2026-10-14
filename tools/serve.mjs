@@ -21,7 +21,8 @@ const MOUNTS = [
   ['/', path.resolve(process.env.WEB_DIR || path.join(ROOT, 'build/web'))],
 ];
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript',
-  '.wasm': 'application/wasm', '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg' };
+  '.wasm': 'application/wasm', '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg',
+  '.css': 'text/css', '.svg': 'image/svg+xml' };
 
 function resolve(url) {
   for (const [prefix, target] of MOUNTS) {
@@ -37,9 +38,60 @@ function resolve(url) {
   return null;
 }
 
+// The track editor's tracks (web/editor/): GET /tracks/ lists them, GET and PUT
+// /tracks/NAME.json read and save one, in TRACKS_DIR (default: tracks/ by this repo).
+const TRACKS = path.resolve(process.env.TRACKS_DIR || path.join(ROOT, 'tracks'));
+const TRACK_NAME = /^[A-Za-z0-9 _.-]{1,64}$/;
+
+function tracks(req, res, url) {
+  const send = (code, body, type = 'application/json') => {
+    res.writeHead(code, { 'Content-Type': type, 'Cache-Control': 'no-store', 'X-Ctr-Dust2': '1' });
+    res.end(typeof body === 'string' ? body : JSON.stringify(body));
+  };
+  const rest = url.slice('/tracks/'.length);
+  if (rest === '') {
+    if (req.method !== 'GET') return send(405, { error: 'GET only' });
+    let list = [];
+    try {
+      list = fs.readdirSync(TRACKS).filter((f) => f.endsWith('.json')).map((f) => {
+        const st = fs.statSync(path.join(TRACKS, f));
+        return { name: f.slice(0, -5), mtime: st.mtimeMs, size: st.size };
+      }).sort((a, b) => b.mtime - a.mtime);
+    } catch { /* none yet */ }
+    return send(200, list);
+  }
+  if (!rest.endsWith('.json') || !TRACK_NAME.test(rest.slice(0, -5))) return send(400, { error: 'bad track name' });
+  const file = path.join(TRACKS, rest);
+  if (req.method === 'GET') {
+    if (!fs.existsSync(file)) return send(404, { error: 'no such track' });
+    return send(200, fs.readFileSync(file, 'utf8'));
+  }
+  if (req.method === 'PUT') {
+    const chunks = [];
+    let size = 0;
+    req.on('data', (c) => { size += c.length; if (size <= 8 << 20) chunks.push(c); });
+    req.on('end', () => {
+      if (size > 8 << 20) return send(413, { error: 'too big' });
+      const text = Buffer.concat(chunks).toString('utf8');
+      try { JSON.parse(text); } catch { return send(400, { error: 'not JSON' }); }
+      fs.mkdirSync(TRACKS, { recursive: true });
+      fs.writeFileSync(file + '.tmp', text);
+      fs.renameSync(file + '.tmp', file);
+      send(200, { ok: true });
+    });
+    return undefined;
+  }
+  if (req.method === 'DELETE') {
+    if (fs.existsSync(file)) fs.renameSync(file, file + '.deleted');
+    return send(200, { ok: true });
+  }
+  return send(405, { error: 'GET, PUT or DELETE' });
+}
+
 http.createServer((req, res) => {
   let url;
   try { url = decodeURIComponent(new URL(req.url, 'http://x').pathname); } catch { url = null; }
+  if (url && url.startsWith('/tracks/')) { tracks(req, res, url); return; }
   let file = url && resolve(url);
   if (file && fs.existsSync(file) && fs.statSync(file).isDirectory()) file = path.join(file, 'index.html');
   if (!file || !fs.existsSync(file)) {

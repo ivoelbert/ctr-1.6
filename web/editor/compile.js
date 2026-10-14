@@ -99,6 +99,21 @@ function frontOf(pos) {
   return n;
 }
 
+// a piece as it's built: a sweep laid on the ground needs no slab under it
+export function asBuilt(pc) {
+  const onGround = pc.kind === 'sweep' && Math.abs(pc.y || 0) < 8 && !(pc.rise > 0) && !(pc.pitch || pc.roll);
+  return onGround ? { ...pc, thick: pc.wallL || pc.wallR ? (pc.thick ?? 96) : 0, noBottom: true } : pc;
+}
+
+// a piece's quadblocks in its own coordinates (the editor's view moves them as a whole)
+export function localQuads(pc) {
+  const E = new Emitter({});
+  const built = asBuilt(pc);
+  E.begin({ ...built, x: 0, y: 0, z: 0, yaw: 0, pitch: 0, roll: 0 });
+  emitPiece(built, E);
+  return E.quads;
+}
+
 // ---- the route: the chain of sweeps from the start round back to it ----
 
 function worldSweep(pc) {
@@ -153,7 +168,7 @@ export function findRoute(pieces) {
   if (closed) for (let k = 1; k <= Math.floor(ns / 2); k++) push(start, k / ns);
   const arc = [0];
   for (let i = 1; i < samples.length; i++) arc.push(arc[i - 1] + len(sub(samples[i].p, samples[i - 1].p)));
-  return { start, seq, closed, samples, arc, length: arc[arc.length - 1] };
+  return { start, seq, closed, samples, arc, length: arc[arc.length - 1], end };
 }
 
 // ---- texture layouts ----
@@ -193,9 +208,7 @@ export function compileTrack(track, atlas, textures, test = null) {
   for (const pc of track.pieces) {
     if (!CATALOGUE[pc.type]) continue;
     E.begin(pc);
-    // a sweep laid on the ground needs no slab under it
-    const onGround = pc.kind === 'sweep' && Math.abs((pc.y || 0)) < 8 && !(pc.rise > 0) && !(pc.pitch || pc.roll);
-    emitPiece(onGround ? { ...pc, thick: pc.wallL || pc.wallR ? (pc.thick ?? 96) : 0, noBottom: true } : pc, E);
+    emitPiece(asBuilt(pc), E);
   }
   const route = findRoute(track.pieces);
 
