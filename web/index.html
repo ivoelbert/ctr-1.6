@@ -53,7 +53,10 @@
     background: rgba(20, 14, 8, .92); color: var(--text); border: 1px solid var(--accent); border-radius: 8px;
     padding: 8px 14px; font: 13px/1.4 ui-monospace, monospace; pointer-events: none; opacity: 0; transition: opacity .3s; }
   #toast.show { opacity: 1; }
-  #editorPanel { grid-column: 1 / -1; }
+  /* the editor under Free drive, the controls beside both */
+  .grid { align-items: start; grid-template-rows: auto 1fr; }
+  .grid > .panel:last-child { grid-column: 2; grid-row: 1 / span 2; }
+  @media (max-width: 760px) { .grid > .panel:last-child { grid-column: auto; grid-row: auto; } }
   .ed-open { width: 100%; padding: 11px; font: 700 15px/1 system-ui, sans-serif; color: #1a0f04; background: linear-gradient(180deg, var(--accent-2), var(--accent)); border: 0; border-radius: 10px; cursor: pointer; }
   #trackList { margin-top: 10px; display: grid; gap: 6px; }
   #trackList .trk { display: flex; gap: 8px; align-items: center; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; }
