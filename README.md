@@ -52,14 +52,23 @@ weapon crates and fruit, and for Counter-Strike's maps its skybox), so keep them
 ## The track editor
 
 The launcher's **Track editor** (or http://localhost:8642/?editor) builds your own tracks, a
-piece at a time, Trackmania style: roads, curves, slopes, banked turns, half pipes, jumps, boost
-pads, quarter pipes, platforms, blocks, decorations, on the block grid or anywhere at any angle
-(grid snap off), every piece's shape and textures to change, and **Tab** drives the track at
-once (it's compiled in the page and swapped into the running race: no loading) and brings you
-back. Lay a loop from the Start / finish round to it and laps count. `H` in the editor lists the
-keys. Tracks are saved in `tracks/` (`Ctrl+S`), and the launcher lists them to drive or edit.
-Everything in them is the editor's own (its textures are drawn by code), so a track is yours to
-share.
+piece at a time, Trackmania style, and **Tab** drives the track at once: it's compiled in the
+page and swapped into the running race (no loading), and Tab or Esc brings you back. Backspace
+while driving starts over at the line; the editor shows your last laps' times.
+
+- Pieces: roads, curves, slopes, banked turns, walled roads, half pipes, jumps, landings, humps,
+  bumps, boost pads (retail's), quarter pipes, ramps, platforms, blocks, hills, ponds, trees,
+  signs with your own text, and a bridge that joins any two open ends with a smooth curve.
+- On the block grid, snapped onto the track's open ends, or anywhere at any angle (grid snap off);
+  a gizmo moves and turns a selection freely; every piece's shape and textures on a panel.
+- The editor's own textures, and (from your disc, `play.sh` takes them) CTR's track textures.
+- A track's ground, sky, light (day to night) and weather (rain, snow); 1-4 players.
+- `H` lists the keys. Lay a loop from the Start / finish round to it and laps count (Close the
+  loop joins it for you). Examples to start from in Open.
+
+Tracks are saved in `tracks/` (`Ctrl+S`; Export / Import for files), and the launcher lists them
+to drive or edit. A track is the editor's own (its textures are drawn by code), unless it uses
+CTR's textures: then it needs a CTR disc to show them.
 
 ## Controls (keyboard)
 
