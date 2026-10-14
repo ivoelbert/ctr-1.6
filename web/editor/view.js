@@ -5,11 +5,10 @@
 import * as THREE from 'three';
 import { OrbitControls } from './vendor/three/OrbitControls.js';
 import { TransformControls } from './vendor/three/TransformControls.js';
-import { localQuads, FIELD, GROUND_Y } from './compile.js';
+import { localQuads, vertexShades, FIELD, GROUND_Y } from './compile.js';
 import { BLOCK, LEVEL } from './pieces.js';
 import { DEG, dot, norm, transformOf } from './geom.js';
 
-const SUN = norm([0.35, 0.85, 0.4]);
 const SUBFACES = [[0, 4, 5, 6], [4, 1, 6, 7], [5, 6, 2, 8], [6, 7, 8, 3]];
 
 export class View {
@@ -119,7 +118,7 @@ export class View {
     const uv = geo.attributes.uv;
     for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * size / 1024, uv.getY(i) * size / 1024);
     const tex = this.textureById.get(texId) || this.textureById.get('grass');
-    const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: tex, color: new THREE.Color(0.93, 0.93, 0.93) }));
+    const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: tex, color: new THREE.Color(0.86, 0.86, 0.86) }));
     mesh.position.y = GROUND_Y;
     mesh.userData.ground = true;
     return mesh;
@@ -133,7 +132,7 @@ export class View {
     this.scene.background = new THREE.Color(sky);
     this.scene.fog.color = new THREE.Color(sky).lerp(new THREE.Color(0xffffff), 0.25 * light);
     for (const m of this.materials.values()) if (!m.transparent) m.color.setScalar(light);
-    this.ground.material.color.setScalar(0.93 * light);
+    this.ground.material.color.setScalar(0.86 * light);
   }
 
   setGround(on, texId) {
@@ -177,10 +176,9 @@ export class View {
       const key = q.tex + (q.double ? '|d' : '');
       if (!byTex.has(key)) byTex.set(key, { tex: q.tex, double: q.double, pos: [], uv: [], col: [] });
       const b = byTex.get(key);
-      const nw = T.dir(q.n);
-      const floor = q.kind === 'floor' && nw[1] > 0.3;
-      const k = floor ? 0.92 + 0.08 * Math.max(0, dot(nw, SUN)) : 0.55 + 0.45 * Math.max(0, dot(nw, SUN));
-      const c = q.kind === 'boost' ? 1.1 : k;
+      // the game multiplies the texture by the shade as it's shown (0x80 = 1); three.js by
+      // linear colours: the shade in its terms
+      const shades = vertexShades(q, 1, T.dir).map((v) => Math.pow(q.kind === 'boost' ? 1.1 : v / 128, 2.2));
       for (const [a, b1, c1, d] of SUBFACES) {
         for (const tri of [[a, b1, c1], [b1, d, c1]]) {
           const p = tri.map((s) => q.pos[s]);
@@ -191,7 +189,7 @@ export class View {
           for (const s of order) {
             b.pos.push(q.pos[s][0], q.pos[s][1], q.pos[s][2]);
             b.uv.push(q.uv[s][0] / 256, q.uv[s][1] / 256);
-            b.col.push(c, c, c);
+            b.col.push(shades[s], shades[s], shades[s]);
           }
         }
       }
@@ -243,14 +241,35 @@ export class View {
     const sig = pc ? JSON.stringify({ ...pc, x: 0, y: 0, z: 0, id: '' }) + tint : null;
     if (this.ghost && this.ghost.userData.sig === sig) {
       this.place(this.ghost, pc);
+      this.guideTo(pc);
       return;
     }
     if (this.ghost) { this.scene.remove(this.ghost); dispose(this.ghost, true); this.ghost = null; }
+    this.guideTo(pc);
     if (!pc) return;
     this.ghost = this.pieceObject(pc, true, tint);
     this.ghost.userData.sig = sig;
     this.ghost.traverse((o) => { o.userData.piece = null; });
     this.scene.add(this.ghost);
+  }
+
+  // a line from the ghost down to the ground, when it's up in the air
+  guideTo(pc) {
+    if (!this.guide) {
+      const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 1, 0)]);
+      this.guide = new THREE.Line(g, new THREE.LineDashedMaterial({ color: 0xffd34d, dashSize: 80, gapSize: 60, depthTest: false, transparent: true }));
+      this.guide.renderOrder = 10;
+      this.scene.add(this.guide);
+    }
+    const on = pc && (pc.y || 0) > 64;
+    this.guide.visible = !!on;
+    if (!on) return;
+    const pos = this.guide.geometry.attributes.position;
+    pos.setXYZ(0, pc.x, GROUND_Y, pc.z);
+    pos.setXYZ(1, pc.x, pc.y, pc.z);
+    pos.needsUpdate = true;
+    this.guide.geometry.computeBoundingSphere();
+    this.guide.computeLineDistances();
   }
 
   // the mouse's ray: the piece under it, and where it meets the build plane

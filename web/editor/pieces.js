@@ -341,6 +341,27 @@ function emitQuarter(pc, E) {
   }
 }
 
+// terrain: a hill over a width x length footprint, its middle at the origin: round (a
+// smooth mound), ridge (long, round across), mesa (a flat top, slopes round the edge)
+function emitHill(pc, E) {
+  const w = pc.width || 4 * BLOCK, d = pc.length || 4 * BLOCK, h = pc.height ?? 2 * LEVEL;
+  const shape = pc.shape || 'round';
+  const nu = Math.max(1, Math.ceil(w / QB)), nv = Math.max(1, Math.ceil(d / QB));
+  const bump = (u, v) => {
+    const x = 2 * u - 1, z = 2 * v - 1;
+    if (shape === 'ridge') return Math.pow(Math.cos(x * Math.PI / 2), 2);
+    if (shape === 'mesa') {
+      const r = Math.max(Math.abs(x), Math.abs(z));
+      const k = Math.min(1, Math.max(0, (1 - r) / (pc.slope ?? 0.35)));
+      return k * k * (3 - 2 * k);
+    }
+    const r = Math.min(1, Math.hypot(x, z));
+    return Math.pow(Math.cos(r * Math.PI / 2), 2);
+  };
+  E.surface(nu, nv, (u, v) => ({ p: [(u - 0.5) * w, h * bump(u, v), (v - 0.5) * d], uv: [u * w / TEXEL, v * d / TEXEL] }),
+    { tex: pc.tex || 'grass', kind: 'floor', out: [0, 1, 0] });
+}
+
 // a cylinder (pillar, post), base at the origin
 function emitCylinder(pc, E) {
   const r = pc.radius ?? 128, h = pc.height ?? 1024, seg = Math.max(8, Math.round(r / 32));
@@ -422,6 +443,14 @@ export const CATALOGUE = {
   block: { group: 'Blocks', label: 'Block', kind: 'box', width: BLOCK, height: BLOCK, length: BLOCK, tex: 'stone' },
   pillar: { group: 'Blocks', label: 'Pillar', kind: 'cylinder', radius: 128, height: 1024, tex: 'concrete' },
 
+  hill: { group: 'Terrain', label: 'Hill', kind: 'hill', width: 4 * BLOCK, length: 4 * BLOCK, height: 2 * LEVEL, shape: 'round', tex: 'grass' },
+  bigHill: { group: 'Terrain', label: 'Big hill', kind: 'hill', width: 8 * BLOCK, length: 8 * BLOCK, height: 6 * LEVEL, shape: 'round', tex: 'grass' },
+  ridge: { group: 'Terrain', label: 'Ridge', kind: 'hill', width: 3 * BLOCK, length: 8 * BLOCK, height: 3 * LEVEL, shape: 'ridge', tex: 'grass' },
+  mesa: { group: 'Terrain', label: 'Mesa', kind: 'hill', width: 6 * BLOCK, length: 6 * BLOCK, height: 4 * LEVEL, shape: 'mesa', slope: 0.4, tex: 'sand' },
+  dune: { group: 'Terrain', label: 'Dune', kind: 'hill', width: 4 * BLOCK, length: 2 * BLOCK, height: LEVEL, shape: 'ridge', tex: 'sand' },
+  snowHill: { group: 'Terrain', label: 'Snow hill', kind: 'hill', width: 6 * BLOCK, length: 6 * BLOCK, height: 4 * LEVEL, shape: 'round', tex: 'snow' },
+  pond: { group: 'Terrain', label: 'Pond', kind: 'platform', width: 4 * BLOCK, length: 4 * BLOCK, height: 8, tex: 'water' },
+  mudPit: { group: 'Terrain', label: 'Mud pit', kind: 'platform', width: 3 * BLOCK, length: 3 * BLOCK, height: 8, tex: 'mud' },
   tree: { group: 'Decor', label: 'Tree', kind: 'tree', height: 1400, radius: 420, tex: 'green' },
   post: { group: 'Decor', label: 'Post', kind: 'cylinder', radius: 40, height: 512, tex: 'white' },
   arch: { group: 'Decor', label: 'Arch', kind: 'gate', width: BLOCK, height: 768, banner: 'yellow' },
@@ -448,6 +477,7 @@ export function emitPiece(pc, E) {
       }
       break;
     case 'platform': emitPlatform(pc, E); break;
+    case 'hill': emitHill(pc, E); break;
     case 'wedge': emitWedge(pc, E); break;
     case 'quarter': emitQuarter(pc, E); break;
     case 'cylinder': emitCylinder(pc, E); break;
