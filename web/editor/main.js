@@ -10,6 +10,7 @@ import { CATALOGUE, makePiece, BLOCK, LEVEL, isSweep, sweepFrame, SPANNED } from
 import { newTrack, demoTrack, worldConnectors, attachTo, openEnds, bridge } from './track.js';
 import { findRoute, FIELD } from './compile.js';
 import { DEG, transformOf, yawOf } from './geom.js';
+import { examples } from './examples.js';
 
 const AUTOSAVE = 'ctr-editor-track';
 const PREFS = 'ctr-editor-prefs';
@@ -602,6 +603,8 @@ const editor = {
     }
     if (done) {
       const before = this.dragStart.before;
+      // a road piece dropped with its start by an open end locks onto it (a magnet)
+      if (this.dragStart.pieces.length === 1) this.magnet(this.dragStart.pieces[0].id);
       this.dragStart = null;
       if (this.snapshot() !== before) {
         this.undo.push(before);
@@ -610,6 +613,25 @@ const editor = {
       }
       this.attachGizmo();
     }
+  },
+
+  magnet(id) {
+    const pc = this.track.pieces.find((p) => p.id === id);
+    if (!pc || pc.kind !== 'sweep') return;
+    const mine = worldConnectors(pc).find((c) => c.end === 0);
+    let best = null, bd = 320;
+    for (const c of openEnds({ pieces: this.track.pieces.filter((p) => p.id !== id) })) {
+      const d = Math.hypot(c.p[0] - mine.p[0], c.p[1] - mine.p[1], c.p[2] - mine.p[2]);
+      // facing each other: the end out of its piece, ours back out of ours
+      if (d < bd && c.f[0] * mine.f[0] + c.f[1] * mine.f[1] + c.f[2] * mine.f[2] < -0.85) { bd = d; best = c; }
+    }
+    if (!best) return;
+    const { id: _, x, y, z, yaw, pitch, roll, ...shape } = pc;
+    const at = attachTo(best, pc.type, shape);
+    Object.assign(pc, { x: at.x, y: at.y, z: at.z, yaw: at.yaw, pitch: at.pitch, roll: 0 });
+    const obj = this.view.pieces.get(pc.id);
+    if (obj) this.view.place(obj, pc);
+    this.toast('Snapped onto the end');
   },
 
   rotateSelection(sign) {
@@ -837,7 +859,17 @@ const editor = {
     this.dialog.replaceChildren(
       el('h3', {}, 'Open a track'),
       ...(items.length ? items : [el('p', { class: 'muted' }, 'No saved tracks yet: Save (Ctrl+S) puts one here.')]),
-      el('div', { class: 'item' }, el('span', { class: 'n', onclick: () => { this.commit(() => { this.track = demoTrack(); }); this.nameInput.value = this.track.name; this.frameTrack(); this.refresh(); close(); } }, 'The demo loop'), el('span', { class: 'muted' }, 'built in')),
+      el('h3', { style: 'margin-top:12px' }, 'Examples'),
+      ...examples(game.textures).map(([name, make]) => el('div', { class: 'item' },
+        el('span', { class: 'n', onclick: () => {
+          const t = normalise(make());
+          this.commit(() => { this.track = t; });
+          this.selection.clear();
+          this.detachGizmo();
+          this.frameTrack();
+          this.refresh();
+          close();
+        } }, name), el('span', { class: 'muted' }, 'built in'))),
       el('div', { class: 'buttons', style: 'margin-top:10px; display:flex; gap:6px' },
         el('button', { onclick: () => this.exportTrack(), title: 'Download this track as a file' }, 'Export file'),
         el('button', { onclick: () => this.importTrack(close), title: 'Open a track file' }, 'Import file'),
