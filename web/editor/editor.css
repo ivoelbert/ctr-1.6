@@ -10,6 +10,9 @@
   background: #2b1e12; color: #f3e6d0; border: 1px solid #5a4329; border-radius: 6px; padding: 5px 7px; font: inherit; }
 #ed input[type=number] { width: 78px; }
 #ed select { min-width: 0; }
+#ed .top select { max-width: 104px; }
+#ed .top .muted { min-width: 26px; }
+#ed input[type=color].sky { width: 34px; height: 30px; padding: 2px; border: 1px solid #5a4329; border-radius: 6px; background: #2b1e12; cursor: pointer; }
 #ed input[type=text].name { width: 150px; font-weight: 600; }
 #ed button { background: #3a2916; color: #f3e6d0; border: 1px solid #6a4f2f; border-radius: 7px; padding: 5px 9px; font: inherit; cursor: pointer; white-space: nowrap; }
 #ed button:hover { background: #4a351c; border-color: #ff8a1f; }

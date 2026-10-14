@@ -116,6 +116,7 @@ if [ ! -f "$WASM" ] || [ -n "$(find engine web/ctr-pre.js build-web.sh -type f -
 elif [ web/index.html -nt build/web/index.html ]; then
   cp web/index.html build/web/index.html
 fi
+rsync -a --delete web/editor/ build/web/editor/
 
 open_browser() {
   # JSPI: Chrome or Edge 137+.
@@ -133,9 +134,13 @@ open_browser() {
   fi
 }
 
-# Already serving? Then just open it.
+# Already serving? Then just open it (an older server than this one's tools/serve.mjs serves the
+# game, but not the track editor's saved tracks: it says so).
 if curl -s -I "$URL" 2>/dev/null | grep -qi '^x-ctr-dust2:'; then
   echo "Already running at $URL"
+  if ! curl -s -I "$URL" 2>/dev/null | grep -qi '^x-ctr-dust2: *[2-9]'; then
+    echo "  (an older server: stop it, Ctrl-C where it runs, and run ./play.sh again to save tracks to tracks/)"
+  fi
   open_browser
   exit 0
 fi

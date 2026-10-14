@@ -243,7 +243,13 @@ export function makeTextures() {
     ['purple', 'Purple', 0, () => plain(S, [140, 70, 190], 26)],
     ['black', 'Black', 0, () => plain(S, [35, 35, 38], 27)],
   ];
-  return list.map(([id, label, terrain, draw]) => ({ id, label, terrain, size: S, canvas: draw() }));
+  return list.map(([id, label, terrain, draw]) => {
+    const canvas = draw();
+    const px = canvas.getContext('2d').getImageData(0, 0, S, S).data;
+    const average = [0, 0, 0];
+    for (let i = 0; i < px.length; i += 4) { average[0] += px[i]; average[1] += px[i + 1]; average[2] += px[i + 2]; }
+    return { id, label, terrain, size: S, canvas, average: average.map((v) => v / (S * S)) };
+  });
 }
 
 // A borderless "CTRW" atlas (4 layers of 1024 a row, textures at 64-aligned origins): the

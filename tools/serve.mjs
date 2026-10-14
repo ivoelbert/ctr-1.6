@@ -45,7 +45,7 @@ const TRACK_NAME = /^[A-Za-z0-9 _.-]{1,64}$/;
 
 function tracks(req, res, url) {
   const send = (code, body, type = 'application/json') => {
-    res.writeHead(code, { 'Content-Type': type, 'Cache-Control': 'no-store', 'X-Ctr-Dust2': '1' });
+    res.writeHead(code, { 'Content-Type': type, 'Cache-Control': 'no-store', 'X-Ctr-Dust2': '2' });
     res.end(typeof body === 'string' ? body : JSON.stringify(body));
   };
   const rest = url.slice('/tracks/'.length);
@@ -95,14 +95,14 @@ http.createServer((req, res) => {
   let file = url && resolve(url);
   if (file && fs.existsSync(file) && fs.statSync(file).isDirectory()) file = path.join(file, 'index.html');
   if (!file || !fs.existsSync(file)) {
-    res.writeHead(404, { 'X-Ctr-Dust2': '1' }); res.end('not found'); return;
+    res.writeHead(404, { 'X-Ctr-Dust2': '2' }); res.end('not found'); return;
   }
   const stat = fs.statSync(file);
   res.writeHead(200, {
     'Content-Type': TYPES[path.extname(file)] || 'application/octet-stream',
     'Content-Length': stat.size,
     'Cache-Control': 'no-store',
-    'X-Ctr-Dust2': '1',
+    'X-Ctr-Dust2': '2',
   });
   if (req.method === 'HEAD') { res.end(); return; }
   fs.createReadStream(file).pipe(res);

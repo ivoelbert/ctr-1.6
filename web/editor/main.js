@@ -20,9 +20,10 @@ let M = null;
 export async function prepare(Module, params) {
   M = Module;
   game = new Game(Module);
-  const css = document.createElement('link');
-  css.rel = 'stylesheet';
-  css.href = 'editor/editor.css';
+  // the stylesheet as text (an older server sends .css without its type, and the page would
+  // ignore a <link> to it)
+  const css = document.createElement('style');
+  css.textContent = await (await fetch('editor/editor.css', { cache: 'no-store' })).text();
   document.head.appendChild(css);
   const track = await initialTrack(params);
   const out = game.prepare(track);
@@ -42,6 +43,8 @@ async function initialTrack(params) {
       const r = await fetch(`tracks/${encodeURIComponent(name)}.json`, { cache: 'no-store' });
       if (r.ok) return normalise(await r.json());
     } catch { /* fall through */ }
+    const kept = library.get(name);
+    if (kept) return normalise(kept);
   }
   try {
     const saved = localStorage.getItem(AUTOSAVE);
@@ -59,6 +62,23 @@ function normalise(t) {
   });
   return out;
 }
+
+// the tracks saved in this browser (as well as to the server's tracks/, when it has them)
+const LIBRARY = 'ctr-editor-library';
+const library = {
+  all() { try { return JSON.parse(localStorage.getItem(LIBRARY) || '{}'); } catch { return {}; } },
+  get(name) { const t = this.all()[name]; return t ? t.track : null; },
+  put(name, track) {
+    const all = this.all();
+    all[name] = { mtime: Date.now(), track };
+    try { localStorage.setItem(LIBRARY, JSON.stringify(all)); } catch { /* full */ }
+  },
+  remove(name) {
+    const all = this.all();
+    delete all[name];
+    try { localStorage.setItem(LIBRARY, JSON.stringify(all)); } catch { /* fine */ }
+  },
+};
 
 const clone = (o) => JSON.parse(JSON.stringify(o));
 const el = (tag, attrs = {}, ...kids) => {
@@ -178,16 +198,19 @@ const editor = {
     this.groundBtn = el('button', { title: 'The grass under everything (off: the track floats over nothing)', onclick: () => this.commit(() => { this.track.ground = this.track.ground === false; }) }, 'Ground');
     this.groundTex = el('select', { title: 'The ground', onchange: () => this.commit(() => { this.track.groundTex = this.groundTex.value; }) },
       ...['grass', 'sand', 'dirt', 'snow', 'water', 'lava', 'concrete', 'road-plain', 'checker', 'ice', 'mud'].map((t) => el('option', { value: t }, game.textures.find((x) => x.id === t)?.label || t)));
+    this.skyInput = el('input', { type: 'color', class: 'sky', title: 'The sky', onchange: () => this.commit(() => { this.track.sky = this.skyInput.value; }) });
+    this.lightSel = el('select', { title: 'The light: day to night', onchange: () => this.commit(() => { this.track.light = Number(this.lightSel.value); }) },
+      el('option', { value: 1 }, 'Day'), el('option', { value: 0.85 }, 'Afternoon'), el('option', { value: 0.65 }, 'Evening'), el('option', { value: 0.42 }, 'Night'));
     this.undoBtn = el('button', { title: 'Undo (Ctrl+Z)', onclick: () => this.doUndo() }, '↶');
     this.redoBtn = el('button', { title: 'Redo (Ctrl+Shift+Z)', onclick: () => this.doRedo() }, '↷');
     this.snapBtn = el('button', { title: 'Grid snap (G): pieces on the block grid; off, anywhere', onclick: () => this.toggleSnap() }, 'Grid');
     this.snapSize = el('select', { title: 'Grid size', onchange: () => { this.snap.size = Number(this.snapSize.value); this.savePrefs(); } },
-      el('option', { value: BLOCK }, '1 block'), el('option', { value: BLOCK / 2 }, '½ block'), el('option', { value: BLOCK / 4 }, '¼ block'), el('option', { value: BLOCK / 16 }, 'fine'));
+      el('option', { value: BLOCK }, '1'), el('option', { value: BLOCK / 2 }, '½'), el('option', { value: BLOCK / 4 }, '¼'), el('option', { value: BLOCK / 16 }, '1/16'));
     this.rotStep = el('select', { title: 'Rotation step (R)', onchange: () => { this.snap.rot = Number(this.rotStep.value); this.savePrefs(); } },
       el('option', { value: 90 }, '90°'), el('option', { value: 45 }, '45°'), el('option', { value: 15 }, '15°'), el('option', { value: 5 }, '5°'), el('option', { value: 1 }, '1°'));
     this.levelLabel = el('span', { class: 'muted', title: 'Build height (PgUp / PgDn, or Q / E)' });
     const top = el('div', { class: 'bar top' },
-      el('span', { class: 'title' }, 'TRACK EDITOR'),
+      el('span', { class: 'title' }, 'EDITOR'),
       this.nameInput,
       el('button', { title: 'A new, empty track', onclick: () => this.newTrack() }, 'New'),
       el('button', { title: 'Open a saved track', onclick: () => this.openDialog() }, 'Open'),
@@ -197,11 +220,11 @@ const editor = {
       el('span', { class: 'sep' }),
       this.snapBtn, this.snapSize, this.rotStep, this.levelLabel,
       el('span', { class: 'sep' }),
-      this.groundBtn, this.groundTex,
+      this.groundBtn, this.groundTex, this.skyInput, this.lightSel,
       el('span', { class: 'grow' }),
       el('button', { title: 'Help (H)', onclick: () => this.toggleHelp() }, '?'),
-      el('button', { title: 'Drive from where the mouse points (Shift+Tab)', onclick: () => this.drive(true) }, '▶ From here'),
-      el('button', { class: 'go', title: 'Drive the track from the start (Tab)', onclick: () => this.drive() }, '▶ DRIVE  (Tab)'));
+      el('button', { title: 'Drive from where the mouse points (Shift+Tab)', onclick: () => this.drive(true) }, '▶ Here'),
+      el('button', { class: 'go', title: 'Drive the track from the start (Tab)', onclick: () => this.drive() }, '▶ DRIVE'));
     R.appendChild(top);
 
     // the palette
@@ -329,7 +352,10 @@ const editor = {
     this.rotStep.value = String(this.snap.rot);
     this.groundBtn.classList.toggle('on', this.track.ground !== false);
     this.groundTex.value = this.track.groundTex || 'grass';
-    this.levelLabel.textContent = `Height ${this.level}`;
+    this.skyInput.value = this.track.sky || '#6eaae6';
+    this.lightSel.value = String(this.track.light ?? 1);
+    this.view.setEnvironment(this.track.sky || '#6eaae6', this.track.light ?? 1);
+    this.levelLabel.textContent = `▲${this.level}`;
     this.view.buildGrid(this.level * LEVEL);
     if (!quiet) this.renderProps();
     this.status();
@@ -739,24 +765,38 @@ const editor = {
 
   async save() {
     const name = this.fileName();
+    library.put(name, this.track);
     try {
       const r = await fetch(`tracks/${encodeURIComponent(name)}.json`, { method: 'PUT', body: JSON.stringify(this.track, null, 1) });
-      if (!r.ok) throw new Error((await r.json()).error);
-      this.toast(`Saved "${name}"`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      this.toast(`Saved "${name}" (tracks/${name}.json)`);
     } catch (e) {
-      this.toast(`Couldn't save: ${e.message}`);
+      // an older server (play.sh says so): the browser keeps it
+      this.toast(`Saved "${name}" in this browser (restart ./play.sh to save it to tracks/ too)`);
     }
   },
 
   async openDialog() {
     let list = [];
-    try { list = await (await fetch('tracks/', { cache: 'no-store' })).json(); } catch { /* none */ }
+    try {
+      const r = await fetch('tracks/', { cache: 'no-store' });
+      if (r.ok) list = await r.json();
+    } catch { /* none */ }
+    // and the browser's own, the ones the server hasn't
+    for (const [name, t] of Object.entries(library.all())) {
+      if (!list.some((x) => x.name === name)) list.push({ name, mtime: t.mtime, local: true });
+    }
     const close = () => { this.dialog.hidden = true; };
     const items = list.map((t) => el('div', { class: 'item' },
       el('span', { class: 'n', onclick: async () => {
-        const r = await fetch(`tracks/${encodeURIComponent(t.name)}.json`, { cache: 'no-store' });
-        if (!r.ok) return;
-        const loaded = normalise(await r.json());
+        let data = null;
+        if (t.local) data = library.get(t.name);
+        else {
+          const r = await fetch(`tracks/${encodeURIComponent(t.name)}.json`, { cache: 'no-store' });
+          if (r.ok) data = await r.json();
+        }
+        if (!data) return;
+        const loaded = normalise(data);
         this.commit(() => { this.track = loaded; });
         this.nameInput.value = this.track.name;
         this.selection.clear();
@@ -766,7 +806,13 @@ const editor = {
         close();
       } }, t.name),
       el('span', { class: 'muted' }, new Date(t.mtime).toLocaleString()),
-      el('button', { onclick: async (e) => { e.stopPropagation(); if (confirm(`Delete "${t.name}"?`)) { await fetch(`tracks/${encodeURIComponent(t.name)}.json`, { method: 'DELETE' }); this.openDialog(); } } }, '✕')));
+      el('button', { onclick: async (e) => {
+        e.stopPropagation();
+        if (!confirm(`Delete "${t.name}"?`)) return;
+        library.remove(t.name);
+        if (!t.local) await fetch(`tracks/${encodeURIComponent(t.name)}.json`, { method: 'DELETE' }).catch(() => {});
+        this.openDialog();
+      } }, '✕')));
     this.dialog.replaceChildren(
       el('h3', {}, 'Open a track'),
       ...(items.length ? items : [el('p', { class: 'muted' }, 'No saved tracks yet: Save (Ctrl+S) puts one here.')]),

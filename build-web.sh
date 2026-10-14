@@ -69,4 +69,6 @@ fi
 emcc "${CFLAGS[@]}" -c engine/main.c -o "$OUT/main.o"
 emcc "$OUT/main.o" "${LDFLAGS[@]}" -o "$OUT/ctr.js"
 cp web/index.html "$OUT/index.html"
+# the track editor's page code (tools/serve.mjs serves web/editor itself; an older server, this copy)
+rsync -a --delete web/editor/ "$OUT/editor/"
 echo "built $OUT/ctr.js"

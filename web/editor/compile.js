@@ -316,9 +316,10 @@ export function compileTrack(track, atlas, textures, test = null) {
   const quads = [];
   const groundTex = track.groundTex || 'grass';
   const rect = (id) => atlas.rects[id] || atlas.rects.white;
+  const light = track.light ?? 1;
   const shadeOf = (n, kind) => {
     const k = kind === 'floor' && n[1] > GROUND_NY ? 0.92 + 0.08 * Math.max(0, dot(n, SUN)) : 0.55 + 0.45 * Math.max(0, dot(n, SUN));
-    return Math.max(24, Math.min(255, Math.round(128 * k)));
+    return Math.max(12, Math.min(255, Math.round(128 * k * light)));
   };
   if (track.ground !== false) {
     const r = rect(groundTex);
@@ -412,12 +413,22 @@ export function compileTrack(track, atlas, textures, test = null) {
   sizes.forEach(([i, j, n], k) => { iv.setInt16(12 + 8 * k, i, true); iv.setInt16(14 + 8 * k, j, true); iv.setUint32(16 + 8 * k, n, true); });
   files['index.bin'] = index;
   files['map.bin'] = minimap(quads, route);
-  files['route.bin'] = routeFile(nodes, spawn);
+  files['route.bin'] = routeFile(nodes, spawn, skyColors(track, textures));
   return { files, quads: total, nodes: nodes.length, route, spawn, ms: performance.now() - t0, preview: E.quads };
 }
 
-function routeFile(nodes, spawn) {
-  const out = new Uint8Array(16 + 12 * nodes.length);
+// the sky (the track's colour, or day blue) and under the horizon (the ground's colour, lit)
+export function skyColors(track, textures) {
+  const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+  const sky = hex(track.sky || '#6eaae6');
+  const g = textures.find((t) => t.id === (track.groundTex || 'grass'));
+  const light = track.light ?? 1;
+  const ground = track.ground === false ? sky.map((v) => v * 0.6) : (g && g.average ? g.average : [80, 140, 70]).map((v) => v * light * 0.9);
+  return [sky, ground].map((c) => c.map((v) => Math.max(0, Math.min(255, Math.round(v)))));
+}
+
+function routeFile(nodes, spawn, colors) {
+  const out = new Uint8Array(16 + 12 * nodes.length + 8);
   const v = new DataView(out.buffer);
   out.set([0x57, 0x52, 0x54, 0x45]);   // WRTE
   v.setInt32(4, nodes.length, true);
@@ -435,6 +446,7 @@ function routeFile(nodes, spawn) {
     v.setUint16(o + 6, Math.max(0, Math.min(65535, n.dist)), true);
     v.setUint8(o + 8, n.fwd); v.setUint8(o + 9, 0xff); v.setUint8(o + 10, n.back); v.setUint8(o + 11, 0xff);
   });
+  colors.forEach((c, i) => out.set([c[0], c[1], c[2], 1], 16 + 12 * nodes.length + 4 * i));
   return out;
 }
 

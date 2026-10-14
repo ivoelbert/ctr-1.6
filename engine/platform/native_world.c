@@ -883,7 +883,7 @@ static void NativeWorld_CollectHitboxes(struct mesh_info *mesh)
 
 // The track editor's route (assets/world/route.bin), in place of the level's: 'WRTE', the
 // node count, the start (s16 x, y, z and heading), then the checkpoint nodes as the level holds
-// them (struct CheckpointNode, 12 bytes). Every racer starts at the start, one behind another.
+// them (struct CheckpointNode, 12 bytes), and the sky's colours. Every racer starts at the start.
 static void NativeWorld_LoadRoute(struct GameTracker *gGT, struct Level *lev)
 {
 	char path[768];
@@ -909,6 +909,16 @@ static void NativeWorld_LoadRoute(struct GameTracker *gGT, struct Level *lev)
 	free(s_route);
 	s_route = (struct CheckpointNode *)malloc(sizeof(struct CheckpointNode) * (size_t)count);
 	memcpy(s_route, file + 16, sizeof(struct CheckpointNode) * (size_t)count);
+	// then, when there, the sky's colour and the one under the horizon (r, g, b, on), as the
+	// level's clear colours (CAM.c paints them every frame)
+	u32 colors = 16 + 12 * (u32)count;
+	if (size >= colors + 8)
+	{
+		for (int i = 0; i < 2; i++)
+		{
+			memcpy(&lev->clearColor[i], file + colors + 4 * i, 4);
+		}
+	}
 	free(file);
 	lev->ptr_restart_points = s_route;
 	lev->cnt_restart_points = count;

@@ -106,6 +106,7 @@ export class View {
         depthWrite: !opts.ghost,
       });
       if (opts.tint) m.color = new THREE.Color(opts.tint);
+      else if (!opts.ghost) m.color.setScalar(this.light ?? 1);
       this.materials.set(key, m);
     }
     return m;
@@ -122,6 +123,17 @@ export class View {
     mesh.position.y = GROUND_Y;
     mesh.userData.ground = true;
     return mesh;
+  }
+
+  // the sky's colour and the light (day 1 .. night 0.4): the game's are the track's (compile.js)
+  setEnvironment(sky, light) {
+    if (this.envKey === `${sky}|${light}`) return;
+    this.envKey = `${sky}|${light}`;
+    this.light = light;
+    this.scene.background = new THREE.Color(sky);
+    this.scene.fog.color = new THREE.Color(sky).lerp(new THREE.Color(0xffffff), 0.25 * light);
+    for (const m of this.materials.values()) if (!m.transparent) m.color.setScalar(light);
+    this.ground.material.color.setScalar(0.93 * light);
   }
 
   setGround(on, texId) {

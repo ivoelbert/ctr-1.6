@@ -467,7 +467,13 @@
     // the track editor, and the tracks made in it (tools/serve.mjs keeps them in tracks/)
     const charParam = () => `&character=${document.getElementById('character').value}`;
     document.getElementById('openEditor').addEventListener('click', () => { location.search = '?editor' + charParam(); });
-    fetch('tracks/', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : [])).then((list) => {
+    fetch('tracks/', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : [])).catch(() => []).then((list) => {
+      // and the ones kept in this browser (an older server can't save files)
+      try {
+        for (const [name, t] of Object.entries(JSON.parse(localStorage.getItem('ctr-editor-library') || '{}'))) {
+          if (!list.some((x) => x.name === name)) list.push({ name, mtime: t.mtime });
+        }
+      } catch { /* none */ }
       const box = document.getElementById('trackList');
       for (const t of list) {
         const row = document.createElement('div');
@@ -483,7 +489,7 @@
         row.append(name, drive, edit);
         box.appendChild(row);
       }
-    }).catch(() => {});
+    });
     playersSel.addEventListener('change', () => {
       document.getElementById('playersNote').hidden = playersSel.value === '1';
     });

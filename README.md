@@ -14,7 +14,7 @@ same way for every map.
   reads the map file (its geometry, textures and lighting), `tools/maps/` has what to change in
   each map for driving, and `tools/track.py` makes the level (quadblocks, stair ramps, the
   painter's audit, the files the game loads in place of Dingo Canyon's).
-- `web/` is the page that runs it.
+- `web/` is the page that runs it; `web/editor/` the track editor (`tools/editor/` its field).
 
 ## Playing
 
@@ -48,6 +48,18 @@ paint something behind a wall over it, and cuts those walls shorter (`tools/pain
 Nothing from the discs or from Counter-Strike is in this repository. The levels `play.sh` writes
 (`build/lev/`) hold data from them (each map is grafted onto Dingo Canyon's level, keeping its
 weapon crates and fruit, and for Counter-Strike's maps its skybox), so keep them to yourself.
+
+## The track editor
+
+The launcher's **Track editor** (or http://localhost:8642/?editor) builds your own tracks, a
+piece at a time, Trackmania style: roads, curves, slopes, banked turns, half pipes, jumps, boost
+pads, quarter pipes, platforms, blocks, decorations, on the block grid or anywhere at any angle
+(grid snap off), every piece's shape and textures to change, and **Tab** drives the track at
+once (it's compiled in the page and swapped into the running race: no loading) and brings you
+back. Lay a loop from the Start / finish round to it and laps count. `H` in the editor lists the
+keys. Tracks are saved in `tracks/` (`Ctrl+S`), and the launcher lists them to drive or edit.
+Everything in them is the editor's own (its textures are drawn by code), so a track is yours to
+share.
 
 ## Controls (keyboard)
 
