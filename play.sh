@@ -108,6 +108,12 @@ if [ ! -f "$index" ] || newer "$index" $(python3 -I tools/deps.py tools/build_wo
   python3 -I tools/build_world.py none "$DISC" "$ROOT/build/lev" editor
 fi
 
+# CTR's own track textures for the editor, from your disc (seconds).
+if [ ! -f "$ROOT/build/lev/editor_ctrtex.json" ] || newer "$ROOT/build/lev/editor_ctrtex.json" tools/editor/ctrtex.py tools/ctrlev.py tools/bigfile.py tools/psxiso.py; then
+  echo "Taking CTR's track textures for the editor..."
+  python3 -I tools/editor/ctrtex.py "$DISC" "$ROOT/build/lev"
+fi
+
 # The game, when it's missing or older than its sources.
 WASM="$ROOT/build/web/ctr.wasm"
 if [ ! -f "$WASM" ] || [ -n "$(find engine web/ctr-pre.js build-web.sh -type f -newer "$WASM" | head -1)" ]; then

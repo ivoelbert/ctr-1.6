@@ -1,15 +1,20 @@
 // The editor's side of the game: its textures in the atlas the game samples, a track compiled
 // into the files the engine reads (assets/world/), and the restart that drives it.
 
-import { makeTextures, buildAtlas } from './textures.js';
+import { makeTextures, buildAtlas, loadCtrTextures } from './textures.js';
 import { compileTrack } from './compile.js';
 
 export class Game {
-  constructor(Module) {
+  constructor(Module, extra = []) {
     this.M = Module;
-    this.textures = makeTextures();
+    this.textures = makeTextures().concat(extra);
     this.atlas = buildAtlas(this.textures);
     this.files = {};
+  }
+
+  // with CTR's own textures, when they're there
+  static async create(Module) {
+    return new Game(Module, await loadCtrTextures());
   }
 
   // before the game starts: the atlas and the first track's files
