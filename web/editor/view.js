@@ -303,9 +303,28 @@ export class View {
       this.overlay.add(arrow);
     }
     if (route && route.samples.length > 1) {
+      const color = route.closed ? 0x3dff8a : 0xffa53d;
       const pts = route.samples.map((s) => new THREE.Vector3(s.p[0], s.p[1] + 40, s.p[2]));
       const g = new THREE.BufferGeometry().setFromPoints(pts);
-      this.overlay.add(new THREE.Line(g, new THREE.LineBasicMaterial({ color: route.closed ? 0x3dff8a : 0xffa53d, transparent: true, opacity: 0.85, depthTest: false })));
+      this.overlay.add(new THREE.Line(g, new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.85, depthTest: false })));
+      // which way round: a chevron every couple of blocks
+      if (!this.chevron) {
+        const shape = new THREE.Shape([new THREE.Vector2(-180, -120), new THREE.Vector2(0, 120), new THREE.Vector2(180, -120), new THREE.Vector2(0, -40)]);
+        this.chevron = new THREE.ShapeGeometry(shape);
+        this.chevron.rotateX(-Math.PI / 2);
+      }
+      const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9, depthTest: false, side: THREE.DoubleSide });
+      let next = 0;
+      for (let i = 0; i < route.samples.length - 1; i++) {
+        if (route.arc[i] < next) continue;
+        next = route.arc[i] + 2048;
+        const s = route.samples[i];
+        const m = new THREE.Mesh(this.chevron, mat);
+        m.position.set(s.p[0], s.p[1] + 44, s.p[2]);
+        m.rotation.y = Math.atan2(s.f[0], s.f[2]) + Math.PI;
+        m.renderOrder = 5;
+        this.overlay.add(m);
+      }
     }
     if (trail && trail.length > 1) {
       const g = new THREE.BufferGeometry().setFromPoints(trail.map((p) => new THREE.Vector3(p[0], p[1] + 60, p[2])));
