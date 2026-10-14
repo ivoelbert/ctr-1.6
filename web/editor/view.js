@@ -32,6 +32,7 @@ export class View {
     this.controls.dampingFactor = 0.15;
     this.controls.screenSpacePanning = false;
     this.controls.maxPolarAngle = Math.PI * 0.495;
+    this.controls.minPolarAngle = 0;
     this.controls.minDistance = 300;
     this.controls.maxDistance = 80000;
     this.controls.zoomSpeed = 1.4;
