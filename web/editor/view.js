@@ -32,9 +32,11 @@ export class View {
     this.controls.dampingFactor = 0.15;
     this.controls.screenSpacePanning = false;
     this.controls.maxPolarAngle = Math.PI * 0.495;
+    this.controls.minPolarAngle = 0;
     this.controls.minDistance = 300;
     this.controls.maxDistance = 80000;
     this.controls.zoomSpeed = 1.4;
+    this.controls.zoomToCursor = true;     // the wheel zooms towards what's under the mouse
     this.controls.target.set(0, 0, 0);
 
     // the textures, as the game samples them (repeating, 256 texels)

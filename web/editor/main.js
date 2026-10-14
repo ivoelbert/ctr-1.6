@@ -279,7 +279,8 @@ const editor = {
       ['Right drag · Middle drag', 'Turn the camera · move it (Shift + right drag too)'],
       ['Alt + drag · Space + drag', 'The same on a trackpad: turn the camera · move it'],
       ['Drag over empty ground', 'Select everything in the box (Shift: add to it)'],
-      ['Wheel · W A S D', 'Zoom · move the camera along the ground'],
+      ['Wheel · W A S D', 'Zoom (towards the mouse) · move the camera along the ground'],
+      ['Double click', 'Look at the piece under the mouse'],
       ['R / Shift+R', 'Turn the piece you place, or the selection, by the rotation step'],
       ['T', 'Mirror the piece you place (curves the other way)'],
       ['PgUp / PgDn  ·  E / Q', 'Build higher / lower (a step is a quarter block)'],
@@ -293,7 +294,7 @@ const editor = {
       ['Ctrl+C / Ctrl+V', 'Copy / paste the selection (pasted where the mouse is)'],
       ['Ctrl+Z / Ctrl+Shift+Z', 'Undo / redo'],
       ['Ctrl+S', 'Save the track (tracks/ by the game)'],
-      ['F', 'Look at the selection (or the whole track)'],
+      ['F · V', 'Look at the selection (or the whole track) · straight down on it, and back'],
       ['Tab', 'Drive it from the start, at once · Tab or Esc again: back here · Backspace while driving: start over'],
       ['Shift+Tab', 'Drive from where the mouse points'],
       ['Esc', 'Put the piece down / clear the selection'],
@@ -1056,6 +1057,12 @@ const editor = {
       }
     });
     cv.addEventListener('contextmenu', (e) => e.preventDefault());
+    // a double click looks at the piece under the mouse
+    cv.addEventListener('dblclick', (ev) => {
+      const pick = this.view.pick(ev, this.level * LEVEL);
+      const pc = pick.piece && this.track.pieces.find((p) => p.id === pick.piece);
+      if (pc && !this.tool) this.view.focus([[pc.x, pc.y, pc.z], pick.point]);
+    });
 
     // the editor's keys go no further (the game, held, would see them when it's back)
     const keys = new Set();
@@ -1104,6 +1111,7 @@ const editor = {
       else if (k === 'KeyM') this.setGizmo(this.gizmoMode === 'rotate' ? 'translate' : 'rotate');
       else if (k === 'KeyH' || ev.key === '?') this.toggleHelp();
       else if (k === 'KeyF') this.focusSelection();
+      else if (k === 'KeyV') this.topView();
       else if (k === 'PageUp' || k === 'KeyE') { this.level = Math.min(100, this.level + 1); this.refresh(true); this.updateGhost(); }
       else if (k === 'PageDown' || k === 'KeyQ') { this.level = Math.max(-4, this.level - 1); this.refresh(true); this.updateGhost(); }
       else if (k === 'Delete' || k === 'Backspace') this.deleteSelection();
@@ -1159,6 +1167,19 @@ const editor = {
     if (this.keys.has('KeyD') || this.keys.has('ArrowRight')) dx += speed;
     if (this.keys.has('KeyA') || this.keys.has('ArrowLeft')) dx -= speed;
     if (dx || dz) this.view.pan(dx, dz);
+  },
+
+  // straight down on the track (V), and back to where the camera was
+  topView() {
+    const v = this.view, t = v.controls.target;
+    if (this.savedCamera) {
+      v.camera.position.copy(this.savedCamera);
+      this.savedCamera = null;
+      return;
+    }
+    this.savedCamera = v.camera.position.clone();
+    const d = Math.max(6000, v.camera.position.distanceTo(t));
+    v.camera.position.set(t.x, t.y + d, t.z + 1);
   },
 
   focusSelection() {
