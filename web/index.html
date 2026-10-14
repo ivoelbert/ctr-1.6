@@ -443,7 +443,7 @@
     document.getElementById('go').disabled = true;
   } else if (params.has('editor')) {
     // the track editor: its field (tools/editor/), the track drawn over it
-    const choice = freeDrive('editor', Number(params.get('character') ?? 0), 1);
+    const choice = freeDrive('editor', Number(params.get('character') ?? 0), Number(params.get('players') ?? 1));
     choice.editor = true;
     start(choice).catch((e) => { say(String(e)); console.error(e); });
   } else if (params.has('map') || params.has('level')) {
@@ -465,7 +465,7 @@
       document.getElementById('go').disabled = mapSel.options.length === 0;
     });
     // the track editor, and the tracks made in it (tools/serve.mjs keeps them in tracks/)
-    const charParam = () => `&character=${document.getElementById('character').value}`;
+    const charParam = () => `&character=${document.getElementById('character').value}&players=${document.getElementById('players').value}`;
     document.getElementById('openEditor').addEventListener('click', () => { location.search = '?editor' + charParam(); });
     fetch('tracks/', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : [])).catch(() => []).then((list) => {
       // and the ones kept in this browser (an older server can't save files)

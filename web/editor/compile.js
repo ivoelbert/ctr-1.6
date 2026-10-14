@@ -496,15 +496,28 @@ export function skyColors(track, textures) {
   return [sky, ground].map((c) => c.map((v) => Math.max(0, Math.min(255, Math.round(v)))));
 }
 
+// a kart's heading for a forward direction: race_setup's (the yaw of it, less a quarter turn)
+const headingOf = (f) => ((((Math.round((Math.atan2(f[0], f[2]) / (2 * Math.PI)) * 4096) - 0x400) % 4096) + 4096) % 4096);
+
+// the grid: two columns of four behind the spawn (the first row's left is player 1's)
+function gridOf(spawn) {
+  const f = norm([spawn.f[0], 0, spawn.f[2]]);
+  const side = [-f[2], 0, f[0]];
+  const out = [];
+  for (let i = 0; i < 8; i++) {
+    const row = i >> 1, col = i & 1;
+    const p = add(add(spawn.p, scale(f, -row * 260)), scale(side, (col - 0.5) * 300));
+    out.push([Math.round(p[0]), Math.round(p[1]), Math.round(p[2]), headingOf(f)]);
+  }
+  return out;
+}
+
 function routeFile(nodes, spawn, colors) {
-  const out = new Uint8Array(16 + 12 * nodes.length + 8);
+  const out = new Uint8Array(16 + 12 * nodes.length + 8 + 64);
   const v = new DataView(out.buffer);
   out.set([0x57, 0x52, 0x54, 0x45]);   // WRTE
   v.setInt32(4, nodes.length, true);
-  const f = spawn.f;
-  // the kart's heading: race_setup's (yaw of the forward, less a quarter turn)
-  const yaw = Math.round((Math.atan2(f[0], f[2]) / (2 * Math.PI)) * 4096);
-  const rot = (((yaw - 0x400) % 4096) + 4096) % 4096;
+  const rot = headingOf(spawn.f);
   v.setInt16(8, Math.round(spawn.p[0]), true);
   v.setInt16(10, Math.round(spawn.p[1]), true);
   v.setInt16(12, Math.round(spawn.p[2]), true);
@@ -516,6 +529,7 @@ function routeFile(nodes, spawn, colors) {
     v.setUint8(o + 8, n.fwd); v.setUint8(o + 9, 0xff); v.setUint8(o + 10, n.back); v.setUint8(o + 11, 0xff);
   });
   colors.forEach((c, i) => out.set([c[0], c[1], c[2], 1], 16 + 12 * nodes.length + 4 * i));
+  gridOf(spawn).forEach((g, i) => g.forEach((val, k) => v.setInt16(16 + 12 * nodes.length + 8 + 8 * i + 2 * k, val, true)));
   return out;
 }
 

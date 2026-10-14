@@ -268,6 +268,8 @@ const editor = {
     const rows = [
       ['Left click', 'Place the piece you picked; with none, select (Shift: add to the selection)'],
       ['Right drag · Middle drag', 'Turn the camera · move it (Shift + right drag too)'],
+      ['Alt + drag · Space + drag', 'The same on a trackpad: turn the camera · move it'],
+      ['Drag over empty ground', 'Select everything in the box (Shift: add to it)'],
       ['Wheel · W A S D', 'Zoom · move the camera along the ground'],
       ['R / Shift+R', 'Turn the piece you place, or the selection, by the rotation step'],
       ['T', 'Mirror the piece you place (curves the other way)'],
@@ -278,6 +280,7 @@ const editor = {
       ['Alt + click', 'Pick up a piece\'s type and settings (eyedropper)'],
       ['Right click (no drag)', 'Delete the piece under the mouse'],
       ['Delete · Ctrl+D', 'Delete · duplicate the selection'],
+      ['1 – 9 · , and .', 'Pick the palette\'s pieces by number · the previous / next tab'],
       ['Ctrl+C / Ctrl+V', 'Copy / paste the selection (pasted where the mouse is)'],
       ['Ctrl+Z / Ctrl+Shift+Z', 'Undo / redo'],
       ['Ctrl+S', 'Save the track (tracks/ by the game)'],
@@ -919,18 +922,41 @@ const editor = {
   bindInput() {
     const cv = this.view.renderer.domElement;
     let down = null;
+    // a trackpad's camera: Alt + drag turns it, Space + drag moves it (the left button's, while held)
+    let spaceHeld = false;
+    const leftButton = (alt) => {
+      this.view.controls.mouseButtons.LEFT = spaceHeld ? THREE.MOUSE.PAN : alt ? THREE.MOUSE.ROTATE : -1;
+    };
+    // a box drawn over empty ground selects what's in it
+    const box = el('div', { class: 'boxsel', hidden: true });
+    this.root.appendChild(box);
     cv.addEventListener('pointermove', (ev) => {
       this.lastPick = this.view.pick(ev, this.level * LEVEL);
       if (this.tool) this.updateGhost();
+      if (down && down.box) {
+        const x0 = Math.min(down.x, ev.clientX), y0 = Math.min(down.y, ev.clientY);
+        Object.assign(box.style, { left: `${x0}px`, top: `${y0}px`, width: `${Math.abs(ev.clientX - down.x)}px`, height: `${Math.abs(ev.clientY - down.y)}px` });
+        box.hidden = Math.hypot(ev.clientX - down.x, ev.clientY - down.y) < 6;
+      }
     });
     cv.addEventListener('pointerdown', (ev) => {
+      leftButton(ev.altKey);
       down = { x: ev.clientX, y: ev.clientY, button: ev.button, t: performance.now() };
+      // a box: the left button on nothing, no tool, no gizmo handle, no camera key
+      if (ev.button === 0 && !this.tool && !ev.altKey && !spaceHeld && !this.view.gizmo.axis) {
+        const pick = this.view.pick(ev, this.level * LEVEL);
+        if (!pick.piece) down.box = true;
+      }
     });
     cv.addEventListener('pointerup', (ev) => {
       if (!down) return;
       const moved = Math.hypot(ev.clientX - down.x, ev.clientY - down.y) > 5;
       const b = down.button;
+      const wasBox = down.box;
+      const start = down;
       down = null;
+      box.hidden = true;
+      if (wasBox && moved) { this.boxSelect(start, ev); return; }
       if (moved || this.view.gizmo.dragging) return;
       const pick = this.view.pick(ev, this.level * LEVEL);
       this.lastPick = pick;
@@ -982,26 +1008,58 @@ const editor = {
       else if (ctrl && k === 'KeyV') this.paste();
       else if (ctrl) handled = false;
       else if (k === 'KeyR') {
-        if (this.tool) { this.rot = (this.rot + (ev.shiftKey ? -1 : 1) * (this.snap.grid ? this.snap.rot : 15) + 360) % 360; this.updateGhost(); }
+        // on an open end a piece can only face on: R flips it, as T does
+        if (this.tool && this.ghostCandidate && this.ghostCandidate.snapped) { this.mirror = !this.mirror; this.updateGhost(); }
+        else if (this.tool) { this.rot = (this.rot + (ev.shiftKey ? -1 : 1) * (this.snap.grid ? this.snap.rot : 15) + 360) % 360; this.updateGhost(); }
         else this.rotateSelection(ev.shiftKey ? -1 : 1);
       } else if (k === 'KeyT') { this.mirror = !this.mirror; this.updateGhost(); }
+      else if (k === 'Space') { spaceHeld = true; leftButton(false); }
       else if (k === 'KeyG') this.toggleSnap();
       else if (k === 'KeyM') this.setGizmo(this.gizmoMode === 'rotate' ? 'translate' : 'rotate');
       else if (k === 'KeyH' || ev.key === '?') this.toggleHelp();
       else if (k === 'KeyF') this.focusSelection();
       else if (k === 'PageUp' || k === 'KeyE') { this.level = Math.min(100, this.level + 1); this.refresh(true); this.updateGhost(); }
       else if (k === 'PageDown' || k === 'KeyQ') { this.level = Math.max(-4, this.level - 1); this.refresh(true); this.updateGhost(); }
-      else if (k === 'Delete' || k === 'Backspace' || k === 'KeyX') this.deleteSelection();
+      else if (k === 'Delete' || k === 'Backspace') this.deleteSelection();
+      else if (/^Digit[1-9]$/.test(k)) {
+        // the palette's tab, by number
+        const types = Object.entries(CATALOGUE).filter(([, d]) => d.group === this.group).map(([t]) => t);
+        const t = types[Number(k.slice(5)) - 1];
+        if (t) this.pickTool(t);
+      } else if (k === 'Comma' || k === 'Period') {
+        const groups = [...new Set(Object.values(CATALOGUE).map((d) => d.group))];
+        this.group = groups[(groups.indexOf(this.group) + (k === 'Period' ? 1 : groups.length - 1)) % groups.length];
+        this.renderPalette();
+      }
       else if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(k)) keys.add(k);
       else handled = false;
       if (handled) ev.preventDefault();
     }, true);
     window.addEventListener('keyup', (ev) => {
       keys.delete(ev.code);
+      if (ev.code === 'Space') { spaceHeld = false; leftButton(false); }
       if (this.mode === 'edit') ev.stopImmediatePropagation();
     }, true);
+
     window.addEventListener('blur', () => keys.clear());
     this.keys = keys;
+  },
+
+  // the pieces whose middles are in the box (screen coordinates), added with Shift
+  boxSelect(a, ev) {
+    const r = this.view.renderer.domElement.getBoundingClientRect();
+    const x0 = Math.min(a.x, ev.clientX), x1 = Math.max(a.x, ev.clientX), y0 = Math.min(a.y, ev.clientY), y1 = Math.max(a.y, ev.clientY);
+    if (!ev.shiftKey) this.selection.clear();
+    const v = new THREE.Vector3();
+    for (const pc of this.track.pieces) {
+      const obj = this.view.pieces.get(pc.id);
+      if (!obj) continue;
+      new THREE.Box3().setFromObject(obj).getCenter(v).project(this.view.camera);
+      const sx = r.left + ((v.x + 1) / 2) * r.width, sy = r.top + ((1 - v.y) / 2) * r.height;
+      if (v.z < 1 && sx >= x0 && sx <= x1 && sy >= y0 && sy <= y1) this.selection.add(pc.id);
+    }
+    this.attachGizmo();
+    this.refresh();
   },
 
   tick(dt) {
