@@ -268,9 +268,50 @@ const editor = {
 
   renderPalette() {
     this.tabs.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.group === this.group));
-    this.palette.replaceChildren(...Object.entries(CATALOGUE).filter(([, d]) => d.group === this.group).map(([type, d]) =>
+    const tiles = Object.entries(CATALOGUE).filter(([, d]) => d.group === this.group).map(([type, d]) =>
       el('div', { class: 'tile' + (this.tool === type ? ' on' : ''), title: d.label, onclick: () => this.pickTool(type) },
-        el('img', { src: this.thumbs[type], alt: '' }), el('span', {}, d.label))));
+        el('img', { src: this.thumbs[type], alt: '' }), el('span', {}, d.label)));
+    // the decorations' tab: a forest (or crates, posts) scattered over the field, off the track
+    if (this.group === 'Decor') {
+      tiles.push(el('div', { class: 'tile scatter', title: 'Scatter trees over the field, away from the track (Undo takes them back)', onclick: () => this.scatter('tree', 40) },
+        el('div', { class: 'big' }, '🌲'), el('span', {}, 'Scatter trees')));
+      tiles.push(el('div', { class: 'tile scatter', title: 'Scatter crates along the track, either side', onclick: () => this.scatter('crate', 30, true) },
+        el('div', { class: 'big' }, '📦'), el('span', {}, 'Line with crates')));
+    }
+    this.palette.replaceChildren(...tiles);
+  },
+
+  // count pieces of type, placed at random: on the field away from the track's pieces, or near
+  // the route (beside it), never on it
+  scatter(type, count, beside = false) {
+    const route = this.route && this.route.samples.length ? this.route.samples : [];
+    const occupied = this.track.pieces.map((p) => [p.x, p.z]);
+    const clear = (x, z, min) => occupied.every(([px, pz]) => Math.hypot(px - x, pz - z) > min) && route.every((s) => Math.hypot(s.p[0] - x, s.p[2] - z) > min);
+    const placed = [];
+    let tries = 0;
+    while (placed.length < count && tries++ < count * 60) {
+      let x, z, y = 0;
+      if (beside && route.length) {
+        const s = route[Math.floor(Math.random() * route.length)];
+        const side = Math.random() < 0.5 ? -1 : 1;
+        const r = [-s.f[2], 0, s.f[0]];
+        const off = 900 + Math.random() * 600;
+        x = s.p[0] + r[0] * off * side; z = s.p[2] + r[2] * off * side; y = 0;
+        if (!clear(x, z, 700)) continue;
+      } else {
+        x = (Math.random() * 2 - 1) * (FIELD - 1024); z = (Math.random() * 2 - 1) * (FIELD - 1024);
+        if (!clear(x, z, 1800)) continue;
+      }
+      const scale = 0.7 + Math.random() * 0.7;
+      const def = CATALOGUE[type];
+      const extra = type === 'tree' ? { height: Math.round(def.height * scale), radius: Math.round(def.radius * scale) } : {};
+      const pc = makePiece(type, { x: Math.round(x), y, z: Math.round(z), yaw: Math.round(Math.random() * 360) - 180, ...extra });
+      placed.push(pc);
+      occupied.push([pc.x, pc.z]);
+    }
+    this.commit(() => { this.track.pieces.push(...placed); });
+    this.toast(`${placed.length} ${def(type)} scattered (Undo takes them back)`);
+    function def(t) { return CATALOGUE[t].label.toLowerCase() + 's'; }
   },
 
   renderHelp() {
