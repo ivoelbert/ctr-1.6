@@ -105,7 +105,7 @@ export class View {
   }
 
   material(texId, opts = {}) {
-    const key = `${texId}|${opts.ghost ? 'g' : ''}|${opts.double ? 'd' : ''}|${opts.tint || ''}`;
+    const key = `${texId}|${opts.ghost ? 'g' : ''}|${opts.double ? 'd' : ''}|${opts.tint || ''}|${opts.glow ? 'l' : ''}`;
     let m = this.materials.get(key);
     if (!m) {
       m = new THREE.MeshBasicMaterial({
@@ -117,7 +117,8 @@ export class View {
         depthWrite: !opts.ghost,
       });
       if (opts.tint) m.color = new THREE.Color(opts.tint);
-      else if (!opts.ghost) m.color.setScalar(this.light ?? 1);
+      else if (!opts.ghost && !opts.glow) m.color.setScalar(this.light ?? 1);
+      m.userData.glow = !!opts.glow;
       this.materials.set(key, m);
     }
     return m;
@@ -143,7 +144,7 @@ export class View {
     this.light = light;
     this.scene.background = new THREE.Color(sky);
     this.scene.fog.color = new THREE.Color(sky).lerp(new THREE.Color(0xffffff), 0.25 * light);
-    for (const m of this.materials.values()) if (!m.transparent) m.color.setScalar(light);
+    for (const m of this.materials.values()) if (!m.transparent && !m.userData.glow) m.color.setScalar(light);
     this.ground.material.color.setScalar(0.86 * light);
   }
 
@@ -219,7 +220,7 @@ export class View {
       g.setAttribute('uv', new THREE.Float32BufferAttribute(b.uv, 2));
       g.setAttribute('color', new THREE.Float32BufferAttribute(b.col, 3));
       g.computeBoundingSphere();
-      const mesh = new THREE.Mesh(g, this.material(b.tex, { ghost, double: b.double, tint }));
+      const mesh = new THREE.Mesh(g, this.material(b.tex, { ghost, double: b.double, tint, glow: pc.glow }));
       mesh.userData.piece = pc.id;
       obj.add(mesh);
     }

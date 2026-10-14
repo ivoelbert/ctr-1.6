@@ -351,7 +351,8 @@ function emitQuarter(pc, E) {
 }
 
 // terrain: a hill over a width x length footprint, its middle at the origin: round (a
-// smooth mound), ridge (long, round across), mesa (a flat top, slopes round the edge)
+// smooth mound), ridge (long, round across), mesa (a flat top, slopes round the edge), peak (a
+// mountain: steeper towards its top)
 function emitHill(pc, E) {
   const w = pc.width || 4 * BLOCK, d = pc.length || 4 * BLOCK, h = pc.height ?? 2 * LEVEL;
   const shape = pc.shape || 'round';
@@ -365,11 +366,26 @@ function emitHill(pc, E) {
       return k * k * (3 - 2 * k);
     }
     const r = Math.min(1, Math.hypot(x, z));
+    if (shape === 'peak') return peakAt(r);
     return Math.pow(Math.cos(r * Math.PI / 2), 2);
   };
-  E.surface(nu, nv, (u, v) => ({ p: [(u - 0.5) * w, h * bump(u, v), (v - 0.5) * d], uv: [u * w / TEXEL, v * d / TEXEL] }),
-    { tex: pc.tex || 'grass', kind: 'floor', out: [0, 1, 0] });
+  const at = (u, v) => ({ p: [(u - 0.5) * w, h * bump(u, v), (v - 0.5) * d], uv: [u * w / TEXEL, v * d / TEXEL] });
+  if (!pc.capTex) {
+    E.surface(nu, nv, at, { tex: pc.tex || 'grass', kind: 'floor', out: [0, 1, 0] });
+    return;
+  }
+  // a snow cap: the quadblocks above the snow line in its texture
+  const line = pc.capAt ?? 0.6;
+  for (let a = 0; a < nu; a++) {
+    for (let b = 0; b < nv; b++) {
+      const top = bump((a + 0.5) / nu, (b + 0.5) / nv) > line;
+      E.surface(1, 1, (u, v) => at((a + u) / nu, (b + v) / nv), { tex: top ? pc.capTex : pc.tex || 'grass', kind: 'floor', out: [0, 1, 0] });
+    }
+  }
 }
+
+// a mountain's height (0..1) at r (0 the top, 1 the foot): concave, a rounded tip
+export const peakAt = (r) => Math.pow(1 - r, 1.6) * (1 - 0.15 * Math.exp(-r * r * 60));
 
 // a cylinder (pillar, post), base at the origin
 function emitCylinder(pc, E) {
@@ -439,7 +455,7 @@ export const CATALOGUE = {
   bend: { group: 'Road', label: 'Gentle bend', ...road({ angle: 30, radius: 4 * BLOCK }) },
   slopeUp: { group: 'Road', label: 'Slope up', ...road({ length: 2 * BLOCK, rise: 2 * LEVEL, profile: 'smooth' }) },
   slopeDown: { group: 'Road', label: 'Slope down', ...road({ length: 2 * BLOCK, rise: -2 * LEVEL, profile: 'smooth' }) },
-  hill: { group: 'Road', label: 'Steep climb', ...road({ length: 3 * BLOCK, rise: 6 * LEVEL, profile: 'smooth' }) },
+  climb: { group: 'Road', label: 'Steep climb', ...road({ length: 3 * BLOCK, rise: 6 * LEVEL, profile: 'smooth' }) },
   bankedCurve: { group: 'Road', label: 'Banked curve', ...road({ angle: 90, radius: 3 * BLOCK, bank: 25, bankMode: 'arc', wallR: 0 }) },
   walled: { group: 'Road', label: 'Walled straight', ...road({ wallL: 160, wallR: 160 }) },
   walledCurve: { group: 'Road', label: 'Walled curve', ...road({ angle: 90, radius: 2 * BLOCK, wallL: 160, wallR: 160 }) },
@@ -476,6 +492,7 @@ export const CATALOGUE = {
   ridge: { group: 'Terrain', label: 'Ridge', kind: 'hill', width: 3 * BLOCK, length: 8 * BLOCK, height: 3 * LEVEL, shape: 'ridge', tex: 'grass' },
   mesa: { group: 'Terrain', label: 'Mesa', kind: 'hill', width: 6 * BLOCK, length: 6 * BLOCK, height: 4 * LEVEL, shape: 'mesa', slope: 0.4, tex: 'sand' },
   dune: { group: 'Terrain', label: 'Dune', kind: 'hill', width: 4 * BLOCK, length: 2 * BLOCK, height: LEVEL, shape: 'ridge', tex: 'sand' },
+  mountain: { group: 'Terrain', label: 'Mountain', kind: 'hill', width: 12 * BLOCK, length: 12 * BLOCK, height: 16 * LEVEL, shape: 'peak', tex: 'stone' },
   snowHill: { group: 'Terrain', label: 'Snow hill', kind: 'hill', width: 6 * BLOCK, length: 6 * BLOCK, height: 4 * LEVEL, shape: 'round', tex: 'snow' },
   pond: { group: 'Terrain', label: 'Pond', kind: 'platform', width: 4 * BLOCK, length: 4 * BLOCK, height: 8, tex: 'water' },
   mudPit: { group: 'Terrain', label: 'Mud pit', kind: 'platform', width: 3 * BLOCK, length: 3 * BLOCK, height: 8, tex: 'mud' },
@@ -516,7 +533,9 @@ export function emitPiece(pc, E) {
     case 'sign': emitSign(pc, E); break;
     case 'box': {
       const w = pc.width || BLOCK, h = pc.height || BLOCK, d = pc.length || BLOCK;
-      emitBox(E, (x, y, z) => [(x - 0.5) * w, y * h, -z * d], [w, h, d], pc.tex || 'stone', pc.sideTex || pc.tex || 'stone', 'floor', 'wall');
+      // standing on the ground: no bottom (it'd never be seen)
+      const onGround = E.ground !== false && Math.abs(pc.y || 0) < 8 && !pc.pitch && !pc.roll;
+      emitBox(E, (x, y, z) => [(x - 0.5) * w, y * h, -z * d], [w, h, d], pc.tex || 'stone', pc.sideTex || pc.tex || 'stone', 'floor', 'wall', { noBottom: onGround });
       break;
     }
     default: break;

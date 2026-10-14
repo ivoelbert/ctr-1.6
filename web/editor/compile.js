@@ -99,7 +99,9 @@ class Emitter {
 // a normal into the world's (the editor's view has the piece's own coordinates).
 // slot -> the faces it's a corner of (FACE_CORNERS' order)
 const FACES_OF = [[0], [1], [2], [3], [0, 1], [0, 2], [0, 1, 2, 3], [1, 3], [2, 3]];
+export const GLOW = 160;               // a glowing piece's shade (0x80 = 1), whatever the light
 export function vertexShades(q, light = 1, dir = (d) => d) {
+  if (q.piece && q.piece.glow) return new Array(9).fill(GLOW);
   // the four faces' normals (their two triangles), turned into the world's
   const fn = [];
   for (const [a, b, c, d] of [[0, 4, 5, 6], [4, 1, 6, 7], [5, 6, 2, 8], [6, 7, 8, 3]]) {
@@ -548,8 +550,10 @@ function minimap(quads, route) {
   const n = (2 * FIELD) / MAP_UNIT;
   const grid = new Uint8Array(n * n);
   const onRoute = route && route.closed ? new Set(route.samples.map((s) => s.piece)) : null;
+  // with a lap to drive: the roads and platforms (not roofs, hills, tops of pillars)
+  const shown = (pc) => !onRoute || (pc && (pc.kind === 'sweep' || pc.kind === 'platform'));
   for (const q of quads) {
-    if (!(q.flags & FLAG_GROUND) || q.kindTag === 'ground') continue;
+    if (!(q.flags & FLAG_GROUND) || q.kindTag === 'ground' || !shown(q.src && q.src.piece)) continue;
     const value = onRoute && q.src && onRoute.has(q.src.piece) ? 3 : 2;
     for (const k of [0, 1, 2, 3, 4, 5, 6, 7, 8]) {
       const p = q.pos[k];
