@@ -243,13 +243,31 @@ export function makeTextures() {
     ['purple', 'Purple', 0, () => plain(S, [140, 70, 190], 26)],
     ['black', 'Black', 0, () => plain(S, [35, 35, 38], 27)],
   ];
-  return list.map(([id, label, terrain, draw]) => {
-    const canvas = draw();
-    const px = canvas.getContext('2d').getImageData(0, 0, S, S).data;
-    const average = [0, 0, 0];
-    for (let i = 0; i < px.length; i += 4) { average[0] += px[i]; average[1] += px[i + 1]; average[2] += px[i + 2]; }
-    return { id, label, terrain, size: S, canvas, average: average.map((v) => v / (S * S)) };
-  });
+  return list.map(([id, label, terrain, draw]) => withAverage({ id, label, terrain, size: S, canvas: draw(), group: 'Editor' }));
+}
+
+function withAverage(t) {
+  const px = t.canvas.getContext('2d').getImageData(0, 0, t.size, t.size).data;
+  const average = [0, 0, 0];
+  for (let i = 0; i < px.length; i += 4) { average[0] += px[i]; average[1] += px[i + 1]; average[2] += px[i + 2]; }
+  return { ...t, average: average.map((v) => v / (t.size * t.size)) };
+}
+
+// CTR's own track textures, when play.sh has taken them from your disc (tools/editor/ctrtex.py:
+// lev/editor_ctrtex.png and .json): grouped by track
+export async function loadCtrTextures() {
+  try {
+    const list = await (await fetch('lev/editor_ctrtex.json', { cache: 'no-store' })).json();
+    const img = await createImageBitmap(await (await fetch('lev/editor_ctrtex.png', { cache: 'no-store' })).blob());
+    return list.textures.map((t) => {
+      const c = canvas(list.cell);
+      const cx = c.getContext('2d');
+      cx.drawImage(img, (t.cell % list.row) * list.cell, Math.floor(t.cell / list.row) * list.cell, list.cell, list.cell, 0, 0, list.cell, list.cell);
+      return withAverage({ id: t.id, label: t.label, terrain: t.terrain, size: list.cell, canvas: c, group: t.track });
+    });
+  } catch {
+    return [];
+  }
 }
 
 // A borderless "CTRW" atlas (4 layers of 1024 a row, textures at 64-aligned origins): the

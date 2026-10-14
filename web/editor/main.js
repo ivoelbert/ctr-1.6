@@ -19,7 +19,7 @@ let M = null;
 
 export async function prepare(Module, params) {
   M = Module;
-  game = new Game(Module);
+  game = await Game.create(Module);
   // the stylesheet as text (an older server sends .css without its type, and the page would
   // ignore a <link> to it)
   const css = document.createElement('style');
@@ -692,10 +692,17 @@ const editor = {
     }
     // textures (for every selected piece)
     const texFields = TEX_FIELDS[pc.kind] || [];
+    const groups = [...new Set(game.textures.map((t) => t.group))];
     for (const [key, label] of texFields) {
       if (key === 'wallTex' && !(pc.wallL || pc.wallR)) continue;
-      kids.push(el('h3', {}, label));
-      kids.push(el('div', { class: 'swatches' }, ...game.textures.map((t) => {
+      // the textures by where they're from: the editor's, or one of CTR's tracks
+      const current = game.textures.find((t) => t.id === pc[key]);
+      const shown = (this.texGroup && this.texGroup[key]) || (current ? current.group : 'Editor');
+      const pick = el('select', { class: 'texgroup', onchange: () => { this.texGroup = { ...(this.texGroup || {}), [key]: pick.value }; this.renderProps(); } },
+        ...groups.map((g) => el('option', { value: g }, g === 'Editor' ? 'Editor\'s' : `CTR: ${g}`)));
+      pick.value = shown;
+      kids.push(el('h3', {}, label, groups.length > 1 ? pick : null));
+      kids.push(el('div', { class: 'swatches' }, ...game.textures.filter((t) => t.group === shown).map((t) => {
         const sw = el('div', { class: 'swatch' + ((pc[key] || '') === t.id ? ' on' : ''), title: t.label,
           onclick: () => this.commit(() => { for (const p of sel) if ((TEX_FIELDS[p.kind] || []).some(([k]) => k === key)) p[key] = t.id; }) });
         sw.style.backgroundImage = `url(${this.texThumb(t)})`;

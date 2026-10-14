@@ -73,3 +73,5 @@
 #drivehint.fade { opacity: 0; }
 #ed .boxsel { position: fixed; border: 1px dashed #ffd34d; background: rgba(255, 211, 77, .12); pointer-events: none; z-index: 2; }
 #ed .boxsel[hidden] { display: none; }
+#ed .props h3 { display: flex; align-items: center; gap: 8px; }
+#ed .props select.texgroup { margin-left: auto; font-size: 11.5px; padding: 2px 4px; text-transform: none; letter-spacing: 0; max-width: 150px; }
