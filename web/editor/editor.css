@@ -71,3 +71,5 @@
 #drivehint { position: fixed; left: 50%; top: 10px; transform: translateX(-50%); z-index: 9; background: rgba(20,14,8,.85); color: #f3e6d0;
   border: 1px solid #ff8a1f; border-radius: 8px; padding: 5px 12px; font: 13px system-ui, sans-serif; pointer-events: none; transition: opacity .6s; }
 #drivehint.fade { opacity: 0; }
+#ed .boxsel { position: fixed; border: 1px dashed #ffd34d; background: rgba(255, 211, 77, .12); pointer-events: none; z-index: 2; }
+#ed .boxsel[hidden] { display: none; }
