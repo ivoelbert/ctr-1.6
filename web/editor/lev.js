@@ -174,7 +174,8 @@ export function writeTile(quads, maxLeaf = 24) {
   let bankStart = 0;
   const quadVidx = new Array(nq);
   const quadBank = new Array(nq);
-  const keyOf = (p, c) => `${p[0]},${p[1]},${p[2]},${c[0]},${c[1]},${c[2]}`;
+  // a vertex's key: its 16-bit position and its colour, packed as characters
+  const keyOf = (p, c) => String.fromCharCode(p[0] & 0xffff, p[1] & 0xffff, p[2] & 0xffff, c[0] | (c[1] << 8), c[2]);
   let banked = false;
   for (let k = 0; k < nq; k++) {
     const q = quads[order[k]];
@@ -212,7 +213,8 @@ export function writeTile(quads, maxLeaf = 24) {
   const layouts = new Map();
   const layoutOff = (tl) => {
     if (!tl) return null;
-    const key = `${tl.uv.join(',')},${tl.clut},${tl.tpage}`;
+    const u = tl.uv;
+    const key = String.fromCharCode(u[0][0] | (u[0][1] << 8), u[1][0] | (u[1][1] << 8), u[2][0] | (u[2][1] << 8), u[3][0] | (u[3][1] << 8), tl.clut, tl.tpage);
     let off = layouts.get(key);
     if (off === undefined) {
       off = b.alloc(0x30);

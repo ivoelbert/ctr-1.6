@@ -119,6 +119,8 @@ const FIELDS = {
   quarter: [['width', 'Width', 'range', 256, 8192, 128], ['radius', 'Radius', 'range', 256, 4096, 64], ['length', 'Flat run', 'range', 0, 4096, 64], ['pipeAngle', 'Steepness', 'range', 30, 89, 1]],
   cylinder: [['radius', 'Radius', 'range', 16, 2048, 16], ['height', 'Height', 'range', 32, 8192, 32]],
   tree: [['height', 'Height', 'range', 256, 6000, 64], ['radius', 'Crown', 'range', 64, 2048, 32]],
+  hill: [['width', 'Width', 'range', 512, 16384, 256], ['length', 'Length', 'range', 512, 16384, 256], ['height', 'Height', 'range', 64, 6144, 64],
+    ['shape', 'Shape', 'select', ['round', 'ridge', 'mesa']], ['slope', 'Mesa slope', 'range', 0.1, 1, 0.05, (p) => p.shape === 'mesa']],
   gate: [['width', 'Width', 'range', 256, 8192, 128], ['height', 'Height', 'range', 256, 4096, 64]],
 };
 const TEX_FIELDS = {
@@ -130,6 +132,7 @@ const TEX_FIELDS = {
   cylinder: [['tex', 'Surface']],
   tree: [['tex', 'Leaves']],
   gate: [['banner', 'Banner']],
+  hill: [['tex', 'Surface']],
 };
 
 const editor = {
@@ -243,7 +246,7 @@ const editor = {
 
     this.props = el('div', { class: 'props', hidden: true });
     R.appendChild(this.props);
-    this.help = el('div', { class: 'help', hidden: true });
+    this.help = el('div', { class: 'help', hidden: true, onclick: () => this.toggleHelp(false) });
     R.appendChild(this.help);
     this.renderHelp();
     this.dialog = el('div', { class: 'dialog', hidden: true });
@@ -317,6 +320,12 @@ const editor = {
   },
 
   changed(quiet = false) {
+    // the pieces stay on the field (its edges are the engine's 16-bit reach)
+    for (const pc of this.track.pieces) {
+      pc.x = Math.max(-FIELD, Math.min(FIELD, pc.x || 0));
+      pc.z = Math.max(-FIELD, Math.min(FIELD, pc.z || 0));
+      pc.y = Math.max(-2048, Math.min(24576, pc.y || 0));
+    }
     if (document.activeElement !== this.nameInput) this.nameInput.value = this.track.name;
     this.view.setGround(this.track.ground !== false, this.track.groundTex);
     this.view.sync(this.track);
@@ -455,14 +464,16 @@ const editor = {
       }
       if (best) return { piece: attachTo(best, this.tool, extra), snapped: true };
     }
-    const p = this.lastPick.plane || at;
-    const y = this.level * LEVEL;
+    // blocks and decorations go on what's under the mouse (stacked), roads on the build height
+    const onSurface = def.kind !== 'sweep' && this.lastPick.point && !['hill'].includes(def.kind);
+    const p = onSurface ? this.lastPick.point : (this.lastPick.plane || at);
+    const y = onSurface ? Math.round(this.lastPick.point[1]) : this.level * LEVEL;
     let x = p[0], z = p[2];
     let yaw = this.rot;
     if (this.snap.grid) {
       yaw = Math.round(yaw / this.snap.rot) * this.snap.rot;
       const g = this.snap.size;
-      const centred = ['cylinder', 'tree'].includes(def.kind);
+      const centred = ['cylinder', 'tree', 'hill'].includes(def.kind);
       if (centred || Math.abs(((yaw % 90) + 90) % 90) > 1e-6) {
         x = Math.round(x / g) * g + (centred && g === BLOCK ? g / 2 : 0);
         z = Math.round(z / g) * g + (centred && g === BLOCK ? g / 2 : 0);
@@ -817,8 +828,41 @@ const editor = {
       el('h3', {}, 'Open a track'),
       ...(items.length ? items : [el('p', { class: 'muted' }, 'No saved tracks yet: Save (Ctrl+S) puts one here.')]),
       el('div', { class: 'item' }, el('span', { class: 'n', onclick: () => { this.commit(() => { this.track = demoTrack(); }); this.nameInput.value = this.track.name; this.frameTrack(); this.refresh(); close(); } }, 'The demo loop'), el('span', { class: 'muted' }, 'built in')),
-      el('div', { class: 'buttons', style: 'margin-top:10px' }, el('button', { onclick: close }, 'Close')));
+      el('div', { class: 'buttons', style: 'margin-top:10px; display:flex; gap:6px' },
+        el('button', { onclick: () => this.exportTrack(), title: 'Download this track as a file' }, 'Export file'),
+        el('button', { onclick: () => this.importTrack(close), title: 'Open a track file' }, 'Import file'),
+        el('span', { class: 'grow' }),
+        el('button', { onclick: close }, 'Close')));
     this.dialog.hidden = false;
+  },
+
+  exportTrack() {
+    const blob = new Blob([JSON.stringify(this.track, null, 1)], { type: 'application/json' });
+    const a = el('a', { href: URL.createObjectURL(blob), download: `${this.fileName()}.ctrtrack.json` });
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  },
+
+  importTrack(done) {
+    const input = el('input', { type: 'file', accept: '.json,application/json' });
+    input.addEventListener('change', async () => {
+      const f = input.files[0];
+      if (!f) return;
+      try {
+        const loaded = normalise(JSON.parse(await f.text()));
+        this.commit(() => { this.track = loaded; });
+        this.selection.clear();
+        this.detachGizmo();
+        this.frameTrack();
+        this.refresh();
+        this.toast(`Imported "${loaded.name}"`);
+        done();
+      } catch (e) {
+        this.toast(`Not a track file: ${e.message}`);
+      }
+    });
+    input.click();
   },
 
   frameTrack() {

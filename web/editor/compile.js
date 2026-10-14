@@ -21,7 +21,7 @@ const MAP_UNIT = 512;
 const SLOT = [[0, 5, 2], [4, 6, 8], [1, 7, 3]];
 const FACE_CORNERS = [[0, 4, 5, 6], [4, 1, 6, 7], [5, 6, 2, 8], [6, 7, 8, 3]];
 
-const SUN = norm([0.35, 0.85, 0.4]);
+const SUN = norm([0.55, 0.7, 0.3]);     // the light comes from up there, to the east
 
 // What the pieces make, as quadblocks in world units (unrounded), with what they came from.
 class Emitter {
@@ -94,6 +94,33 @@ class Emitter {
   }
 }
 
+// Light for each of a quadblock's 9 vertices (0x80 = 1): the sun on the faces round it, so a
+// hill reads as one; floors a little brighter than walls (they light the kart too). dir turns
+// a normal into the world's (the editor's view has the piece's own coordinates).
+// slot -> the faces it's a corner of (FACE_CORNERS' order)
+const FACES_OF = [[0], [1], [2], [3], [0, 1], [0, 2], [0, 1, 2, 3], [1, 3], [2, 3]];
+export function vertexShades(q, light = 1, dir = (d) => d) {
+  // the four faces' normals (their two triangles), turned into the world's
+  const fn = [];
+  for (const [a, b, c, d] of [[0, 4, 5, 6], [4, 1, 6, 7], [5, 6, 2, 8], [6, 7, 8, 3]]) {
+    const p = q.pos;
+    const n1 = cross(sub(p[c], p[a]), sub(p[b], p[a]));
+    const n2 = cross(sub(p[c], p[b]), sub(p[d], p[b]));
+    let n = add(n1, n2);
+    if (dot(n, q.n) < 0) n = scale(n, -1);
+    fn.push(n);
+  }
+  const floor = q.kind === 'floor' || q.kind === 'ground';
+  return FACES_OF.map((faces, slot) => {
+    let n = [0, 0, 0];
+    for (const f of faces) n = add(n, fn[f]);
+    n = norm(dir(len(n) > 1e-9 ? n : q.n));
+    const sun = Math.max(0, dot(n, SUN));
+    const k = floor && n[1] > GROUND_NY ? 0.6 + 0.45 * sun : 0.5 + 0.5 * sun;
+    return Math.max(12, Math.min(255, Math.round(128 * k * light)));
+  });
+}
+
 // the quadblock's front, summed over its four faces: (p2 - p0) x (p1 - p0) per face
 function frontOf(pos) {
   let n = [0, 0, 0];
@@ -155,7 +182,8 @@ export function findRoute(pieces) {
       }
     }
     if (!closed && !next) {
-      // a jump: an entry ahead (up to 10 blocks), near the line the end points along, facing on
+      // a jump: off a road that ends going up (a ramp), or down onto a lower one: an entry
+      // ahead (up to 6 blocks), near the line the end points along, facing on
       let best = null, bd = Infinity;
       const fh = norm([end.f[0], 0, end.f[2]]);
       for (const pc of sweeps) {
@@ -168,7 +196,8 @@ export function findRoute(pieces) {
           const d = sub(c.p, end.p);
           const ahead = d[0] * fh[0] + d[2] * fh[2];
           const side = Math.abs(d[0] * fh[2] - d[2] * fh[0]);
-          if (ahead < 256 || ahead > 10 * 1024 || side > 768 + ahead * 0.15 || dot(norm([cf[0], 0, cf[2]]), fh) < 0.7) continue;
+          if (ahead < 256 || ahead > 6 * 1024 || side > 768 + ahead * 0.15 || dot(norm([cf[0], 0, cf[2]]), fh) < 0.7) continue;
+          if (!(end.f[1] > 0.05 || c.p[1] < end.p[1] - 64)) continue;
           const score = ahead + side * 3;
           if (score < bd) { bd = score; best = { piece: pc, dir, end: dir > 0 ? w.at(1) : { p: w.at(0).p, f: scale(w.at(0).f, -1) } }; }
         }
@@ -225,17 +254,47 @@ const INVISIBLE = { uv: [[0, 0], [0, 0], [0, 0], [0, 0]], clut: 15 << 10, tpage:
 
 // ---- the whole compile ----
 
+let emitCache = new Map();
+let tileCache = new Map();
+
+// FNV-1a over what a tile's quadblocks are: positions, layouts, flags, terrain, checkpoint, colour
+function tileHash(quads) {
+  let h = 0x811c9dc5;
+  const mix = (v) => { h ^= v & 0xffff; h = Math.imul(h, 0x01000193); h ^= (v >>> 16) & 0xffff; h = Math.imul(h, 0x01000193); };
+  for (const q of quads) {
+    for (const p of q.pos) { mix(p[0]); mix(p[1]); mix(p[2]); }
+    mix(q.flags); mix(q.terrain); mix(q.checkpoint ?? 255); mix(q.doubleSided ? 1 : 0);
+    for (const f of q.faces) for (const uv of f.uv) mix(uv[0] | (uv[1] << 8)); 
+    mix(q.faces[0].clut); mix(q.faces[0].tpage);
+    if (q.color) mix(q.color[0][0]);
+  }
+  return h >>> 0;
+}
+
 // track: { pieces, ground: true|false, name }; atlas: { rects }; textures: [{ id, terrain }]
 // test: { p: [x, y, z], yaw } to start from there instead of the start line
 export function compileTrack(track, atlas, textures, test = null) {
   const t0 = performance.now();
   const terrainOf = Object.fromEntries(textures.map((t) => [t.id, t.terrain]));
+  // each piece's quadblocks, from the last compile when the piece hasn't changed
   const E = new Emitter(terrainOf);
+  const cache = new Map();
   for (const pc of track.pieces) {
     if (!CATALOGUE[pc.type]) continue;
-    E.begin(pc);
-    emitPiece(asBuilt(pc), E);
+    const sig = JSON.stringify(pc);
+    let quads = emitCache.get(sig);
+    if (!quads) {
+      const before = E.quads.length;
+      E.begin(pc);
+      emitPiece(asBuilt(pc), E);
+      quads = E.quads.slice(before);
+    } else {
+      for (const q of quads) q.piece = pc;
+      E.quads.push(...quads);
+    }
+    cache.set(sig, quads);
   }
+  emitCache = cache;
   const route = findRoute(track.pieces);
 
   // checkpoints: a node every NODE_SPACING along a closed route; else free drive's nodes
@@ -351,20 +410,23 @@ export function compileTrack(track, atlas, textures, test = null) {
       }
     }
   }
-  // the pieces' quadblocks
+  // the pieces' quadblocks (none reaching past the window's 16-bit positions: wrapped round,
+  // one would wreck the whole window's BSP)
   let minY = 0;
+  const LIMIT = 32000;
   for (const q of E.quads) {
+    if (q.pos.some((p) => Math.abs(p[0]) > LIMIT || Math.abs(p[1]) > LIMIT || Math.abs(p[2]) > LIMIT)) continue;
     const r = rect(q.tex);
     const L = layoutsOf(q.uv, r);
     let flags = 0, terrain = terrainOf[q.tex] ?? 0;
     if (q.kind === 'floor') flags = q.n[1] > GROUND_NY ? FLAG_GROUND | FLAG_CAMERA_SEARCH : FLAG_COLLISION_SURFACE;
     else if (q.kind === 'wall') flags = FLAG_COLLISION_SURFACE;
     else if (q.kind === 'boost') { flags = FLAG_SKIP_WATER_LIST | FLAG_COLLISION_SURFACE | FLAG_TRIGGER; terrain = q.super ? 2 : 1; }
-    const c = shadeOf(q.n, q.kind);
+    const shades = vertexShades(q, light);
     const centre = q.pos[6];
     const cp = flags & FLAG_GROUND ? nodeOf(q, centre) : 0xff;
     for (const p of q.pos) minY = Math.min(minY, p[1]);
-    quads.push({ pos: q.pos, faces: L.faces, low: L.low, color: new Array(9).fill([c, c, c]), flags, terrain, checkpoint: cp,
+    quads.push({ pos: q.pos, faces: L.faces, low: L.low, color: shades.map((c) => [c, c, c]), flags, terrain, checkpoint: cp,
       doubleSided: q.double, src: q });
   }
   // round to whole units, by tile (each in coordinates from its centre)
@@ -395,15 +457,22 @@ export function compileTrack(track, atlas, textures, test = null) {
       }
     }
   }
+  // a tile whose quadblocks are as they were keeps its file (an edit touches a tile or two)
   const files = {};
   const sizes = [];
   let total = 0;
+  const reused = new Map();
   for (const t of tiles.values()) {
-    const out = writeTile(t.quads);
-    files[`T_${t.i}_${t.j}.lev`] = out.data;
-    sizes.push([t.i, t.j, out.data.length]);
-    total += out.quads;
+    const key = `${t.i},${t.j}`;
+    const h = tileHash(t.quads);
+    const old = tileCache.get(key);
+    const data = old && old.hash === h ? old.data : writeTile(t.quads).data;
+    reused.set(key, { hash: h, data });
+    files[`T_${t.i}_${t.j}.lev`] = data;
+    sizes.push([t.i, t.j, data.length]);
+    total += t.quads.length;
   }
+  tileCache = reused;
   sizes.sort((a, b) => a[1] - b[1] || a[0] - b[0]);
   const index = new Uint8Array(12 + 8 * sizes.length);
   const iv = new DataView(index.buffer);
