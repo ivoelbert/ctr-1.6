@@ -248,7 +248,7 @@ export function writeTile(quads, maxLeaf = 24) {
     for (let f = 0; f < 4; f++) b.ptr(o + 0x1c + 4 * f, layoutOff(q.faces[f]));
     const bx = boxes[order[k]];
     for (let c = 0; c < 6; c++) b.s16(o + 0x2c + 2 * c, bx[c]);
-    b.u8(o + 0x38, q.terrain || 0); b.u8(o + 0x39, 0); b.u8(o + 0x3a, quadBank[k]); b.s8(o + 0x3b, 0);
+    b.u8(o + 0x38, q.terrain || 0); b.u8(o + 0x39, q.weather || 0); b.u8(o + 0x3a, quadBank[k]); b.s8(o + 0x3b, 0);
     b.s16(o + 0x3c, blockId(k)); b.u8(o + 0x3e, q.checkpoint ?? 0xff);
     b.ptr(o + 0x40, layoutOff(q.low));
     b.ptr(o + 0x44, null);   // the world's PVS (native_world.c sets it)

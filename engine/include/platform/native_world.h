@@ -28,6 +28,8 @@ void NativeWorld_SetDrawDistance(int units);
 // assets/world/ and asks for a restart; the restart reads them all again (the route: the start
 // and the checkpoints in place of the level's) and, quick, starts without the countdown.
 void NativeWorld_RequestReload(int quick);
+// the editor's weather's vanish rate (a banked level's quadblocks hold their bank there instead)
+int NativeWorld_WeatherVanish(void);
 struct UIMap;
 int NativeWorld_MapIconPos(const struct UIMap *map, int *posX, int *posY);
 

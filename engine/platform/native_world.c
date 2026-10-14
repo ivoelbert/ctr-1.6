@@ -330,6 +330,14 @@ static double s_lastAssemblyMs;
 // the track editor: re-read the tiles at the next restart (and start it without the countdown)
 static int s_reloadPending;
 static int s_quickStart;
+// the editor's weather: how fast it comes (a quadblock's weather_vanishRate, which a banked
+// level's quadblocks spend on their vertex bank)
+static int s_weatherVanish;
+
+int NativeWorld_WeatherVanish(void)
+{
+	return s_worldActive && s_fixedWindow ? s_weatherVanish : 0;
+}
 static struct CheckpointNode *s_route;
 static double s_lastLoadMs;
 static int s_tilesLoaded;
@@ -941,6 +949,21 @@ static void NativeWorld_LoadRoute(struct GameTracker *gGT, struct Level *lev)
 	if (hasGrid)
 	{
 		memcpy(grid, file + colors + 8, sizeof(grid));
+	}
+	// and the weather (0 none, 1 rain, 2 snow): retail's rain buffer for it (Tiger Temple's rain,
+	// Blizzard Bluff's snow; their quadblocks' weather_intensity says how much falls where)
+	u32 weatherAt = colors + 8 + sizeof(grid);
+	int weather = size > weatherAt ? file[weatherAt] : 0;
+	memset(&lev->rainBuffer, 0, sizeof(lev->rainBuffer));
+	s_weatherVanish = weather == 1 ? 9 : weather == 2 ? 1 : 0;
+	if (weather == 1 || weather == 2)
+	{
+		lev->rainBuffer.numParticles_max = 240;
+		lev->rainBuffer.vanishRate = 240;
+		lev->rainBuffer.colorRGBA_top = 0x404040;
+		lev->rainBuffer.colorRGBA_bottom = 0xffffff;
+		lev->rainBuffer.fillMode = (int)(weather == 1 ? 0xe1000a60u : 0xe1000a20u);
+		lev->rainBuffer.offsetOT = 1;
 	}
 	free(file);
 	lev->ptr_restart_points = s_route;
