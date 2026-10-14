@@ -121,7 +121,8 @@ const FIELDS = {
   cylinder: [['radius', 'Radius', 'range', 16, 2048, 16], ['height', 'Height', 'range', 32, 8192, 32]],
   tree: [['height', 'Height', 'range', 256, 6000, 64], ['radius', 'Crown', 'range', 64, 2048, 32]],
   hill: [['width', 'Width', 'range', 512, 16384, 256], ['length', 'Length', 'range', 512, 16384, 256], ['height', 'Height', 'range', 64, 6144, 64],
-    ['shape', 'Shape', 'select', ['round', 'ridge', 'mesa']], ['slope', 'Mesa slope', 'range', 0.1, 1, 0.05, (p) => p.shape === 'mesa']],
+    ['shape', 'Shape', 'select', ['round', 'ridge', 'mesa', 'peak']], ['slope', 'Mesa slope', 'range', 0.1, 1, 0.05, (p) => p.shape === 'mesa'],
+    ['capAt', 'Snow line', 'range', 0.05, 1, 0.05, (p) => p.capTex]],
   gate: [['width', 'Width', 'range', 256, 8192, 128], ['height', 'Height', 'range', 256, 4096, 64]],
   sign: [['text', 'Text', 'text'], ['bg', 'Colour', 'color'], ['fg', 'Letters', 'color'], ['width', 'Width', 'range', 256, 8192, 128], ['height', 'Height', 'range', 128, 4096, 64], ['lift', 'Lift', 'range', 0, 4096, 64]],
 };
@@ -134,7 +135,7 @@ const TEX_FIELDS = {
   cylinder: [['tex', 'Surface']],
   tree: [['tex', 'Leaves']],
   gate: [['banner', 'Banner']],
-  hill: [['tex', 'Surface']],
+  hill: [['tex', 'Surface'], ['capTex', 'Snow cap (above the snow line)']],
 };
 
 const editor = {
@@ -776,6 +777,7 @@ const editor = {
         if (show && !show(pc)) continue;
         kids.push(this.fieldRow(pc, key, label, kind, a, b, step));
       }
+      kids.push(this.fieldRow(pc, 'glow', 'Glows', 'check'));
     }
     // textures (for every selected piece)
     const texFields = TEX_FIELDS[pc.kind] || [];
@@ -815,13 +817,20 @@ const editor = {
   fieldRow(pc, key, label, kind, a, b, step) {
     const def = CATALOGUE[pc.type] || {};
     // what the pieces take when a value isn't set (pieces.js)
-    const builtIn = { pipeAngle: pc.kind === 'quarter' ? 85 : 80, flatPart: 0.5, profile: 'smooth', bankMode: 'const', shape: pc.kind === 'hill' ? 'round' : 'flat', tension: 1, slope: 0.35 };
+    const builtIn = { pipeAngle: pc.kind === 'quarter' ? 85 : 80, flatPart: 0.5, profile: 'smooth', bankMode: 'const', shape: pc.kind === 'hill' ? 'round' : 'flat', tension: 1, slope: 0.35, capAt: 0.6 };
     const value = pc[key] ?? def[key] ?? builtIn[key] ?? (kind === 'select' ? a[0] : 0);
     if (kind === 'text' || kind === 'color') {
       const inp = el('input', { type: kind, value: value || (kind === 'color' ? '#ffffff' : ''), class: kind === 'color' ? 'sky' : '',
         onchange: () => this.commit(() => { pc[key] = inp.value; }) });
       if (kind === 'text') inp.style.width = '150px';
       return el('div', { class: 'row' }, el('label', {}, label), el('div', { class: 'ctl' }, inp));
+    }
+    if (kind === 'check') {
+      // lit the same day or night (neon, lamps, signs)
+      const box = el('input', { type: 'checkbox', title: 'Lit the same by day or night: neon, lamps, signs',
+        onchange: () => this.commit(() => { if (box.checked) pc[key] = true; else delete pc[key]; }) });
+      box.checked = !!value;
+      return el('div', { class: 'row' }, el('label', {}, label), el('div', { class: 'ctl' }, box));
     }
     if (kind === 'select') {
       const s = el('select', { onchange: () => this.commit(() => { pc[key] = s.value || undefined; if (!s.value) delete pc[key]; }) },

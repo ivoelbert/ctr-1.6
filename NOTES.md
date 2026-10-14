@@ -435,6 +435,14 @@ case): `lvlscn.dat`, `lvltex.dat`, `lvl.qb`, `lvlcol.dat` (collision; not read).
   as the atlas does (three.js's flipY off).
 - The engine's window is 16-bit round the middle tile: the ground ring stops at 28672 units, and
   the compiler drops any quadblock past 32000 (one wrapped round wrecks the window's BSP).
+- The examples (examples.js) are laid as you would (a Course: next piece onto the end, a jump,
+  turn to a heading, a straight to a line, a bridge home), then dressed (trees, towers, islands)
+  where no road is. A kart does ~1600 units a second: 85-95k a lap is about a minute. A jump
+  wants its landing's lip close and not far below the kicker's (a kart off a 256 kicker falls
+  ~1000 in 1400 ahead): one that lands short goes under a ramp and sticks, so a landing is
+  solid down to the ground. A glowing piece's vertices are 160 (0x80 = 1) whatever the light.
+  ~30k quadblocks (the city) draw at 60 fps in 0.35 MB of primitives; an edit recompiles in
+  ~100-200 ms there (~50 ms on a small track).
 
 ## Tools
 
