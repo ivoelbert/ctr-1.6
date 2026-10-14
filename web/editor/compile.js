@@ -137,8 +137,9 @@ export function asBuilt(pc) {
 }
 
 // a piece's quadblocks in its own coordinates (the editor's view moves them as a whole)
-export function localQuads(pc) {
+export function localQuads(pc, ground = true) {
   const E = new Emitter({});
+  E.ground = ground;
   const built = asBuilt(pc);
   E.begin(built, true);
   emitPiece(built, E);
@@ -278,10 +279,11 @@ export function compileTrack(track, atlas, textures, test = null) {
   const terrainOf = Object.fromEntries(textures.map((t) => [t.id, t.terrain]));
   // each piece's quadblocks, from the last compile when the piece hasn't changed
   const E = new Emitter(terrainOf);
+  E.ground = track.ground !== false;     // pillars only stand on ground
   const cache = new Map();
   for (const pc of track.pieces) {
     if (!CATALOGUE[pc.type]) continue;
-    const sig = JSON.stringify(pc);
+    const sig = JSON.stringify(pc) + E.ground;
     let quads = emitCache.get(sig);
     if (!quads) {
       const before = E.quads.length;
