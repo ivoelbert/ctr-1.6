@@ -270,6 +270,43 @@ export async function loadCtrTextures() {
   }
 }
 
+// a sign's face: its text, fitted, on its colour (drawn 2:1 and squeezed into the square cell:
+// the board it goes on is twice as wide as it's tall)
+export const SIGN_SLOTS = 16;
+export function drawSign(c, text, bg = '#1d4fd8', fg = '#ffffff') {
+  const W = 512, H = 256;
+  const wide = canvas(W);
+  wide.width = W; wide.height = H;
+  const cx = wide.getContext('2d');
+  cx.fillStyle = bg;
+  cx.fillRect(0, 0, W, H);
+  cx.strokeStyle = fg;
+  cx.lineWidth = 10;
+  cx.strokeRect(10, 10, W - 20, H - 20);
+  const lines = String(text || '').split(/\n|\\n/).slice(0, 3);
+  let size = 120;
+  cx.font = `900 ${size}px system-ui, sans-serif`;
+  while (size > 20 && (lines.some((l) => cx.measureText(l).width > W - 60) || size * lines.length * 1.1 > H - 50)) {
+    size -= 4;
+    cx.font = `900 ${size}px system-ui, sans-serif`;
+  }
+  cx.fillStyle = fg;
+  cx.textAlign = 'center';
+  cx.textBaseline = 'middle';
+  lines.forEach((l, i) => cx.fillText(l, W / 2, H / 2 + (i - (lines.length - 1) / 2) * size * 1.08));
+  const out = c.getContext('2d');
+  out.clearRect(0, 0, c.width, c.height);
+  out.drawImage(wide, 0, 0, c.width, c.height);
+}
+
+export function signSlots() {
+  return Array.from({ length: SIGN_SLOTS }, (_, k) => {
+    const c = canvas(256);
+    drawSign(c, '');
+    return { id: `sign-${k}`, label: `Sign ${k + 1}`, terrain: 0, size: 256, canvas: c, group: 'Signs', average: [40, 80, 200] };
+  });
+}
+
 // A borderless "CTRW" atlas (4 layers of 1024 a row, textures at 64-aligned origins): the
 // file the game loads (assets/dust2/atlas.rgba) and where each texture went.
 export function buildAtlas(textures) {

@@ -123,6 +123,7 @@ const FIELDS = {
   hill: [['width', 'Width', 'range', 512, 16384, 256], ['length', 'Length', 'range', 512, 16384, 256], ['height', 'Height', 'range', 64, 6144, 64],
     ['shape', 'Shape', 'select', ['round', 'ridge', 'mesa']], ['slope', 'Mesa slope', 'range', 0.1, 1, 0.05, (p) => p.shape === 'mesa']],
   gate: [['width', 'Width', 'range', 256, 8192, 128], ['height', 'Height', 'range', 256, 4096, 64]],
+  sign: [['text', 'Text', 'text'], ['bg', 'Colour', 'color'], ['fg', 'Letters', 'color'], ['width', 'Width', 'range', 256, 8192, 128], ['height', 'Height', 'range', 128, 4096, 64], ['lift', 'Lift', 'range', 0, 4096, 64]],
 };
 const TEX_FIELDS = {
   sweep: [['tex', 'Surface'], ['wallTex', 'Walls'], ['sideTex', 'Sides']],
@@ -176,6 +177,7 @@ const editor = {
       const s = window.ctr && window.ctr.state ? window.ctr.state() : null;
       if (s && s.kart && s.eventTime > 0 && (s.gameMode1 & 0x40) === 0) {
         this.ready = true;
+        game.started = true;
         // ?drive (the launcher's Drive): straight into the race
         if (new URLSearchParams(location.search).has('drive')) this.drive();
         else game.pause(true);
@@ -337,6 +339,7 @@ const editor = {
       pc.y = Math.max(-2048, Math.min(24576, pc.y || 0));
     }
     if (document.activeElement !== this.nameInput) this.nameInput.value = this.track.name;
+    for (const id of game.updateSigns(this.track)) this.view.refreshTexture(id);
     this.view.setGround(this.track.ground !== false, this.track.groundTex);
     this.view.sync(this.track);
     for (const id of [...this.selection]) if (!this.track.pieces.some((p) => p.id === id)) this.selection.delete(id);
@@ -397,7 +400,7 @@ const editor = {
     const time = (ms) => `${Math.floor(ms / 60000)}:${String(Math.floor((ms % 60000) / 1000)).padStart(2, '0')}.${String(Math.floor((ms % 1000) / 10)).padStart(2, '0')}`;
     const laps = this.laps && this.laps.length ? el('span', {}, 'Laps ', ...this.laps.slice(-3).map((t, i, a) => el('b', {}, time(t) + (i < a.length - 1 ? ' · ' : ''))),
       this.laps.length > 1 ? el('span', { class: 'muted' }, `  best ${time(Math.min(...this.laps))}`) : null) : null;
-    this.statusEl.replaceChildren(route, el('span', { class: 'muted' }, `${n} pieces`), laps, tool,
+    this.statusEl.replaceChildren(...[route, el('span', { class: 'muted' }, `${n} pieces`), laps, tool].filter(Boolean),
       el('span', { class: 'grow' }), el('span', { class: 'muted' }, this.ready ? 'Game ready: Tab drives' : 'Game loading…'));
   },
 
@@ -725,7 +728,7 @@ const editor = {
     }
     // textures (for every selected piece)
     const texFields = TEX_FIELDS[pc.kind] || [];
-    const groups = [...new Set(game.textures.map((t) => t.group))];
+    const groups = [...new Set(game.textures.map((t) => t.group))].filter((g) => g !== 'Signs');
     for (const [key, label] of texFields) {
       if (key === 'wallTex' && !(pc.wallL || pc.wallR)) continue;
       // the textures by where they're from: the editor's, or one of CTR's tracks
@@ -763,6 +766,12 @@ const editor = {
     // what the pieces take when a value isn't set (pieces.js)
     const builtIn = { pipeAngle: pc.kind === 'quarter' ? 85 : 80, flatPart: 0.5, profile: 'smooth', bankMode: 'const', shape: pc.kind === 'hill' ? 'round' : 'flat', tension: 1, slope: 0.35 };
     const value = pc[key] ?? def[key] ?? builtIn[key] ?? (kind === 'select' ? a[0] : 0);
+    if (kind === 'text' || kind === 'color') {
+      const inp = el('input', { type: kind, value: value || (kind === 'color' ? '#ffffff' : ''), class: kind === 'color' ? 'sky' : '',
+        onchange: () => this.commit(() => { pc[key] = inp.value; }) });
+      if (kind === 'text') inp.style.width = '150px';
+      return el('div', { class: 'row' }, el('label', {}, label), el('div', { class: 'ctl' }, inp));
+    }
     if (kind === 'select') {
       const s = el('select', { onchange: () => this.commit(() => { pc[key] = s.value || undefined; if (!s.value) delete pc[key]; }) },
         ...a.map((o) => el('option', { value: o }, o === '' ? 'none' : o)));

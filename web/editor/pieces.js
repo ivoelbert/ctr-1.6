@@ -289,6 +289,13 @@ function emitBox(E, corner, size, texTop, texSide, kindTop, kindSide, opts = {})
   const [sx, sy, sz] = size;
   const P = (x, y, z) => corner(x, y, z);
   const n = (a) => Math.max(1, Math.ceil(a / QB));
+  if (opts.sidesOnly) {
+    E.surface(n(sx), 1, (u, v) => ({ p: P(u, 1, v), uv: [u * sx / TEXEL, v * sz / TEXEL] }), { tex: texTop, kind: kindTop, out: [0, 1, 0], frame: true });
+    E.surface(n(sx), 1, (u, v) => ({ p: P(u, 0, v), uv: [u * sx / TEXEL, v * sz / TEXEL] }), { tex: texSide, kind: kindSide, out: [0, -1, 0], frame: true });
+    E.surface(1, n(sy), (u, v) => ({ p: P(0, v, u), uv: [u * sz / TEXEL, v * sy / TEXEL] }), { tex: texSide, kind: kindSide, out: [-1, 0, 0], frame: true });
+    E.surface(1, n(sy), (u, v) => ({ p: P(1, v, u), uv: [u * sz / TEXEL, v * sy / TEXEL] }), { tex: texSide, kind: kindSide, out: [1, 0, 0], frame: true });
+    return;
+  }
   // top (y = 1)
   if (!opts.noTop) E.surface(n(sx), n(sz), (u, v) => ({ p: P(u, 1, v), uv: [u * sx / TEXEL, v * sz / TEXEL] }), { tex: texTop, kind: kindTop, out: [0, 1, 0], frame: true });
   if (!opts.noBottom) E.surface(n(sx), n(sz), (u, v) => ({ p: P(u, 0, v), uv: [u * sx / TEXEL, v * sz / TEXEL] }), { tex: texSide, kind: kindSide, out: [0, -1, 0], frame: true });
@@ -388,6 +395,21 @@ function emitGate(pc, E, banner) {
   emitBox(E, (x, y, z) => [(x - 0.5) * (w + post * 2), h - bh + y * bh, (z - 0.5) * 48], [w + post * 2, bh, 48], banner, banner, 'deco', 'deco');
 }
 
+// a sign: a board on two posts, its face the sign's text (pc.signTex: a slot of the atlas the
+// track's signs are drawn in, compile.signSlotsOf)
+function emitSign(pc, E) {
+  const w = pc.width || BLOCK, h = pc.height ?? w / 2, lift = pc.lift ?? 384, d = 48;
+  for (const side of [-1, 1]) {
+    emitBox(E, (x, y, z) => [side * (w / 2 - 40) + (x - 0.5) * 48, y * (lift + h), (z - 0.5) * 48], [48, lift + h, 48], 'black', 'black', 'wall', 'wall', { noBottom: true });
+  }
+  const tex = pc.signTex || 'white';
+  // the face (towards -z, the way the sign faces) and the back
+  // (read from in front: its left is the piece's +x on the face, -x on the back)
+  E.surface(1, 1, (u, v) => ({ p: [(0.5 - u) * w, lift + v * h, -d / 2], uv: [u * 256, (1 - v) * 256] }), { tex, kind: 'wall', out: [0, 0, -1] });
+  E.surface(1, 1, (u, v) => ({ p: [(u - 0.5) * w, lift + v * h, d / 2], uv: [u * 256, (1 - v) * 256] }), { tex: pc.twoSided === false ? 'black' : tex, kind: 'wall', out: [0, 0, 1] });
+  emitBox(E, (x, y, z) => [(x - 0.5) * w, lift + y * h, (z - 0.5) * d], [w, h, d], 'black', 'black', 'wall', 'wall', { noTop: false, sidesOnly: true });
+}
+
 function emitTree(pc, E) {
   const h = pc.height ?? 1024, r = pc.radius ?? 384;
   emitCylinder({ radius: 48, height: h * 0.45, tex: 'wood' }, E);
@@ -461,6 +483,8 @@ export const CATALOGUE = {
   post: { group: 'Decor', label: 'Post', kind: 'cylinder', radius: 40, height: 512, tex: 'white' },
   arch: { group: 'Decor', label: 'Arch', kind: 'gate', width: BLOCK, height: 768, banner: 'yellow' },
   crate: { group: 'Decor', label: 'Crate', kind: 'box', width: 256, height: 256, length: 256, tex: 'wood' },
+  sign: { group: 'Decor', label: 'Sign', kind: 'sign', width: BLOCK, height: 512, lift: 384, text: 'CTR 1.6', bg: '#1d4fd8', fg: '#ffffff' },
+  bigSign: { group: 'Decor', label: 'Big sign', kind: 'sign', width: 3 * BLOCK, height: 768, lift: 640, text: 'GO!', bg: '#d0381a', fg: '#ffd34d' },
 };
 
 export function makePiece(type, at = {}) {
@@ -489,6 +513,7 @@ export function emitPiece(pc, E) {
     case 'cylinder': emitCylinder(pc, E); break;
     case 'tree': emitTree(pc, E); break;
     case 'gate': emitGate(pc, E, pc.banner || 'yellow'); break;
+    case 'sign': emitSign(pc, E); break;
     case 'box': {
       const w = pc.width || BLOCK, h = pc.height || BLOCK, d = pc.length || BLOCK;
       emitBox(E, (x, y, z) => [(x - 0.5) * w, y * h, -z * d], [w, h, d], pc.tex || 'stone', pc.sideTex || pc.tex || 'stone', 'floor', 'wall');
@@ -506,4 +531,16 @@ export function connectors(pc) {
     { p: a.p, f: scale(a.f, -1), end: 0 },   // facing out of the piece, back the way in
     { p: b.p, f: b.f, end: 1 },
   ];
+}
+
+// the track's signs' faces: each different text (and colours) a slot of the atlas, in order
+export const signKey = (pc) => JSON.stringify([pc.text || '', pc.bg || '', pc.fg || '']);
+export function signSlotsOf(pieces, slots = 16) {
+  const out = new Map();
+  for (const pc of pieces) {
+    if (pc.kind !== 'sign') continue;
+    const k = signKey(pc);
+    if (!out.has(k) && out.size < slots) out.set(k, `sign-${out.size}`);
+  }
+  return out;
 }
