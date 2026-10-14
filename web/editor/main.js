@@ -98,7 +98,7 @@ const SWEEP_FIELDS = [
   ['angle', 'Turn', 'range', -180, 180, 5],
   ['radius', 'Radius', 'range', 512, 16384, 256, (p) => !!p.angle],
   ['rise', 'Rise', 'range', -4096, 4096, 64],
-  ['profile', 'Slope shape', 'select', ['smooth', 'linear', 'kicker', 'easeOut']],
+  ['profile', 'Slope shape', 'select', ['smooth', 'linear', 'kicker', 'easeOut', 'hump', 'bumps']],
   ['width', 'Width', 'range', 256, 8192, 128],
   ['bank', 'Bank', 'range', -80, 80, 1],
   ['bankMode', 'Bank shape', 'select', ['const', 'arc', 'in', 'out']],
@@ -253,7 +253,7 @@ const editor = {
     R.appendChild(this.dialog);
     this.toastEl = el('div', { class: 'toast' });
     R.appendChild(this.toastEl);
-    this.driveHint = el('div', { id: 'drivehint', class: 'fade' }, 'Tab or Esc: back to the editor');
+    this.driveHint = el('div', { id: 'drivehint', class: 'fade' }, 'Tab or Esc: back to the editor · Backspace: start over');
     document.body.appendChild(this.driveHint);
   },
 
@@ -285,7 +285,7 @@ const editor = {
       ['Ctrl+Z / Ctrl+Shift+Z', 'Undo / redo'],
       ['Ctrl+S', 'Save the track (tracks/ by the game)'],
       ['F', 'Look at the selection (or the whole track)'],
-      ['Tab', 'Drive it from the start, at once · Tab or Esc again: back here'],
+      ['Tab', 'Drive it from the start, at once · Tab or Esc again: back here · Backspace while driving: start over'],
       ['Shift+Tab', 'Drive from where the mouse points'],
       ['Esc', 'Put the piece down / clear the selection'],
     ];
@@ -892,6 +892,7 @@ const editor = {
       test = { p: [p[0], p[1] + 80, p[2]], yaw: Math.atan2(-f.x, -f.z) };
     }
     if (!this.ready) { this.toast('The game is still loading…'); return; }
+    this.lastTest = test;
     try { localStorage.setItem(AUTOSAVE, this.snapshot()); } catch { /* full */ }
     const out = game.drive(this.track, test);
     if (!out) return;
@@ -911,6 +912,12 @@ const editor = {
       if (s.kart) this.trail.push([s.kart.x, s.kart.y, s.kart.z]);
       if (this.trail.length > 6000) this.trail.shift();
     }, 120);
+  },
+
+  restart() {
+    const out = game.drive(this.track, this.lastTest || null);
+    if (out) window.ctrEditor.last = out;
+    this.trail = [];
   },
 
   back() {
@@ -991,6 +998,11 @@ const editor = {
           ev.preventDefault();
           ev.stopImmediatePropagation();
           this.back();
+        } else if (ev.code === 'Backspace') {
+          // start over at the line, at once (the same track)
+          ev.preventDefault();
+          ev.stopImmediatePropagation();
+          this.restart();
         }
         return;
       }

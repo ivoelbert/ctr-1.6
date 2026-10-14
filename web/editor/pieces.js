@@ -24,7 +24,9 @@ const PROFILES = {
   smooth: (s) => smooth(s),
   linear: (s) => s,
   kicker: (s) => s * s,                 // flat in, steep out: a jump
-  easeOut: (s) => 1 - (1 - s) * (1 - s),
+  easeOut: (s) => 1 - (1 - s) * (1 - s),  // steep in, flat out: a landing
+  hump: (s) => Math.sin(Math.PI * s) ** 2,        // up and back down (rise is its height)
+  bumps: (s) => Math.sin(2 * Math.PI * s) ** 2,   // two of them
 };
 const dProfile = (name, s) => {
   const h = 1e-4;
@@ -234,7 +236,7 @@ function emitSweep(pc, E) {
     }, { tex: pc.sideTex || 'concrete', kind: 'wall', out: (p, u) => scale(sweepFrame(pc, u).u, -1), underside: true });
   }
   // pillars down to the ground under a raised road (the piece's place, E.world, says how far)
-  if (pc.supports !== false && E.world) emitSupports(pc, E, at, thick);
+  if (pc.supports !== false && E.world && E.ground !== false) emitSupports(pc, E, at, thick);
   // a start line: a checker band across the road at the middle
   if (pc.type === 'start') {
     const s0 = 0.5 - 96 / L, s1 = 0.5 + 96 / L;
@@ -428,6 +430,10 @@ export const CATALOGUE = {
   pipeCurve: { group: 'Stunt', label: 'Half pipe curve', ...road({ angle: 90, radius: 3 * BLOCK, width: 2 * BLOCK, shape: 'pipe', flatPart: 0.45, tex: 'concrete' }) },
   kicker: { group: 'Stunt', label: 'Jump', ...road({ length: BLOCK, rise: LEVEL, profile: 'kicker', tex: 'hazard' }) },
   bigKicker: { group: 'Stunt', label: 'Big jump', ...road({ length: 2 * BLOCK, rise: 3 * LEVEL, profile: 'kicker', tex: 'hazard' }) },
+  landing: { group: 'Stunt', label: 'Landing', ...road({ length: 2 * BLOCK, rise: -2 * LEVEL, profile: 'easeOut', tex: 'road' }) },
+  hump: { group: 'Stunt', label: 'Hump', ...road({ length: 2 * BLOCK, rise: 384, profile: 'hump' }) },
+  dip: { group: 'Stunt', label: 'Dip', ...road({ length: 2 * BLOCK, rise: -384, profile: 'hump' }) },
+  bumps: { group: 'Stunt', label: 'Bumpy road', ...road({ length: 3 * BLOCK, rise: 128, profile: 'bumps', tex: 'dirt', thick: 64 }) },
   boost: { group: 'Stunt', label: 'Boost pad', ...road({ boost: 'normal' }) },
   superBoost: { group: 'Stunt', label: 'Super boost', ...road({ boost: 'super', tex: 'road-red' }) },
   quarter: { group: 'Stunt', label: 'Quarter pipe', kind: 'quarter', width: 2 * BLOCK, radius: BLOCK, length: 0, tex: 'concrete' },

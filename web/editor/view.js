@@ -169,7 +169,7 @@ export class View {
 
   // a piece's mesh (its own coordinates; the object carries its place)
   pieceObject(pc, ghost = false, tint = null) {
-    const quads = localQuads(pc);
+    const quads = localQuads(pc, this.ground.visible);
     const T = transformOf({ yaw: pc.yaw, pitch: pc.pitch, roll: pc.roll });
     const byTex = new Map();
     for (const q of quads) {
@@ -220,7 +220,7 @@ export class View {
     const seen = new Set();
     for (const pc of track.pieces) {
       seen.add(pc.id);
-      const sig = JSON.stringify({ ...pc, x: 0, z: 0, onGround: Math.abs(pc.y || 0) < 8 });
+      const sig = JSON.stringify({ ...pc, x: 0, z: 0, onGround: Math.abs(pc.y || 0) < 8, ground: this.ground.visible });
       let obj = this.pieces.get(pc.id);
       if (!obj || obj.userData.sig !== sig) {
         if (obj) { this.pieceGroup.remove(obj); dispose(obj); }
