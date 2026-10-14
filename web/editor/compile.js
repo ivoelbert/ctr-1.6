@@ -256,6 +256,7 @@ const INVISIBLE = { uv: [[0, 0], [0, 0], [0, 0], [0, 0]], clut: 15 << 10, tpage:
 // ---- the whole compile ----
 
 let emitCache = new Map();
+const WEATHER = { rain: 1, snow: 2 };
 let tileCache = new Map();
 
 // FNV-1a over what a tile's quadblocks are: positions, layouts, flags, terrain, checkpoint, colour
@@ -264,7 +265,7 @@ function tileHash(quads) {
   const mix = (v) => { h ^= v & 0xffff; h = Math.imul(h, 0x01000193); h ^= (v >>> 16) & 0xffff; h = Math.imul(h, 0x01000193); };
   for (const q of quads) {
     for (const p of q.pos) { mix(p[0]); mix(p[1]); mix(p[2]); }
-    mix(q.flags); mix(q.terrain); mix(q.checkpoint ?? 255); mix(q.doubleSided ? 1 : 0);
+    mix(q.flags); mix(q.terrain); mix(q.checkpoint ?? 255); mix(q.doubleSided ? 1 : 0); mix(q.weather || 0);
     for (const f of q.faces) for (const uv of f.uv) mix(uv[0] | (uv[1] << 8)); 
     mix(q.faces[0].clut); mix(q.faces[0].tpage);
     if (q.color) mix(q.color[0][0]);
@@ -431,6 +432,9 @@ export function compileTrack(track, atlas, textures, test = null) {
     quads.push({ pos: q.pos, faces: L.faces, low: L.low, color: shades.map((c) => [c, c, c]), flags, terrain, checkpoint: cp,
       doubleSided: q.double, src: q });
   }
+  // the weather falls everywhere (the camera's quadblock says how much: retail's most)
+  const weather = WEATHER[track.weather] ? 60 : 0;
+  for (const q of quads) q.weather = weather;
   // round to whole units, by tile (each in coordinates from its centre)
   const tiles = new Map();
   for (const q of quads) {
@@ -484,7 +488,7 @@ export function compileTrack(track, atlas, textures, test = null) {
   sizes.forEach(([i, j, n], k) => { iv.setInt16(12 + 8 * k, i, true); iv.setInt16(14 + 8 * k, j, true); iv.setUint32(16 + 8 * k, n, true); });
   files['index.bin'] = index;
   files['map.bin'] = minimap(quads, route);
-  files['route.bin'] = routeFile(nodes, spawn, skyColors(track, textures));
+  files['route.bin'] = routeFile(nodes, spawn, skyColors(track, textures), WEATHER[track.weather] || 0);
   return { files, quads: total, nodes: nodes.length, route, spawn, ms: performance.now() - t0, preview: E.quads };
 }
 
@@ -514,8 +518,8 @@ function gridOf(spawn) {
   return out;
 }
 
-function routeFile(nodes, spawn, colors) {
-  const out = new Uint8Array(16 + 12 * nodes.length + 8 + 64);
+function routeFile(nodes, spawn, colors, weather = 0) {
+  const out = new Uint8Array(16 + 12 * nodes.length + 8 + 64 + 4);
   const v = new DataView(out.buffer);
   out.set([0x57, 0x52, 0x54, 0x45]);   // WRTE
   v.setInt32(4, nodes.length, true);
@@ -532,6 +536,7 @@ function routeFile(nodes, spawn, colors) {
   });
   colors.forEach((c, i) => out.set([c[0], c[1], c[2], 1], 16 + 12 * nodes.length + 4 * i));
   gridOf(spawn).forEach((g, i) => g.forEach((val, k) => v.setInt16(16 + 12 * nodes.length + 8 + 8 * i + 2 * k, val, true)));
+  out[16 + 12 * nodes.length + 8 + 64] = weather;
   return out;
 }
 

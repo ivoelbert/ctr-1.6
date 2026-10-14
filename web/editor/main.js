@@ -205,6 +205,8 @@ const editor = {
     this.skyInput = el('input', { type: 'color', class: 'sky', title: 'The sky', onchange: () => this.commit(() => { this.track.sky = this.skyInput.value; }) });
     this.lightSel = el('select', { title: 'The light: day to night', onchange: () => this.commit(() => { this.track.light = Number(this.lightSel.value); }) },
       el('option', { value: 1 }, 'Day'), el('option', { value: 0.85 }, 'Afternoon'), el('option', { value: 0.65 }, 'Evening'), el('option', { value: 0.42 }, 'Night'));
+    this.weatherSel = el('select', { title: 'The weather', onchange: () => this.commit(() => { this.track.weather = this.weatherSel.value || undefined; if (!this.weatherSel.value) delete this.track.weather; }) },
+      el('option', { value: '' }, 'Clear'), el('option', { value: 'rain' }, 'Rain'), el('option', { value: 'snow' }, 'Snow'));
     this.undoBtn = el('button', { title: 'Undo (Ctrl+Z)', onclick: () => this.doUndo() }, '↶');
     this.redoBtn = el('button', { title: 'Redo (Ctrl+Shift+Z)', onclick: () => this.doRedo() }, '↷');
     this.snapBtn = el('button', { title: 'Grid snap (G): pieces on the block grid; off, anywhere', onclick: () => this.toggleSnap() }, 'Grid');
@@ -224,7 +226,7 @@ const editor = {
       el('span', { class: 'sep' }),
       this.snapBtn, this.snapSize, this.rotStep, this.levelLabel,
       el('span', { class: 'sep' }),
-      this.groundBtn, this.groundTex, this.skyInput, this.lightSel,
+      this.groundBtn, this.groundTex, this.skyInput, this.lightSel, this.weatherSel,
       el('span', { class: 'grow' }),
       el('button', { title: 'Help (H)', onclick: () => this.toggleHelp() }, '?'),
       el('button', { title: 'Drive from where the mouse points (Shift+Tab)', onclick: () => this.drive(true) }, '▶ Here'),
@@ -371,6 +373,7 @@ const editor = {
     this.groundTex.value = this.track.groundTex || 'grass';
     this.skyInput.value = this.track.sky || '#6eaae6';
     this.lightSel.value = String(this.track.light ?? 1);
+    this.weatherSel.value = this.track.weather || '';
     this.view.setEnvironment(this.track.sky || '#6eaae6', this.track.light ?? 1);
     this.levelLabel.textContent = `▲${this.level}`;
     this.view.buildGrid(this.level * LEVEL);
