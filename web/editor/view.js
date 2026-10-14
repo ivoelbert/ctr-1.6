@@ -89,7 +89,16 @@ export class View {
     const w = this.container.clientWidth || window.innerWidth, h = this.container.clientHeight || window.innerHeight;
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
+    // the bars over the view: its middle in the middle of what they leave
+    const shift = ((this.insets ? this.insets[1] - this.insets[0] : 0) / 2) | 0;
+    if (shift) this.camera.setViewOffset(w, h, 0, shift, w, h);
+    else this.camera.clearViewOffset();
     this.camera.updateProjectionMatrix();
+  }
+
+  setInsets(top, bottom) {
+    this.insets = [top, bottom];
+    this.resize();
   }
 
   material(texId, opts = {}) {

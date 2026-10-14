@@ -244,6 +244,10 @@ const editor = {
     this.statusEl = el('div', { class: 'status' });
     R.appendChild(el('div', { class: 'bar bottom' }, this.tabs, this.palette, this.statusEl));
     this.renderPalette();
+    // the view's middle in the middle of what the bars leave
+    const insets = () => this.view.setInsets(top.offsetHeight, this.statusEl.parentElement.offsetHeight);
+    insets();
+    window.addEventListener('resize', insets);
 
     this.props = el('div', { class: 'props', hidden: true });
     R.appendChild(this.props);
@@ -749,7 +753,9 @@ const editor = {
 
   fieldRow(pc, key, label, kind, a, b, step) {
     const def = CATALOGUE[pc.type] || {};
-    const value = pc[key] ?? def[key] ?? (kind === 'select' ? a[0] : 0);
+    // what the pieces take when a value isn't set (pieces.js)
+    const builtIn = { pipeAngle: pc.kind === 'quarter' ? 85 : 80, flatPart: 0.5, profile: 'smooth', bankMode: 'const', shape: pc.kind === 'hill' ? 'round' : 'flat', tension: 1, slope: 0.35 };
+    const value = pc[key] ?? def[key] ?? builtIn[key] ?? (kind === 'select' ? a[0] : 0);
     if (kind === 'select') {
       const s = el('select', { onchange: () => this.commit(() => { pc[key] = s.value || undefined; if (!s.value) delete pc[key]; }) },
         ...a.map((o) => el('option', { value: o }, o === '' ? 'none' : o)));
