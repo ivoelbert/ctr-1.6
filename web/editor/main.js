@@ -279,7 +279,8 @@ const editor = {
       ['Right drag · Middle drag', 'Turn the camera · move it (Shift + right drag too)'],
       ['Alt + drag · Space + drag', 'The same on a trackpad: turn the camera · move it'],
       ['Drag over empty ground', 'Select everything in the box (Shift: add to it)'],
-      ['Wheel · W A S D', 'Zoom · move the camera along the ground'],
+      ['Wheel · W A S D', 'Zoom (towards the mouse) · move the camera along the ground'],
+      ['Double click', 'Look at the piece under the mouse'],
       ['R / Shift+R', 'Turn the piece you place, or the selection, by the rotation step'],
       ['T', 'Mirror the piece you place (curves the other way)'],
       ['PgUp / PgDn  ·  E / Q', 'Build higher / lower (a step is a quarter block)'],
@@ -1056,6 +1057,12 @@ const editor = {
       }
     });
     cv.addEventListener('contextmenu', (e) => e.preventDefault());
+    // a double click looks at the piece under the mouse
+    cv.addEventListener('dblclick', (ev) => {
+      const pick = this.view.pick(ev, this.level * LEVEL);
+      const pc = pick.piece && this.track.pieces.find((p) => p.id === pick.piece);
+      if (pc && !this.tool) this.view.focus([[pc.x, pc.y, pc.z], pick.point]);
+    });
 
     // the editor's keys go no further (the game, held, would see them when it's back)
     const keys = new Set();
