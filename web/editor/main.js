@@ -280,6 +280,7 @@ const editor = {
       ['Alt + click', 'Pick up a piece\'s type and settings (eyedropper)'],
       ['Right click (no drag)', 'Delete the piece under the mouse'],
       ['Delete · Ctrl+D', 'Delete · duplicate the selection'],
+      ['1 – 9 · , and .', 'Pick the palette\'s pieces by number · the previous / next tab'],
       ['Ctrl+C / Ctrl+V', 'Copy / paste the selection (pasted where the mouse is)'],
       ['Ctrl+Z / Ctrl+Shift+Z', 'Undo / redo'],
       ['Ctrl+S', 'Save the track (tracks/ by the game)'],
@@ -1007,7 +1008,9 @@ const editor = {
       else if (ctrl && k === 'KeyV') this.paste();
       else if (ctrl) handled = false;
       else if (k === 'KeyR') {
-        if (this.tool) { this.rot = (this.rot + (ev.shiftKey ? -1 : 1) * (this.snap.grid ? this.snap.rot : 15) + 360) % 360; this.updateGhost(); }
+        // on an open end a piece can only face on: R flips it, as T does
+        if (this.tool && this.ghostCandidate && this.ghostCandidate.snapped) { this.mirror = !this.mirror; this.updateGhost(); }
+        else if (this.tool) { this.rot = (this.rot + (ev.shiftKey ? -1 : 1) * (this.snap.grid ? this.snap.rot : 15) + 360) % 360; this.updateGhost(); }
         else this.rotateSelection(ev.shiftKey ? -1 : 1);
       } else if (k === 'KeyT') { this.mirror = !this.mirror; this.updateGhost(); }
       else if (k === 'Space') { spaceHeld = true; leftButton(false); }
@@ -1017,7 +1020,17 @@ const editor = {
       else if (k === 'KeyF') this.focusSelection();
       else if (k === 'PageUp' || k === 'KeyE') { this.level = Math.min(100, this.level + 1); this.refresh(true); this.updateGhost(); }
       else if (k === 'PageDown' || k === 'KeyQ') { this.level = Math.max(-4, this.level - 1); this.refresh(true); this.updateGhost(); }
-      else if (k === 'Delete' || k === 'Backspace' || k === 'KeyX') this.deleteSelection();
+      else if (k === 'Delete' || k === 'Backspace') this.deleteSelection();
+      else if (/^Digit[1-9]$/.test(k)) {
+        // the palette's tab, by number
+        const types = Object.entries(CATALOGUE).filter(([, d]) => d.group === this.group).map(([t]) => t);
+        const t = types[Number(k.slice(5)) - 1];
+        if (t) this.pickTool(t);
+      } else if (k === 'Comma' || k === 'Period') {
+        const groups = [...new Set(Object.values(CATALOGUE).map((d) => d.group))];
+        this.group = groups[(groups.indexOf(this.group) + (k === 'Period' ? 1 : groups.length - 1)) % groups.length];
+        this.renderPalette();
+      }
       else if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(k)) keys.add(k);
       else handled = false;
       if (handled) ev.preventDefault();

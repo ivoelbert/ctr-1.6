@@ -883,7 +883,7 @@ static void NativeWorld_CollectHitboxes(struct mesh_info *mesh)
 
 // The track editor's route (assets/world/route.bin), in place of the level's: 'WRTE', the
 // node count, the start (s16 x, y, z and heading), then the checkpoint nodes as the level holds
-// them (struct CheckpointNode, 12 bytes), and the sky's colours. Every racer starts at the start.
+// them (struct CheckpointNode, 12 bytes), the sky's colours and the grid (or every racer at the start).
 static void NativeWorld_LoadRoute(struct GameTracker *gGT, struct Level *lev)
 {
 	char path[768];
@@ -918,6 +918,29 @@ static void NativeWorld_LoadRoute(struct GameTracker *gGT, struct Level *lev)
 		{
 			memcpy(&lev->clearColor[i], file + colors + 4 * i, 4);
 		}
+		// split screen clears to one colour (MainInit's draw environments): the sky's; and the
+		// views below the first paint all of their sky in the colour under the horizon (CAM.c):
+		// the sky's there too
+		const u8 *sky = file + colors;
+		lev->clearColorRGBA = (u32)sky[0] | ((u32)sky[1] << 8) | ((u32)sky[2] << 16);
+		if (gGT->numPlyrCurrGame > 1)
+		{
+			lev->clearColor[1] = lev->clearColor[0];
+		}
+		// and the glow gradient over the horizon (Dingo Canyon's sunset, in the level it's
+		// grafted on): the sky's too
+		for (int i = 0; i < 3; i++)
+		{
+			lev->glowGradient[i].colorFrom = lev->clearColorRGBA;
+			lev->glowGradient[i].colorTo = lev->clearColorRGBA;
+		}
+	}
+	// then, when there, the eight racers' places on the grid (s16 x, y, z and heading each)
+	s16 grid[8][4];
+	int hasGrid = size >= colors + 8 + sizeof(grid);
+	if (hasGrid)
+	{
+		memcpy(grid, file + colors + 8, sizeof(grid));
 	}
 	free(file);
 	lev->ptr_restart_points = s_route;
@@ -925,11 +948,12 @@ static void NativeWorld_LoadRoute(struct GameTracker *gGT, struct Level *lev)
 	gGT->trackLength_x_numLaps_x_8 = s_route[0].distToFinish * gGT->numLaps * 8;
 	for (int i = 0; i < 8; i++)
 	{
-		lev->DriverSpawn[i].pos.x = start[0];
-		lev->DriverSpawn[i].pos.y = start[1];
-		lev->DriverSpawn[i].pos.z = start[2];
+		const s16 *at = hasGrid ? grid[i] : start;
+		lev->DriverSpawn[i].pos.x = at[0];
+		lev->DriverSpawn[i].pos.y = at[1];
+		lev->DriverSpawn[i].pos.z = at[2];
 		lev->DriverSpawn[i].rot.x = 0;
-		lev->DriverSpawn[i].rot.y = start[3];
+		lev->DriverSpawn[i].rot.y = at[3];
 		lev->DriverSpawn[i].rot.z = 0;
 	}
 	s_fixedWindow = 1;
