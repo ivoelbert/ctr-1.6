@@ -390,7 +390,11 @@ const editor = {
       this.tool ? el('span', {}, 'Placing ', el('b', {}, CATALOGUE[this.tool].label), ' · R turn · T mirror · Esc done') :
       this.selection.size ? el('span', {}, el('b', {}, `${this.selection.size} selected`), ' · M move/turn · R turn · Del delete · Ctrl+D duplicate') :
         el('span', { class: 'muted' }, 'Pick a piece below, or click one to select it · H: help');
-    this.statusEl.replaceChildren(route, el('span', { class: 'muted' }, `${n} pieces`), tool,
+    // the last drive's laps, and the best of them
+    const time = (ms) => `${Math.floor(ms / 60000)}:${String(Math.floor((ms % 60000) / 1000)).padStart(2, '0')}.${String(Math.floor((ms % 1000) / 10)).padStart(2, '0')}`;
+    const laps = this.laps && this.laps.length ? el('span', {}, 'Laps ', ...this.laps.slice(-3).map((t, i, a) => el('b', {}, time(t) + (i < a.length - 1 ? ' · ' : ''))),
+      this.laps.length > 1 ? el('span', { class: 'muted' }, `  best ${time(Math.min(...this.laps))}`) : null) : null;
+    this.statusEl.replaceChildren(route, el('span', { class: 'muted' }, `${n} pieces`), laps, tool,
       el('span', { class: 'grow' }), el('span', { class: 'muted' }, this.ready ? 'Game ready: Tab drives' : 'Game loading…'));
   },
 
@@ -945,11 +949,24 @@ const editor = {
     clearTimeout(this.hintTimer);
     this.hintTimer = setTimeout(() => this.driveHint.classList.add('fade'), 2500);
     clearInterval(this.trailTimer);
+    // the drive's line (shown when you're back) and its laps' times
+    this.laps = [];
+    let lap = 0, lapStart = 0, tick = 0;
     this.trailTimer = setInterval(() => {
       const s = window.ctr.state();
-      if (s.kart) this.trail.push([s.kart.x, s.kart.y, s.kart.z]);
+      if (!s.kart) return;
+      if (s.kart.lap > lap) {
+        if (lap === 0 || this.laps.length || s.kart.lap - lap === 1) this.laps.push(s.eventTime - lapStart);
+        lap = s.kart.lap;
+        lapStart = s.eventTime;
+      } else if (s.kart.lap < lap || s.eventTime < lapStart) {
+        lap = s.kart.lap;     // started over (Backspace)
+        lapStart = s.eventTime;
+        this.laps = [];
+      }
+      if (++tick % 3 === 0) this.trail.push([s.kart.x, s.kart.y, s.kart.z]);
       if (this.trail.length > 6000) this.trail.shift();
-    }, 120);
+    }, 40);
   },
 
   restart() {
