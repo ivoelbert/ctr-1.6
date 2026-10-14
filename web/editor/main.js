@@ -555,6 +555,15 @@ const editor = {
       this.ends.find((c) => c.piece.id === r.start.id && c.end === 1);
     if (!startIn || !last) { this.toast('No open end to join to the start'); return; }
     const pc = bridge(last, startIn);
+    // how far it turns: past the start, a bridge has to loop round on itself
+    let turn = 0, prev = null;
+    for (let i = 0; i <= 32; i++) {
+      const f = sweepFrame(pc, i / 32).f;
+      const a = Math.atan2(f[0], f[2]);
+      if (prev !== null) { let d = a - prev; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; turn += d; }
+      prev = a;
+    }
+    if (Math.abs(turn) > 4) { this.toast('The track ends past the start: shorten its last side (or move the start) and close it again'); return; }
     this.commit(() => { this.track.pieces.push(pc); });
     this.toast('Loop closed with a bridge: tweak it on the right');
   },

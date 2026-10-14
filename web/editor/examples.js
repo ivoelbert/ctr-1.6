@@ -15,7 +15,9 @@ function chain(name, start, steps, settings = {}, retex = null) {
     pc = attachTo(exit(pc), type, extra || {});
     t.pieces.push(pc);
   }
-  t.pieces.push(bridge(exit(pc), worldConnectors(first).find((c) => c.end === 0)));
+  // closed by a bridge, unless the pieces already meet the start
+  const end = exit(pc), startIn = worldConnectors(first).find((c) => c.end === 0);
+  if (Math.hypot(end.p[0] - startIn.p[0], end.p[1] - startIn.p[1], end.p[2] - startIn.p[2]) > 64) t.pieces.push(bridge(end, startIn));
   if (retex) for (const p of t.pieces) retex(p);
   return t;
 }
@@ -48,6 +50,7 @@ function rainbow() {
     ['bankedCurve', { angle: 90, bank: 30 }],
     ['straight2'],
     ['boost'],
+    ['straight'],
     ['bankedCurve', { angle: 90, bank: 30 }],
     ['bumps', { tex: 'rainbow', rise: 160 }],
     ['bankedCurve', { angle: 90, bank: 30 }],
