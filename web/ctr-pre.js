@@ -8,7 +8,8 @@
 // on other refresh rates they follow elapsed time.
 //
 // Module.ctrTurbo = true makes every wait return at once (tests run the game as
-// fast as the machine allows).
+// fast as the machine allows). Module.ctrPaused = true holds the game at its next wait
+// (the track editor, while you build): no VBlanks come until it's false again.
 
 (function () {
   const VBLANK_MS = (1000 * 897619) / 53693175;
@@ -54,6 +55,12 @@
   }
 
   function onFrame(t) {
+    if (Module.ctrPaused) {
+      clock.last = t;
+      clock.due = 0;
+      requestAnimationFrame(onFrame);
+      return;
+    }
     if (clock.last !== null) {
       const dt = t - clock.last;
       estimatePeriod(dt);
@@ -98,6 +105,10 @@
   };
 
   Module.ctrWaitForVBlanks = function () {
+    if (Module.ctrPaused) {
+      ensureRunning();
+      return new Promise((resolve) => { clock.waiter = resolve; });
+    }
     if (Module.ctrTurbo || typeof requestAnimationFrame !== 'function') {
       return yieldNow().then(() => 1);
     }

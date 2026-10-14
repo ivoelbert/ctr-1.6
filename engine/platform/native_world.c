@@ -11,6 +11,9 @@ static Vec3 s_worldShift;
 static Vec3 s_worldOrigin;
 static int s_worldActive;
 static int s_drawDistance;
+// the editor's field is one window (its 3 x 3 tiles): it never follows the kart, so the origin
+// stays put and the route's 16-bit positions with it
+static int s_fixedWindow;
 
 int NativeWorld_DrawDistance(void)
 {
@@ -223,7 +226,10 @@ void NativeWorld_FrameStart(struct GameTracker *gGT)
 	{
 		// a world keeps its origin on its tiles: no shifts by hand
 		s_worldShiftPending = 0;
-		NativeWorld_Follow(gGT);
+		if (!s_fixedWindow)
+		{
+			NativeWorld_Follow(gGT);
+		}
 		// every instance is drawn: the tiles' quadblocks have no list for the cameras to take
 		for (int p = 0; p < 4 && s_worldInstances != NULL; p++)
 		{
@@ -321,6 +327,10 @@ static int *s_visAll;
 static struct PVS s_worldPVS;
 static struct VisMem s_worldVisMem;
 static double s_lastAssemblyMs;
+// the track editor: re-read the tiles at the next restart (and start it without the countdown)
+static int s_reloadPending;
+static int s_quickStart;
+static struct CheckpointNode *s_route;
 static double s_lastLoadMs;
 static int s_tilesLoaded;
 
@@ -871,6 +881,57 @@ static void NativeWorld_CollectHitboxes(struct mesh_info *mesh)
 	}
 }
 
+// The track editor's route (assets/world/route.bin), in place of the level's: 'WRTE', the
+// node count, the start (s16 x, y, z and heading), then the checkpoint nodes as the level holds
+// them (struct CheckpointNode, 12 bytes). Every racer starts at the start, one behind another.
+static void NativeWorld_LoadRoute(struct GameTracker *gGT, struct Level *lev)
+{
+	char path[768];
+	u32 size;
+	snprintf(path, sizeof(path), "%s/world/route.bin", NativeAssets_GetAssetDir());
+	u8 *file = NativeWorld_ReadFile(path, &size);
+	if (file == NULL)
+	{
+		return;
+	}
+	int count = 0;
+	if (size >= 16 && memcmp(file, "WRTE", 4) == 0)
+	{
+		memcpy(&count, file + 4, 4);
+	}
+	if (count < 1 || count > 255 || size < 16 + 12 * (u32)count)
+	{
+		free(file);
+		return;
+	}
+	s16 start[4];
+	memcpy(start, file + 8, sizeof(start));
+	free(s_route);
+	s_route = (struct CheckpointNode *)malloc(sizeof(struct CheckpointNode) * (size_t)count);
+	memcpy(s_route, file + 16, sizeof(struct CheckpointNode) * (size_t)count);
+	free(file);
+	lev->ptr_restart_points = s_route;
+	lev->cnt_restart_points = count;
+	gGT->trackLength_x_numLaps_x_8 = s_route[0].distToFinish * gGT->numLaps * 8;
+	for (int i = 0; i < 8; i++)
+	{
+		lev->DriverSpawn[i].pos.x = start[0];
+		lev->DriverSpawn[i].pos.y = start[1];
+		lev->DriverSpawn[i].pos.z = start[2];
+		lev->DriverSpawn[i].rot.x = 0;
+		lev->DriverSpawn[i].rot.y = start[3];
+		lev->DriverSpawn[i].rot.z = 0;
+	}
+	s_fixedWindow = 1;
+	printf("[CTR Native] world: the editor's route, %d checkpoints\n", count);
+}
+
+void NativeWorld_RequestReload(int quick)
+{
+	s_reloadPending = 1;
+	s_quickStart = quick;
+}
+
 // Before the drivers are made (they land on what's under the spawn): the world's mesh in
 // place of the level's, round tile (0, 0) (the level is built in the world's coordinates).
 void NativeWorld_LevelStart(struct GameTracker *gGT)
@@ -894,11 +955,20 @@ void NativeWorld_LevelStart(struct GameTracker *gGT)
 		// a restart: the level's data back where it was built
 		NativeWorld_ShiftLevelData(lev, s_worldOrigin.x, s_worldOrigin.y, s_worldOrigin.z);
 	}
-	else
+	if (lev != s_worldLevel || s_reloadPending)
 	{
-		NativeWorld_FreeTiles();
+		// a new level, or the editor's new tiles (the slots' buffers stay, for the next ones)
+		if (lev != s_worldLevel)
+		{
+			NativeWorld_FreeTiles();
+			free(s_route);
+			s_route = NULL;
+			s_fixedWindow = 0;
+		}
 		s_worldActive = NativeWorld_LoadIndex();
 		s_worldLevel = lev;
+		s_reloadPending = 0;
+		NativeWorld_LoadRoute(gGT, lev);
 	}
 	s_worldOrigin.x = s_worldOrigin.y = s_worldOrigin.z = 0;
 	if (!s_worldActive)
@@ -976,6 +1046,17 @@ void NativeWorld_LevelReady(struct GameTracker *gGT)
 		}
 	}
 	printf("[CTR Native] world: %d instances, %d pickup hitboxes\n", n, s_worldHitboxCount);
+	if (s_quickStart)
+	{
+		// the editor's test drive: off at once, no countdown, no fly-in
+		s_quickStart = 0;
+		// the lights already gone (MainMain's floor), the clock at 0 (the countdown zeroes it),
+		// and the race HUD on (as the fly-in's end turns it on, CAM.c)
+		gGT->trafficLightsTimer = -960;
+		gGT->elapsedEventTime = 0;
+		gGT->gameMode1 &= ~START_OF_RACE;
+		gGT->hudFlags |= HUD_FLAG_RACE_HUD | HUD_FLAG_RENDER_LESS;
+	}
 }
 
 // A frame's start: past the edge of the centre tile (and an eighth of a tile more), the

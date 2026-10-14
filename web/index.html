@@ -391,6 +391,12 @@
     Module.FS.mkdir('/assets');
     Module.FS.writeFile('/assets/ctr-u.bin', disc);
     if (choice.map) await loadMap(choice.map);
+    // the track editor (web/editor/): its textures and the track's tiles in place of the field's
+    let editor = null;
+    if (choice.editor) {
+      editor = await import('./editor/main.js');
+      await editor.prepare(Module, params);
+    }
     Module.ctrBoot = choice.boot;
     say('');
     launcher.hidden = true;
@@ -404,6 +410,7 @@
     // ?depth=0: a custom level's faces in CTR's painted order only, as the PS1 drew them
     if (params.get('depth') === '0') Module._NativeWeb_SetLevelDepth(0);
     Module.callMain([]);
+    if (editor) editor.start();
   }
 
   // The engine suspends its game loop at each VBlank wait through JSPI.
@@ -419,6 +426,11 @@
     launcher.hidden = false;
     document.getElementById('nojspi').hidden = false;
     document.getElementById('go').disabled = true;
+  } else if (params.has('editor')) {
+    // the track editor: its field (tools/editor/), the track drawn over it
+    const choice = freeDrive('editor', Number(params.get('character') ?? 0), 1);
+    choice.editor = true;
+    start(choice).catch((e) => { say(String(e)); console.error(e); });
   } else if (params.has('map') || params.has('level')) {
     const character = Number(params.get('character') ?? 0);
     const players = params.has('players') ? Number(params.get('players')) : undefined;

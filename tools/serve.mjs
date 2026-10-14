@@ -16,6 +16,8 @@ const DISC = process.env.CTR_DISC ||
 const MOUNTS = [
   ['/game-data/ctr-u.bin', DISC],
   ['/lev/', path.resolve(process.env.LEV_DIR || path.join(ROOT, 'build/lev'))],
+  // the track editor's page code, straight from the source (no build step)
+  ['/editor/', path.join(ROOT, 'web/editor')],
   ['/', path.resolve(process.env.WEB_DIR || path.join(ROOT, 'build/web'))],
 ];
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript',
