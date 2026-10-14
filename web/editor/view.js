@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import { OrbitControls } from './vendor/three/OrbitControls.js';
 import { TransformControls } from './vendor/three/TransformControls.js';
 import { localQuads, vertexShades, FIELD, GROUND_Y } from './compile.js';
-import { BLOCK, LEVEL } from './pieces.js';
+import { BLOCK, LEVEL, signKey, signSlotsOf } from './pieces.js';
 import { DEG, dot, norm, transformOf } from './geom.js';
 
 const SUBFACES = [[0, 4, 5, 6], [4, 1, 6, 7], [5, 6, 2, 8], [6, 7, 8, 3]];
@@ -42,6 +42,7 @@ export class View {
     this.textureById = new Map();
     for (const t of textures) {
       const tex = new THREE.CanvasTexture(t.canvas);
+      tex.flipY = false;     // v counts down the image, as the game's atlas does
       tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
       tex.colorSpace = THREE.SRGBColorSpace;
       tex.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
@@ -144,6 +145,12 @@ export class View {
     this.ground.material.color.setScalar(0.86 * light);
   }
 
+  // a texture's canvas was redrawn (a sign's)
+  refreshTexture(id) {
+    const tex = this.textureById.get(id);
+    if (tex) tex.needsUpdate = true;
+  }
+
   setGround(on, texId) {
     this.ground.visible = on;
     const tex = this.textureById.get(texId) || this.textureById.get('grass');
@@ -227,7 +234,9 @@ export class View {
   // the pieces drawn: rebuilt where they changed (sig: what their geometry depends on)
   sync(track) {
     const seen = new Set();
-    for (const pc of track.pieces) {
+    const signs = signSlotsOf(track.pieces);
+    for (const raw of track.pieces) {
+      const pc = raw.kind === 'sign' ? { ...raw, signTex: signs.get(signKey(raw)) } : raw;
       seen.add(pc.id);
       const sig = JSON.stringify({ ...pc, x: 0, z: 0, onGround: Math.abs(pc.y || 0) < 8, ground: this.ground.visible });
       let obj = this.pieces.get(pc.id);

@@ -1,15 +1,43 @@
 // The editor's side of the game: its textures in the atlas the game samples, a track compiled
 // into the files the engine reads (assets/world/), and the restart that drives it.
 
-import { makeTextures, buildAtlas, loadCtrTextures } from './textures.js';
+import { makeTextures, buildAtlas, loadCtrTextures, signSlots, drawSign, SIGN_SLOTS } from './textures.js';
 import { compileTrack } from './compile.js';
+import { signSlotsOf } from './pieces.js';
 
 export class Game {
   constructor(Module, extra = []) {
     this.M = Module;
-    this.textures = makeTextures().concat(extra);
+    this.textures = makeTextures().concat(signSlots(), extra);
     this.atlas = buildAtlas(this.textures);
     this.files = {};
+    this.signsDrawn = '';
+    this.atlasDirty = false;
+  }
+
+  // the track's signs drawn in their slots (the canvases, and the atlas the game has); returns
+  // the slots redrawn (the editor's view updates those)
+  updateSigns(track) {
+    const slots = signSlotsOf(track.pieces, SIGN_SLOTS);
+    const want = JSON.stringify([...slots]);
+    if (want === this.signsDrawn) return [];
+    this.signsDrawn = want;
+    const changed = [];
+    const specs = new Map([...slots].map(([key, id]) => [id, JSON.parse(key)]));
+    for (let k = 0; k < SIGN_SLOTS; k++) {
+      const id = `sign-${k}`;
+      const t = this.textures.find((x) => x.id === id);
+      const [text, bg, fg] = specs.get(id) || ['', undefined, undefined];
+      drawSign(t.canvas, text, bg || undefined, fg || undefined);
+      // into the game's atlas
+      const r = this.atlas.rects[id];
+      const px = t.canvas.getContext('2d').getImageData(0, 0, t.size, t.size).data;
+      const ox = (r.layer % 4) * 1024 + r.x, oy = Math.floor(r.layer / 4) * 1024 + r.y;
+      for (let row = 0; row < t.size; row++) this.atlas.file.set(px.subarray(row * t.size * 4, (row + 1) * t.size * 4), 12 + ((oy + row) * this.atlas.width + ox) * 4);
+      changed.push(id);
+    }
+    this.atlasDirty = true;
+    return changed;
   }
 
   // with CTR's own textures, when they're there
@@ -20,6 +48,8 @@ export class Game {
   // before the game starts: the atlas and the first track's files
   prepare(track) {
     const FS = this.M.FS;
+    this.updateSigns(track);
+    this.atlasDirty = false;
     FS.mkdirTree('/assets/dust2');
     FS.writeFile('/assets/dust2/atlas.rgba', this.atlas.file);
     FS.mkdirTree('/assets/world');
@@ -51,6 +81,14 @@ export class Game {
   }
 
   // drive the track now: compiled, swapped in, the race started over (no countdown)
+  // the atlas again in the game, when its signs changed
+  syncAtlas() {
+    if (!this.atlasDirty) return;
+    this.atlasDirty = false;
+    this.M.FS.writeFile('/assets/dust2/atlas.rgba', this.atlas.file);
+    if (this.started && this.M._NativeWeb_ReloadAtlas) this.M._NativeWeb_ReloadAtlas();
+  }
+
   drive(track, test = null) {
     // the game left the editor's level (its pause menu's Quit): back in with a reload, the
     // track autosaved
@@ -61,6 +99,8 @@ export class Game {
       location.search = q.toString();
       return null;
     }
+    this.updateSigns(track);
+    this.syncAtlas();
     const out = this.write(track, test);
     this.M._NativeWeb_EditorRestart(1);
     this.pause(false);

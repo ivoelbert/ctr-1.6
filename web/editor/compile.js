@@ -7,7 +7,7 @@
 
 import { writeTile, FLAG_GROUND, FLAG_CAMERA_SEARCH, FLAG_COLLISION_SURFACE, FLAG_TRIGGER, FLAG_KILL_PLANE, FLAG_SKIP_WATER_LIST } from './lev.js';
 import { add, sub, scale, cross, dot, norm, madd, len, transformOf, apply3 } from './geom.js';
-import { emitPiece, sweepFrame, sweepLength, connectors, CATALOGUE } from './pieces.js';
+import { emitPiece, sweepFrame, sweepLength, connectors, CATALOGUE, signKey, signSlotsOf } from './pieces.js';
 
 export const TILE = 16384;
 export const FIELD = 24576;          // the field reaches +-FIELD in x and z
@@ -282,8 +282,10 @@ export function compileTrack(track, atlas, textures, test = null) {
   const E = new Emitter(terrainOf);
   E.ground = track.ground !== false;     // pillars only stand on ground
   const cache = new Map();
-  for (const pc of track.pieces) {
-    if (!CATALOGUE[pc.type]) continue;
+  const signs = signSlotsOf(track.pieces);
+  for (const raw of track.pieces) {
+    if (!CATALOGUE[raw.type]) continue;
+    const pc = raw.kind === 'sign' ? { ...raw, signTex: signs.get(signKey(raw)) } : raw;
     const sig = JSON.stringify(pc) + E.ground;
     let quads = emitCache.get(sig);
     if (!quads) {
