@@ -137,7 +137,10 @@ export function asBuilt(pc) {
   // (a bridge that climbs off the ground isn't on it: its supports would reach up through it)
   const climbs = pc.path === 'bezier' && ((pc.to?.[1] || 0) > 8 || pc.fromPitch > 0.5);
   const onGround = pc.kind === 'sweep' && Math.abs(pc.y || 0) < 8 && !(pc.rise > 0) && !climbs && !(pc.pitch || pc.roll);
-  return onGround ? { ...pc, thick: pc.wallL || pc.wallR ? (pc.thick ?? 96) : 0, noBottom: true } : pc;
+  if (!onGround) return pc;
+  // banked, its outside's raised off the ground: a side down to it under that edge
+  const bankSide = pc.bank ? (pc.width || 1024) * Math.tan(Math.min(80, Math.abs(pc.bank)) * Math.PI / 180) + 32 : 0;
+  return { ...pc, thick: Math.max(pc.wallL || pc.wallR ? (pc.thick ?? 96) : 0, bankSide), noBottom: true };
 }
 
 // a piece's quadblocks in its own coordinates (the editor's view moves them as a whole)
@@ -157,7 +160,7 @@ function worldSweep(pc) {
   return {
     at: (s) => {
       const fr = sweepFrame(pc, s);
-      return { p: T.point(fr.p), f: T.dir(fr.f), u: T.dir(fr.u) };
+      return { p: T.point(fr.p), base: T.point(fr.base), f: T.dir(fr.f), u: T.dir(fr.u) };
     },
     length: sweepLength(pc),
   };
@@ -177,12 +180,12 @@ export function findRoute(pieces) {
     for (const pc of sweeps) {
       const w = W.get(pc);
       const a = w.at(0), b = w.at(1);
-      if (len(sub(a.p, end.p)) < 96 && dot(a.f, end.f) > 0.9) {
+      if (len(sub(a.base, end.base)) < 96 && dot(a.f, end.f) > 0.9) {
         if (pc === start) { closed = true; break; }
         if (!used.has(pc)) { next = { piece: pc, dir: 1, end: b }; break; }
       }
-      if (pc !== start && !used.has(pc) && len(sub(b.p, end.p)) < 96 && dot(b.f, end.f) < -0.9) {
-        next = { piece: pc, dir: -1, end: { p: a.p, f: scale(a.f, -1) } };
+      if (pc !== start && !used.has(pc) && len(sub(b.base, end.base)) < 96 && dot(b.f, end.f) < -0.9) {
+        next = { piece: pc, dir: -1, end: { base: a.base, f: scale(a.f, -1) } };
         break;
       }
     }
@@ -198,13 +201,13 @@ export function findRoute(pieces) {
           if (pc === start && s !== 0) continue;
           const c = w.at(s);
           const cf = dir > 0 ? c.f : scale(c.f, -1);
-          const d = sub(c.p, end.p);
+          const d = sub(c.base, end.base);
           const ahead = d[0] * fh[0] + d[2] * fh[2];
           const side = Math.abs(d[0] * fh[2] - d[2] * fh[0]);
           if (ahead < 256 || ahead > 6 * 1024 || side > 768 + ahead * 0.15 || dot(norm([cf[0], 0, cf[2]]), fh) < 0.7) continue;
-          if (!(end.f[1] > 0.05 || c.p[1] < end.p[1] - 64)) continue;
+          if (!(end.f[1] > 0.05 || c.base[1] < end.base[1] - 64)) continue;
           const score = ahead + side * 3;
-          if (score < bd) { bd = score; best = { piece: pc, dir, end: dir > 0 ? w.at(1) : { p: w.at(0).p, f: scale(w.at(0).f, -1) } }; }
+          if (score < bd) { bd = score; best = { piece: pc, dir, end: dir > 0 ? w.at(1) : { base: w.at(0).base, f: scale(w.at(0).f, -1) } }; }
         }
       }
       if (best && best.piece === start) { closed = true; break; }

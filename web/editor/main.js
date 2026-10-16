@@ -102,7 +102,7 @@ const SWEEP_FIELDS = [
   ['profile', 'Slope shape', 'select', ['smooth', 'linear', 'kicker', 'easeOut', 'hump', 'bumps']],
   ['width', 'Width', 'range', 256, 8192, 128],
   ['bank', 'Bank', 'range', -80, 80, 1],
-  ['bankMode', 'Bank shape', 'select', ['const', 'arc', 'in', 'out']],
+  ['bankMode', 'Bank shape', 'select', ['const', 'arc', 'hold', 'in', 'out']],
   ['shape', 'Cross section', 'select', ['flat', 'pipe', 'pipeL', 'pipeR']],
   ['flatPart', 'Pipe floor', 'range', 0, 0.95, 0.05, (p) => p.shape && p.shape !== 'flat'],
   ['pipeAngle', 'Pipe height', 'range', 20, 89, 1, (p) => p.shape && p.shape !== 'flat'],
@@ -593,7 +593,7 @@ const editor = {
     const r = this.route;
     if (!r || r.closed) return;
     const startIn = this.ends.find((c) => c.piece.id === r.start.id && c.end === 0);
-    const last = this.ends.find((c) => Math.hypot(c.p[0] - r.end.p[0], c.p[1] - r.end.p[1], c.p[2] - r.end.p[2]) < 2 && c.piece.id !== r.start.id) ||
+    const last = this.ends.find((c) => Math.hypot(c.p[0] - r.end.base[0], c.p[1] - r.end.base[1], c.p[2] - r.end.base[2]) < 2 && c.piece.id !== r.start.id) ||
       this.ends.find((c) => c.piece.id === r.start.id && c.end === 1);
     if (!startIn || !last) { this.toast('No open end to join to the start'); return; }
     const pc = bridge(last, startIn);
