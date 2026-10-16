@@ -1009,8 +1009,13 @@ const char *gte_shader_virtual_atlas = "	uniform sampler2D s_texture;\n"
 
 // NOTE(ctr-dust2): a custom level's exact depth (a_precise.z: the vertex's z / 2^17, see
 // native_gpu.c) for the depth test its polygons get; the rest (depth test off) sits at the far end.
+// Hyperbolic, as a perspective projection's (1 - near / z), not z itself: the rasteriser
+// interpolates depth linearly on screen, which only 1 / z is, so a linear depth bowed inside each
+// triangle (by tens of units on a big ground face seen low) and the grass showed through a road
+// laid 4 units over it. Near is 16 units (2^-13): a 24-bit step is z^2 / 2^28 units, a third of
+// a unit at 10,000 units away. Corners nearer than that clamp instead of clipping the face.
 #define GTE_EXACT_DEPTH                                                                                     \
-	"	if (a_precise.z > 0.0) gl_Position.z = (2.0 * min(a_precise.z, 1.0) - 1.0) * gl_Position.w;\n" \
+	"	if (a_precise.z > 0.0) gl_Position.z = clamp(2.0 * (1.0 - 0.0001220703125 / a_precise.z) / (1.0 - 0.0001220703125) - 1.0, -1.0, 1.0) * gl_Position.w;\n" \
 	"	else gl_Position.z = 0.999 * gl_Position.w;\n"
 
 #define GTE_VERTEX_SHADER                                                                                          \

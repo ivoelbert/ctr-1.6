@@ -54,7 +54,10 @@ Dust 2 from a Sketchfab model of it, then moved every map to Counter-Strike's ow
   now gets a host list as long as the level's quadblocks (`CTR_RenderLists.c`).
 - 1-pixel cracks between neighbouring faces (T-junctions, neighbours subdivided differently,
   whole-pixel vertices): `native_gpu.c` pushes every atlas polygon's edges out by 0.6 pixels
-  (a per-vertex offset the atlas vertex shader applies), so neighbours overlap.
+  (a per-vertex offset the atlas vertex shader applies), so neighbours overlap. A moved corner
+  takes its face's depth where it moved to (1 / z extrapolated on the face's plane): a face seen
+  low reaches hundreds of units deeper in 0.6 pixels, and with the corner's own depth the
+  ground's edges came up through a road over it (and a road's fillers went under the ground).
 - The canvas has no alpha channel (`SDL_GL_ALPHA_SIZE` 0): the frame reaches the screen with
   VRAM's mask bit as alpha, and in a real Chrome window on macOS every pixel without the bit
   (the level, the HUD) showed the black page instead. Headless screenshots go through Chrome's
@@ -301,7 +304,11 @@ sector, sector count, name). The shared PS2 parts (the ISO reader, the GS swizzl
   painted in CTR's order the walls mostly hid them).
 - Flicker: the exact depth (native_gpu.c) was z / 2^30 with z already in units, so the depth
   buffer's step was 64 units, a metre of the city: windows in their frames, trim and balconies
-  fought as the camera moved. It's z / 2^17 now (1/128 unit a step, 2 km deep).
+  fought as the camera moved. It's z / 2^17 now (2 km deep), and the depth test gets it
+  hyperbolic (1 - 16 units / z, as a perspective projection's): the rasteriser interpolates
+  depth linearly on screen, which only 1 / z is, and a linear depth bowed inside every triangle
+  by tens of units on a big face seen low (the editor's grass showed through a road laid 4 units
+  over it). A step is z^2 / 2^28 units: a third of a unit at 10,000.
 - Layers: the models lay trim, signs and window frames on their walls in the same plane (or a
   centimetre off, which CTR's 1.6 cm units round away), and the PS2 draws them after: with the
   depth buffer they fought, and flickered as the camera moved. `lift_layers` lifts each face
