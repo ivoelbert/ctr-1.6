@@ -1933,6 +1933,11 @@ static void DrawLevelOvr1P_BuildMidpointFromFirstEndpoint(struct DrawLevelOvr1PS
                                                           int writeClipBytes)
 {
 	*dstA = *srcA;
+#ifdef CTR_NATIVE
+	// NOTE(ctr-dust2): the copied corner keeps its exact projection (native_precise.h): without,
+	// a near face's subdivisions had no exact depth and were painted unsorted over what's in front
+	NativePrecise_Copy(&dstA->posScreen[0], &srcA->posScreen[0]);
+#endif
 	dstA->color_hi[3] = 0;
 	DrawLevelOvr1P_BuildMidpointValue(dstMid, srcA, srcB, writeClipBytes);
 }
@@ -3006,6 +3011,11 @@ static int DrawLevelOvr1P_EmitClipRecordGT3Table(struct PushBuffer *pb, struct P
 		work[0] = projected[0];
 		work[1] = projected[1];
 		work[2] = projected[2];
+#ifdef CTR_NATIVE
+		NativePrecise_Copy(&work[0].posScreen[0], &projected[0].posScreen[0]);
+		NativePrecise_Copy(&work[1].posScreen[0], &projected[1].posScreen[0]);
+		NativePrecise_Copy(&work[2].posScreen[0], &projected[2].posScreen[0]);
+#endif
 	}
 
 	// NOTE(aalhendi): Retail 0x800aa934..0x800aa968 reads the projected
@@ -3169,6 +3179,12 @@ static int DrawLevelOvr1P_EmitClipRecordGT4Table(struct PushBuffer *pb, struct P
 		work[1] = projected[1];
 		work[2] = projected[2];
 		work[3] = projected[3];
+#ifdef CTR_NATIVE
+		NativePrecise_Copy(&work[0].posScreen[0], &projected[0].posScreen[0]);
+		NativePrecise_Copy(&work[1].posScreen[0], &projected[1].posScreen[0]);
+		NativePrecise_Copy(&work[2].posScreen[0], &projected[2].posScreen[0]);
+		NativePrecise_Copy(&work[3].posScreen[0], &projected[3].posScreen[0]);
+#endif
 	}
 
 	// NOTE(aalhendi): Retail 0x800aaf28..0x800aaf6c mirrors the GT3 path for

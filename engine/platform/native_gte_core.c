@@ -317,8 +317,8 @@ internal int GTE_RotTransPers(int idx, int lm)
 	C2_SX2 = Lm_G1(F((s64)C2_OFX + ((s64)C2_IR1 * h_over_sz3)) >> 16);
 	C2_SY2 = Lm_G2(F((s64)C2_OFY + ((s64)C2_IR2 * h_over_sz3)) >> 16);
 
-	// NOTE(ctr-dust2): the exact projection, beside SXY2 (native_precise.h); only where it
-	// agrees with the whole pixels (not past the GTE's limits)
+	// NOTE(ctr-dust2): the exact projection, beside SXY2 (native_precise.h); not for a corner
+	// nearer than 16 units
 	{
 		int valid = 0;
 		double dx = 0.0, dy = 0.0, z = 0.0;
@@ -334,7 +334,10 @@ internal int GTE_RotTransPers(int idx, int lm)
 			{
 				dx = (double)C2_OFX / 65536.0 + x * h / z - (double)C2_SX2;
 				dy = (double)C2_OFY / 65536.0 + y * h / z - (double)C2_SY2;
-				valid = dx > -1.5 && dx < 2.5 && dy > -1.5 && dy < 2.5;
+				// past the GTE's limits (±1024 pixels) the whole pixel is clamped and the exact
+				// one is far from it: still the corner's place (a big face by the camera reaches
+				// far off the screen, and without it was painted unsorted over what's in front)
+				valid = dx > -32768.0 && dx < 32768.0 && dy > -32768.0 && dy < 32768.0;
 			}
 		}
 		NativePrecise_PushProjection((u32)(u16)C2_SX2 | ((u32)(u16)C2_SY2 << 16), valid, (float)dx, (float)dy, (float)(z / 4096.0));

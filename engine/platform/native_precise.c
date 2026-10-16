@@ -3,10 +3,14 @@
 
 #include <string.h>
 
+#include <ctr_scratchpad.h>
+
 // a direct-mapped table by word address: words within 8 MiB of each other never share a slot
-// (a frame's primitive buffer is smaller)
+// (a frame's primitive buffer is smaller). The scratchpad, where the level renderer keeps the
+// vertices it's working on, has a table of its own: a primitive written 8 MiB past it took a
+// vertex's slot halfway through a face (its subdivisions then had no exact depth, and were
+// painted unsorted, over the road in front of them)
 #define NATIVE_PRECISE_SHADOW_BITS 21
-#define NATIVE_PRECISE_SUBPIXEL    4096.0f
 
 typedef struct
 {
@@ -19,12 +23,13 @@ typedef struct
 {
 	const void *addr;
 	uint32_t sxy;  // the word it describes
-	int16_t dx, dy;
+	float dx, dy;  // pixels: past the GTE's ±1024 limit the exact place is far from the clamped one
 	float z;
 } NativePreciseShadow;
 
 static NativePreciseProjection s_preciseSxy[3];  // beside the GTE's SXY0..2
 static NativePreciseShadow s_preciseShadow[1u << NATIVE_PRECISE_SHADOW_BITS];
+static NativePreciseShadow s_preciseScratch[CTR_SCRATCHPAD_SIZE / 4];
 static int s_preciseEnabled;
 static int s_preciseRecording;
 
@@ -41,6 +46,12 @@ void NativePrecise_EndLevel(void)
 
 static NativePreciseShadow *NativePrecise_Slot(const void *addr)
 {
+	uintptr_t scratch = (uintptr_t)addr - (uintptr_t)CTR_SCRATCHPAD_BASE;
+
+	if (scratch < CTR_SCRATCHPAD_SIZE)
+	{
+		return &s_preciseScratch[scratch >> 2];
+	}
 	return &s_preciseShadow[((uintptr_t)addr >> 2) & ((1u << NATIVE_PRECISE_SHADOW_BITS) - 1)];
 }
 
@@ -77,8 +88,8 @@ void NativePrecise_StoreSXY(const void *addr, int reg)
 	}
 	s->addr = addr;
 	s->sxy = sxy;
-	s->dx = (int16_t)(p->dx * NATIVE_PRECISE_SUBPIXEL);
-	s->dy = (int16_t)(p->dy * NATIVE_PRECISE_SUBPIXEL);
+	s->dx = p->dx;
+	s->dy = p->dy;
 	s->z = p->z;
 }
 
@@ -115,8 +126,8 @@ int NativePrecise_Get(const void *addr, float *dx, float *dy, float *z)
 	{
 		return 0;
 	}
-	*dx = s->dx / NATIVE_PRECISE_SUBPIXEL;
-	*dy = s->dy / NATIVE_PRECISE_SUBPIXEL;
+	*dx = s->dx;
+	*dy = s->dy;
 	*z = s->z;
 	return 1;
 }
