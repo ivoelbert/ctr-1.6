@@ -3,7 +3,7 @@
 
 import { makePiece, sweepFrame, sweepLength } from './pieces.js';
 import { newTrack, worldConnectors, attachTo, bridge, demoTrack } from './track.js';
-import { norm, madd, transformOf, yawOf } from './geom.js';
+import { norm, madd, transformOf, yawOf, DEG } from './geom.js';
 
 // a track from a start and a list of [type, extra] laid one after another, closed with a bridge
 function chain(name, start, steps, settings = {}, retex = null) {
@@ -95,13 +95,16 @@ export function examples(textures) {
     ['Neon city', () => neonCity(textures)],
     ['Sky islands', () => skyIslands(textures)],
     ['Frozen pass', () => frozenPass(textures)],
+    ['Volcano', () => volcano(textures)],
+    ['Coral coaster', () => coralCoaster(textures)],
+    ['Castle keep', () => castleKeep(textures)],
   ];
 }
 
 // ---- the showcase tracks: what a track can be with some work ----
 
 // a course laid as you'd lay it: next() snaps a piece onto the end, leap() puts one across a gap
-// ahead, put() places one anywhere, close() bridges the end back to the start
+// ahead, to() sweeps on to a point, put() places one anywhere, close() bridges the end back to the start
 class Course {
   constructor(name, start, settings = {}) {
     this.t = { ...newTrack(name), ...settings };
@@ -134,6 +137,13 @@ class Course {
     this.next(kicker, { ...extra, tex: extra.kickTex || 'hazard' });
     const lip = this.end.p[1];
     return this.leap(gap, drop, 'landing', { rise: -down, length: Math.max(2048, down * 4), thick: Math.max(96, lip - drop), ...extra });
+  }
+  // a road curving on to (x, y, z), arriving heading `yaw` (a bridge: a smooth sweep)
+  to(x, y, z, yaw, extra = {}) {
+    const f = [-Math.sin(yaw * DEG), 0, -Math.cos(yaw * DEG)];
+    this.pc = bridge(this.end, { p: [x, y, z], f }, extra);
+    this.t.pieces.push(this.pc);
+    return this.pc;
   }
   close(extra = {}) {
     const startIn = worldConnectors(this.first).find((c) => c.end === 0), e = this.end;
@@ -565,5 +575,387 @@ function frozenPass(textures) {
   c.t.pieces.push(centred('block', 3000, 20500, 15, { y: 900, width: 2400, length: 1800, height: 250, tex: snow }));
   c.t.pieces.push(centred('block', 3000 - 0.26 * 820, 20500 - 0.97 * 820, 15, { y: 300, width: 500, length: 40, height: 350, tex: 'yellow', glow: true }));
   c.put('bigSign', { x: 12288 + 2600, y: 0, z: 11500, yaw: 160, text: 'FROZEN PASS', bg: '#1d3f6e', fg: '#e8f4ff' });
+  return c.t;
+}
+
+// round a volcano: drift chains up its west side, a jump over a lava river, rollers along a ridge,
+// a drop off its end, a half pipe and switchbacks down the east, and sweepers home
+function volcano(textures) {
+  const T = texPick(textures);
+  const basalt = T('ctr-dingocanyon-5', 'road-plain'), rock = T('ctr-dingocanyon-14', 'dirt'), rock2 = T('ctr-dingocanyon-6', 'stone');
+  const strata = T('ctr-dingocanyon-1', 'sand'), beams = T('ctr-dragonmines-14', 'wood'), ash = T('ctr-turbotrack-1', 'mud');
+  const W = 1536;
+  const road = { width: W, tex: basalt, sideTex: rock, wallTex: rock2, supportTex: beams };
+  // a turn banked into it (a curve's bank lifts its right side: out of a left turn)
+  const turn = (angle, radius, extra = {}) => ['curve2', { angle, radius, bank: Math.sign(angle) * 10, bankMode: 'arc', ...extra }];
+  const c = new Course('Volcano', { x: -14500, y: 0, z: 8000, yaw: 0, ...road }, { groundTex: ash, sky: '#9a3a1c', light: 0.9 });
+  // west: an S of drifts, up to the lava river and over it, another S
+  c.run([turn(-40, 2560), turn(80, 2560), turn(-40, 2560), ['slopeUp', { rise: 512, length: 2048, thick: 900 }], ['boost', { thick: 900 }]], road);
+  const run = c.end;
+  c.jump(1100, 256, 512, { ...road, thick: 900 });
+  c.run([turn(45, 2560), turn(-45, 2560)], road);
+  // round to the east and up onto the ridge: rollers, a chicane, and off its end
+  c.to(-9500, 768, -15500, -90, { ...road, thick: 1000 });
+  const ridge = c.run([
+    ['hump', { rise: 384 }], ['hump', { rise: 384 }],
+    ['bend', { angle: -30 }], ['bend', { angle: 60 }], ['bend', { angle: -30 }],
+    ['hump', { rise: 320 }],
+  ], { ...road, wallL: 128, wallR: 128, thick: 1000 });
+  c.jump(1280, 640, 896, { ...road, thick: 1700 }, 'bigKicker');
+  // south down the east: a half pipe's S, then switchbacks
+  c.to(14000, 640, -8000, 180, { ...road, thick: 800 });
+  c.run([
+    ['halfpipe', { length: 2048, width: 2048 }],
+    ['pipeCurve', { angle: -40, radius: 3072, width: 2048, rise: -128 }],
+    ['pipeCurve', { angle: 40, radius: 3072, width: 2048, rise: -128 }],
+    turn(-90, 2048, { rise: -128 }), ['straight', { length: 1024 }],
+    turn(180, 2048, { rise: -128 }), ['straight', { length: 1024 }],
+    turn(-180, 2048, { rise: -128 }), ['straight', { length: 1024 }],
+  ], { ...road, thick: 800 });
+  // the lava tube: under the rock, west along the bottom, sweepers, a hump and a dip, home
+  c.to(4500, 0, 14500, 90, road);
+  const tube = c.next('walled', { ...road, length: 3072, wallL: 320, wallR: 320, wallTex: rock });
+  c.run([turn(30, 4096), turn(-30, 4096), ['boost'], ['hump', { rise: 320 }], ['dip', { rise: -192 }]], road);
+  c.close(road);
+  // the volcano: lava at its top, a glowing vent, streams of lava from its foot
+  const V = [-2000, -1500];
+  c.put('mountain', { x: V[0], y: 0, z: V[1], width: 15000, length: 15000, height: 6500, tex: rock, capTex: 'lava', capAt: 0.8 });
+  c.put('pillar', { x: V[0], y: 5200, z: V[1], radius: 900, height: 360, tex: 'orange', glow: true });
+  const rnd = random(31);
+  for (let k = 0; k < 7; k++) {
+    const a = (k / 7 + rnd() * 0.08) * 2 * Math.PI, d = 6200 + rnd() * 600;
+    c.put('hill', { x: V[0] + Math.sin(a) * d, z: V[1] + Math.cos(a) * d, yaw: a / DEG, y: -2, shape: 'ridge', width: 420, length: 2600 + rnd() * 1400, height: 40, tex: 'lava', glow: true });
+  }
+  // the lava river under the jump, across the valley
+  const fx = run.f[0], fz = run.f[2], mid = [run.p[0] + fx * (1024 + 550), run.p[2] + fz * (1024 + 550)];
+  c.t.pieces.push(centred('pond', mid[0] + 2500, mid[1], 0, { y: -1, width: 11000, length: 760, height: 8, tex: 'lava', glow: true, noMap: true }));
+  // the lava tube's roof, and the rock it's in
+  {
+    const fr = sweepFrame(tube, 0.5), m = transformOf(tube).point(fr.p);
+    c.t.pieces.push(centred('block', m[0], m[2], tube.yaw, { y: 600, width: W + 900, length: 3072, height: 900, tex: rock2 }));
+    c.put('hill', { x: m[0], y: 1400, z: m[2], width: 4200, length: 4600, height: 900, tex: rock });
+    for (const side of [-1, 1]) {
+      const a = tube.yaw * DEG;
+      c.put('hill', { x: m[0] + Math.cos(a) * side * 2600, y: 0, z: m[2] - Math.sin(a) * side * 2600, width: 3400, length: 5200, height: 1600, tex: rock });
+    }
+  }
+  // torches along the ridge
+  along(ridge, 2048, 0, (p, yaw, pc, k) => {
+    const a = yaw * DEG;
+    for (const side of [-1, 1]) {
+      const q = [p[0] + Math.cos(a) * side * (W / 2 + 90), p[2] - Math.sin(a) * side * (W / 2 + 90)];
+      c.put('post', { x: q[0], y: p[1], z: q[1], height: 520, radius: 36, tex: 'black' });
+      c.put('pillar', { x: q[0], y: p[1] + 520, z: q[1], radius: 80, height: 110, tex: 'orange', glow: true });
+    }
+  });
+  // the land: lava pools ringed with rocks, black spires, dead trees, boulders; far volcanoes
+  const free = freeSpots(c.t);
+  free.take(V[0], V[1], 7600);
+  for (let i = 0, n = 0; i < 500 && n < 9; i++) {
+    const x = (rnd() * 2 - 1) * 21000, z = (rnd() * 2 - 1) * 21000, w = 1600 + rnd() * 1800;
+    if (!free(x, z, w)) continue;
+    free.take(x, z, w); n++;
+    c.put('pillar', { x, y: -2, z, radius: w / 2, height: 6, tex: 'lava', glow: true, solid: false });
+    for (let r = 0; r < 4; r++) {
+      const a = rnd() * 2 * Math.PI, d = w * 0.62;
+      c.put('block', { x: x + Math.sin(a) * d, y: 0, z: z + Math.cos(a) * d, yaw: rnd() * 90, width: 300 + rnd() * 400, length: 300 + rnd() * 400, height: 150 + rnd() * 350, tex: rock2 });
+    }
+  }
+  for (let i = 0, n = 0; i < 900 && n < 60; i++) {
+    const x = (rnd() * 2 - 1) * 23000, z = (rnd() * 2 - 1) * 23000;
+    const kind = n % 5;
+    if (!free(x, z, kind === 0 ? 1300 : 450)) continue;
+    free.take(x, z, kind === 0 ? 1200 : 350); n++;
+    if (kind === 0) {
+      c.put('mountain', { x, y: 0, z, width: 1400 + rnd() * 1200, length: 1400 + rnd() * 1200, height: 1800 + rnd() * 2200, tex: rock2 });
+    } else if (kind === 1) {
+      const h = 700 + rnd() * 600;
+      c.put('pillar', { x, y: 0, z, radius: 70, height: h, tex: 'black' });
+      c.put('pillar', { x: x + 140, y: h * 0.5, z, radius: 40, height: h * 0.4, tex: 'black' });
+      c.put('pillar', { x: x - 120, y: h * 0.35, z: z + 60, radius: 35, height: h * 0.35, tex: 'black' });
+    } else {
+      c.put('block', { x, y: 0, z, yaw: rnd() * 90, width: 300 + rnd() * 700, length: 300 + rnd() * 700, height: 200 + rnd() * 600, tex: kind === 2 ? rock2 : rock });
+    }
+  }
+  for (const [x, z, w, h] of [[-19500, -19500, 9000, 4200], [20000, -19500, 8000, 3600], [20500, 19500, 7000, 3000], [-20000, 20000, 7500, 3300]]) {
+    c.put('mountain', { x, y: 0, z, width: w, length: w, height: h, tex: rock, capTex: 'lava', capAt: 0.78 });
+  }
+  // boulders and lava cracks by the road (it goes by faster with things close to it)
+  along(c.t.pieces.filter((p) => p.kind === 'sweep'), 1400, 0, (p, yaw, pc, k) => {
+    if (p[1] > 300) return;
+    const a = yaw * DEG, side = rnd() < 0.5 ? -1 : 1, off = side * (W / 2 + 500 + rnd() * 900);
+    const x = p[0] + Math.cos(a) * off, z = p[2] - Math.sin(a) * off;
+    if (!free(x, z, 380)) return;
+    free.take(x, z, 300);
+    if (rnd() < 0.25) c.put('block', { x, y: -2, z, yaw: yaw + rnd() * 40 - 20, width: 120, length: 900 + rnd() * 900, height: 10, tex: 'lava', glow: true });
+    else c.put('block', { x, y: 0, z, yaw: rnd() * 90, width: 250 + rnd() * 450, length: 250 + rnd() * 450, height: 150 + rnd() * 450, tex: rnd() < 0.6 ? rock2 : strata });
+  });
+  c.put('bigSign', { x: -14500 - 2700, y: 0, z: 6500, yaw: -100, text: 'VOLCANO', bg: '#2a0d08', fg: '#ff7a1a' });
+  c.put('sign', { x: mid[0] + 1800, y: 0, z: mid[1] + 1400, yaw: -20, text: 'HOT!', bg: '#ffb000', fg: '#2a0d08' });
+  return c.t;
+}
+
+// a seaside coaster: along the promenade, out on the pier over coaster hills, round a climbing
+// loop over itself by the lighthouse, down a drop and off the pier's end onto a rock island, through
+// its half pipe, over an arched boardwalk back to the beach and home through the palms
+function coralCoaster(textures) {
+  const T = texPick(textures);
+  const lane = T('ctr-cocopark-2', 'road'), planks = T('ctr-crashcove-12', 'wood'), timber = T('ctr-crashcove-10', 'wood');
+  const sand = T('ctr-crashcove-2', 'sand'), grass = T('ctr-cocopark-1', 'grass'), rockTex = T('ctr-crashcove-13', 'stone');
+  const W = 1408;
+  const road = { width: W, tex: lane, sideTex: timber, wallTex: 'kerb', supportTex: timber };
+  const pier = { ...road, tex: planks, wallL: 96, wallR: 96, thick: 64 };
+  const turn = (angle, radius, extra = {}) => ['curve2', { angle, radius, bank: Math.sign(angle) * 10, bankMode: 'arc', ...extra }];
+  const c = new Course('Coral coaster', { x: -9000, y: 0, z: 14500, yaw: -90, ...road }, { groundTex: 'water', sky: '#69c8f2', light: 1 });
+  // the promenade, east: an S, a boost, a hump
+  const prom = c.run([turn(40, 2560), turn(-80, 2560), turn(40, 2560), ['boost'], ['hump', { rise: 320 }]], road);
+  // north onto the pier and over the coaster's hills, a wiggle
+  prom.push(c.to(13000, 0, 8500, 0, road));
+  const ramp = c.run([['curve2', { angle: -25, radius: 4096, rise: 384 }], ['curve2', { angle: 25, radius: 4096, rise: 384 }]], { ...pier, thick: 96 });
+  const hills = c.run([
+    ['curve2', { angle: 25, radius: 5120, rise: 512, profile: 'hump' }],
+    ['curve2', { angle: -50, radius: 3072, rise: -384, profile: 'hump', bank: -10, bankMode: 'arc' }],
+    ['curve2', { angle: 25, radius: 5120, rise: 512, profile: 'hump' }],
+    ['hump', { rise: 448, length: 2560 }],
+    ['straight', { length: 3584 }]], pier);
+  // the loop: three quarters round to the right, climbing, and over the pier
+  const loop = c.next('curve2', { ...pier, angle: -270, radius: 2560, rise: 1152, bank: -14, bankMode: 'const', wallR: 0 });
+  // west: over the pier, the drop, and off the end onto the island
+  const drop = c.run([['straight', { length: 3328 }], ['curve2', { angle: 35, radius: 5120, rise: -1152 }], ['boost']], pier);
+  c.jump(1280, 512, 1024, { ...pier, wallL: 0, wallR: 0 }, 'bigKicker');
+  // the island: a half pipe, an S, round to the south
+  const isle = c.run([['pipeCurve', { angle: -35, radius: 4096, width: 2048, tex: rockTex }], turn(35, 3072), turn(-70, 3072), turn(35, 3072),
+  ], road);
+  isle.push(c.to(-12500, 0, c.end.p[2] - 1200, 90, road));
+  isle.push(c.next('pipeCurve', { ...road, angle: 90, radius: 3072, width: 2048, tex: rockTex }));
+  // the boardwalk's arch to the beach, the palms, and home
+  const rope = c.next('hump', { ...pier, width: 1152, length: 6144, rise: 448, wallL: 160, wallR: 160, wallTex: timber });
+  const palms = c.run([turn(-45, 2560), turn(90, 2560), turn(-45, 2560)], road);
+  c.turnTo(-90, 'curve2', { ...road, radius: 3072, bank: 10, bankMode: 'arc' });
+  c.close(road);
+  const rnd = random(41);
+  const free = freeSpots(c.t);
+  // the beach (the ground's the sea): along the bottom, and up the west to the boardwalk
+  const beach = { y: -1, height: 40, tex: sand, sideTex: sand, noMap: true };
+  c.put('platform', { x: 0, z: 24000, width: 48000, length: 15500, ...beach });
+  const ropeEnd = transformOf(rope).point(sweepFrame(rope, 1).p);
+  c.put('platform', { x: -16500, z: 8600, width: 15000, length: 8600 - ropeEnd[2] + 300, ...beach });
+  // grass behind the beach, and dunes
+  c.put('hill', { x: 0, y: -2, z: 22500, width: 46000, length: 3000, height: 300, shape: 'ridge', tex: grass });
+  // the island under the roads that land on it
+  {
+    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+    along([c.t.pieces[c.t.pieces.indexOf(isle[0]) - 1], ...isle], 256, 0, (p) => { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); z0 = Math.min(z0, p[2]); z1 = Math.max(z1, p[2]); });
+    x0 -= 1800; x1 += 1800; z0 -= 1800; z1 += 1800;
+    c.put('platform', { x: (x0 + x1) / 2, z: z1, width: x1 - x0, length: z1 - z0, y: -1, height: 40, tex: sand, sideTex: rockTex, noMap: true });
+    c.put('hill', { x: (x0 + x1) / 2, y: 0, z: z0 - 1200, width: x1 - x0, length: 4200, height: 1400, shape: 'ridge', tex: rockTex });
+    c.put('mountain', { x: x0 + 2500, y: 0, z: z0 - 900, width: 5000, length: 4000, height: 2600, tex: rockTex, capTex: grass, capAt: 0.55 });
+  }
+  // the lighthouse in the loop
+  {
+    const fr = sweepFrame(loop, 0), T0 = transformOf(loop), at = T0.point(madd(fr.p, fr.r, 2560));
+    free.take(at[0], at[2], 1200);
+    for (let k = 0; k < 7; k++) c.put('pillar', { x: at[0], y: k * 480, z: at[2], radius: 760 - k * 40, height: 480, tex: k % 2 ? 'red' : 'white' });
+    c.put('pillar', { x: at[0], y: 3360, z: at[2], radius: 520, height: 420, tex: 'yellow', glow: true });
+    c.put('pillar', { x: at[0], y: 3780, z: at[2], radius: 620, height: 160, tex: 'red' });
+  }
+  // lamps along the pier
+  along([...ramp, ...hills, loop, ...drop], 2048, 0, (p, yaw) => {
+    const a = yaw * DEG;
+    for (const side of [-1, 1]) {
+      const q = [p[0] + Math.cos(a) * side * (W / 2 + 70), p[2] - Math.sin(a) * side * (W / 2 + 70)];
+      c.put('post', { x: q[0], y: p[1] + 96, z: q[1], height: 560, radius: 30, tex: 'white' });
+      c.put('pillar', { x: q[0], y: p[1] + 656, z: q[1], radius: 70, height: 90, tex: 'yellow', glow: true });
+    }
+  });
+  const palm = (x, y, z, h) => {
+    c.put('pillar', { x, y, z, radius: 70, height: h, tex: timber });
+    c.put('tree', { x, y: y + h - 260, z, height: 520, radius: 760 + rnd() * 160, tex: rnd() < 0.5 ? T('ctr-cocopark-12', 'green') : 'green' });
+  };
+  // palms by the roads on land, and on the island
+  along([...prom, ...palms, ...isle], 1500, 0, (p, yaw) => {
+    const a = yaw * DEG, side = rnd() < 0.5 ? -1 : 1, off = side * (W / 2 + 500 + rnd() * 1200);
+    const x = p[0] + Math.cos(a) * off, z = p[2] - Math.sin(a) * off;
+    if (!free(x, z, 500)) return;
+    free.take(x, z, 400);
+    palm(x, 0, z, 1000 + rnd() * 600);
+  });
+  // the beach: umbrellas, huts, palms
+  for (let i = 0, n = 0; i < 600 && n < 40; i++) {
+    const x = (rnd() * 2 - 1) * 22000, z = 10500 + rnd() * 10500;
+    if (!free(x, z, 700)) continue;
+    free.take(x, z, 600); n++;
+    if (n % 3 === 0) {
+      const colours = ['red', 'blue', 'yellow', 'orange'];
+      c.put('post', { x, y: 0, z, height: 600, radius: 24, tex: 'white' });
+      c.put('tree', { x, y: 470, z, height: 260, radius: 480, tex: colours[n % 4] });
+    } else if (n % 7 === 1) {
+      const yaw = rnd() * 40 - 20;
+      c.t.pieces.push(centred('block', x, z, yaw, { y: 0, width: 1000, length: 800, height: 620, tex: ['blue', 'yellow', 'red'][n % 3], sideTex: 'white' }));
+      c.t.pieces.push(centred('block', x, z, yaw, { y: 620, width: 1200, length: 1000, height: 90, tex: 'white' }));
+    } else {
+      palm(x, 0, z, 1100 + rnd() * 700);
+    }
+  }
+  // the sea: rocks, buoys, boats
+  for (let i = 0, n = 0; i < 600 && n < 34; i++) {
+    const x = (rnd() * 2 - 1) * 22500, z = -22500 + rnd() * 29000;
+    if (!free(x, z, 900)) continue;
+    free.take(x, z, 800); n++;
+    if (n % 3 === 0) {
+      c.put('pillar', { x, y: -4, z, radius: 90, height: 260, tex: n % 2 ? 'red' : 'white' });
+    } else if (n % 4 === 1) {
+      const yaw = rnd() * 180;
+      c.t.pieces.push(centred('block', x, z, yaw, { y: -4, width: 520, length: 1500, height: 180, tex: 'white', sideTex: n % 2 ? 'blue' : 'red' }));
+      c.put('post', { x, y: 176, z, height: 900, radius: 26, tex: timber });
+      c.put('sign', { x, y: 200, z, yaw: yaw + 90, width: 600, height: 520, lift: 180, text: '', bg: n % 2 ? '#ffffff' : '#ffd34d', fg: '#ffffff' });
+    } else {
+      c.put('block', { x, y: -4, z, yaw: rnd() * 90, width: 500 + rnd() * 900, length: 500 + rnd() * 900, height: 150 + rnd() * 400, tex: rockTex });
+    }
+  }
+  c.put('bigSign', { x: -9000 + 1800, y: 0, z: 14500 - 2600, yaw: 20, text: 'CORAL BAY', bg: '#0f6fa8', fg: '#ffe8a3' });
+  return c.t;
+}
+
+// a castle at night in the rain: through the village, over the moat into the gatehouse, an S
+// round the fountain, a climbing turn up onto the walls, along the ramparts, off them over the
+// moat, and home through the forest and the graveyard
+function castleKeep(textures) {
+  const T = texPick(textures);
+  const paving = T('ctr-cortexcastle-3', 'stone'), wallTex = T('ctr-cortexcastle-1', 'stone'), merlons = T('ctr-cortexcastle-5', 'stone');
+  const timber = T('ctr-cortexcastle-6', 'wood'), mud = T('ctr-cortexcastle-15', 'dirt'), grass = T('ctr-tigertemple-16', 'grass');
+  const W = 1408, Y = 1536;     // the road's width; the walls' height
+  const road = { width: W, tex: paving, sideTex: wallTex, wallTex: merlons, supportTex: wallTex };
+  const turn = (angle, radius, extra = {}) => ['curve2', { angle, radius, bank: Math.sign(angle) * 10, bankMode: 'arc', ...extra }];
+  const c = new Course('Castle keep', { x: -4000, y: 0, z: 20000, yaw: -90, ...road }, { groundTex: grass, sky: '#1d1a3a', light: 0.62, weather: 'rain' });
+  // the village: an S, round to the north, up to the moat and over it into the gatehouse
+  const village = c.run([turn(35, 2560), turn(-70, 2560), turn(35, 2560)], road);
+  village.push(c.to(7000, 0, 13000, 0, road));
+  village.push(c.next('slopeUp', { ...road, rise: 512, length: 2048, thick: 600 }));
+  c.jump(1100, 256, 512, { ...road, thick: 600 });
+  // the courtyard: an S round the fountain, and a climbing turn up onto the north wall
+  const yard = c.run([turn(-45, 2560), turn(90, 2560), turn(-45, 2560), ['straight', { length: 1024 }]], road);
+  const up = c.next('curve2', { ...road, angle: 90, radius: 3072, rise: Y, bank: 12, bankMode: 'arc', wallR: 192, thick: Y + 64 });
+  // the ramparts: west along the north wall, a chicane, round the corner and south along the west
+  const top = { ...road, wallL: 192, wallR: 192, thick: Y + 64 };
+  const ramparts = c.run([['bend', { angle: -30 }], ['bend', { angle: 60 }], ['bend', { angle: -30 }], turn(90, 2048), ['straight', { length: 2048 }]], top);
+  // off the wall, over the moat
+  ramparts.push(c.next('curve2', { ...top, angle: -90, radius: 2048 }));
+  c.jump(1280, 768, Y, { ...road, thick: Y + 800 }, 'bigKicker');
+  // the forest south, the graveyard's bumpy lane, home
+  const forest = [c.turnTo(180, 'curve2', { ...road, radius: 2560, bank: -10, bankMode: 'arc' })];
+  forest.push(...c.run([turn(60, 2560), turn(-120, 2560), turn(60, 2560), ['bumps', { tex: mud, rise: 96 }], turn(45, 3072), turn(-45, 3072)], road));
+  forest.push(c.turnTo(-90, 'curve2', { ...road, radius: 3072, bank: 10, bankMode: 'arc' }));
+  c.close(road);
+  const rnd = random(53);
+  const free = freeSpots(c.t);
+  const box = (x0, x1, z0, z1, y, h, tex, extra = {}) => c.put('block', { x: (x0 + x1) / 2, y, z: z1, width: x1 - x0, length: z1 - z0, height: h, tex, ...extra });
+  const take = (x0, x1, z0, z1) => free.take((x0 + x1) / 2, (z0 + z1) / 2, Math.hypot(x1 - x0, z1 - z0) / 2);
+  // merlons along a wall's top, x0..x1 (or z0..z1) at its outer edge
+  const merlonsX = (x0, x1, z, y) => { for (let x = x0 + 200; x < x1 - 200; x += 520) c.put('block', { x, y, z: z + 130, width: 260, length: 260, height: 260, tex: merlons }); };
+  const merlonsZ = (z0, z1, x, y) => { for (let z = z0 + 200; z < z1 - 200; z += 520) c.put('block', { x, y, z: z + 130, width: 260, length: 260, height: 260, tex: merlons }); };
+  // the moat
+  const moat = { y: -2, height: 8, tex: 'water', noMap: true };
+  for (const [x0, x1, z0, z1] of [[-11600, 13000, 8850, 9900], [-11600, -10500, -7200, 8850], [11950, 13000, -7200, 8850], [-11600, 13000, -8250, -7200]]) {
+    box(x0, x1, z0, z1, -2, 8, 'water', { noMap: true });
+    take(x0, x1, z0, z1);
+  }
+  // the walls: south (the gate in it), west, east, the north's east end (the ramparts are the rest)
+  for (const [x0, x1, z0, z1] of [[-7000, 6000, 7400, 8700], [8000, 11800, 7400, 8700], [-7000, -5600, 2400, 7400], [10400, 11800, -5500, 7400], [7000, 10400, -5500, -4100]]) {
+    box(x0, x1, z0, z1, 0, Y, wallTex);
+    take(x0, x1, z0, z1);
+    if (x1 - x0 > z1 - z0) merlonsX(x0, x1, z0, Y); else merlonsZ(z0, z1, x0, Y);
+  }
+  // the gatehouse: towers by the gate, a roof over it
+  for (const x of [4900, 9100]) c.put('pillar', { x, y: 0, z: 8050, radius: 900, height: Y + 900, tex: wallTex });
+  box(4200, 9800, 7400, 8700, Y + 200, 500, wallTex);
+  for (const x of [4900, 9100]) c.put('tree', { x, y: Y + 900, z: 8050, height: 1400, radius: 1050, tex: T('ctr-cortexcastle-4', 'red') });
+  // the towers: the one the climb goes round, the corners
+  c.put('pillar', { x: 7000 - 3072, y: 0, z: -1485, radius: 1900, height: Y + 1200, tex: wallTex });
+  c.put('tree', { x: 7000 - 3072, y: Y + 1200, z: -1485, height: 2400, radius: 2200, tex: T('ctr-cortexcastle-4', 'red') });
+  for (const [x, z] of [[11100, 8050], [-6300, 8050], [11100, -4800]]) {
+    c.put('pillar', { x, y: 0, z, radius: 1100, height: Y + 700, tex: wallTex });
+    c.put('tree', { x, y: Y + 700, z, height: 1600, radius: 1300, tex: T('ctr-cortexcastle-4', 'red') });
+  }
+  // the courtyard's paving, the fountain, the keep
+  c.put('platform', { x: 2400, z: 7400, width: 16000, length: 11500, y: -1, height: 40, tex: paving, noMap: true });
+  c.put('pillar', { x: 9300, y: 0, z: 2900, radius: 700, height: 160, tex: wallTex });
+  c.put('pillar', { x: 9300, y: 160, z: 2900, radius: 600, height: 10, tex: 'water' });
+  c.put('pillar', { x: 9300, y: 0, z: 2900, radius: 90, height: 700, tex: wallTex });
+  box(-4600, 1600, -400, 5200, 0, 3800, wallTex);
+  for (const [x, z] of [[-4600, -400], [1600, -400], [-4600, 5200], [1600, 5200]]) {
+    c.put('pillar', { x, y: 0, z, radius: 700, height: 4800, tex: wallTex });
+    c.put('tree', { x, y: 4800, z, height: 1700, radius: 820, tex: T('ctr-cortexcastle-4', 'red') });
+  }
+  box(-3800, 800, 400, 4400, 3800, 1800, wallTex);
+  merlonsX(-4600, 1600, -400, 3800);
+  // the keep's lit windows, and its banner
+  for (let k = 0; k < 4; k++) {
+    box(-3900 + k * 1400, -3500 + k * 1400, 5180, 5240, 1800, 600, 'yellow', { glow: true });
+    box(-3900 + k * 1400, -3500 + k * 1400, 5180, 5240, 600, 600, 'yellow', { glow: true });
+  }
+  take(-5300, 2300, -1100, 5900);
+  // torches along the ramparts
+  along([up, ...ramparts], 1800, 0, (p, yaw) => {
+    const a = yaw * DEG;
+    for (const side of [-1, 1]) {
+      const q = [p[0] + Math.cos(a) * side * (W / 2 + 100), p[2] - Math.sin(a) * side * (W / 2 + 100)];
+      c.put('post', { x: q[0], y: p[1] + 192, z: q[1], height: 280, radius: 30, tex: timber });
+      c.put('pillar', { x: q[0], y: p[1] + 472, z: q[1], radius: 70, height: 100, tex: 'orange', glow: true });
+    }
+  });
+  // the village: houses either side of the road, pitched roofs, lit windows, lanterns
+  along(village.slice(0, 4), 1300, 0, (p, yaw, pc, k) => {
+    const a = yaw * DEG;
+    for (const side of [-1, 1]) {
+      const d = side * (W / 2 + 900 + rnd() * 400), x = p[0] + Math.cos(a) * d, z = p[2] - Math.sin(a) * d;
+      if (!free(x, z, 800)) continue;
+      free.take(x, z, 700);
+      const w = 1200 + rnd() * 300, l = 1100 + rnd() * 300, h = 900 + rnd() * 400;
+      c.t.pieces.push(centred('block', x, z, yaw, { y: 0, width: w, length: l, height: h, tex: rnd() < 0.5 ? T('ctr-cortexcastle-9', 'brick') : timber }));
+      for (const r of [0, 180]) c.t.pieces.push(centred('wedge', x + Math.cos(a) * (r ? 1 : -1) * w / 4, z - Math.sin(a) * (r ? 1 : -1) * w / 4, yaw + 90 + r, { y: h, width: l + 120, length: w / 2 + 60, rise: 600, tex: T('ctr-cortexcastle-13', 'red'), sideTex: timber }));
+      const wx = x - Math.cos(a) * side * (w / 2 + 6), wz = z + Math.sin(a) * side * (w / 2 + 6);
+      c.t.pieces.push(centred('block', wx, wz, yaw + 90, { y: 350, width: 360, length: 12, height: 300, tex: 'yellow', glow: true }));
+    }
+    const lx = p[0] + Math.cos(a) * (W / 2 + 160), lz = p[2] - Math.sin(a) * (W / 2 + 160);
+    if (k % 2 === 0 && free(lx, lz, 100)) {
+      c.put('post', { x: lx, y: 0, z: lz, height: 700, radius: 26, tex: 'black' });
+      c.put('pillar', { x: lx, y: 700, z: lz, radius: 90, height: 120, tex: 'yellow', glow: true });
+    }
+  });
+  // the forest: dark pines thick near the road; the graveyard by the bumpy lane
+  along(forest, 900, 0, (p, yaw) => {
+    const a = yaw * DEG;
+    for (const side of [-1, 1]) {
+      const d = side * (W / 2 + 600 + rnd() * 1500), x = p[0] + Math.cos(a) * d, z = p[2] - Math.sin(a) * d;
+      if (Math.max(Math.abs(x), Math.abs(z)) > 23000 || !free(x, z, 450)) continue;
+      free.take(x, z, 400);
+      c.put('tree', { x, y: 0, z, height: 1800 + rnd() * 1400, radius: 450 + rnd() * 250, tex: rnd() < 0.6 ? T('ctr-tigertemple-6', 'green') : 'green' });
+    }
+  });
+  const lane = forest[4];
+  along([lane], 700, 0, (p, yaw, pc, k) => {
+    const a = yaw * DEG;
+    for (const side of [-1, 1]) for (const r of [1, 2, 3]) {
+      const d = side * (W / 2 + 300 + r * 650), x = p[0] + Math.cos(a) * d, z = p[2] - Math.sin(a) * d;
+      if (!free(x, z, 250)) continue;
+      free.take(x, z, 200);
+      if ((k + r) % 3 === 0) {
+        c.put('block', { x, y: 0, z, yaw, width: 80, length: 80, height: 520, tex: 'stone' });
+        c.put('block', { x, y: 320, z: z + 0, yaw, width: 360, length: 80, height: 80, tex: 'stone' });
+      } else c.put('block', { x, y: 0, z, yaw, width: 360, length: 120, height: 300 + rnd() * 200, tex: 'stone' });
+    }
+  });
+  // trees everywhere else, and hills round the valley
+  for (let i = 0, n = 0; i < 1500 && n < 70; i++) {
+    const x = (rnd() * 2 - 1) * 23000, z = (rnd() * 2 - 1) * 23000;
+    if (!free(x, z, 500)) continue;
+    free.take(x, z, 450); n++;
+    c.put('tree', { x, y: 0, z, height: 1600 + rnd() * 1600, radius: 420 + rnd() * 260, tex: rnd() < 0.6 ? T('ctr-tigertemple-6', 'green') : 'green' });
+  }
+  for (const [x, z, w, h] of [[-15000, -17000, 14000, 2600], [8000, -17000, 16000, 3200], [19000, 2000, 9000, 2400], [18500, 18500, 9000, 1800]]) {
+    c.put('hill', { x, y: 0, z, width: w, length: w * 0.8, height: h, tex: grass });
+  }
+  c.put('bigSign', { x: -4000 + 1600, y: 0, z: 20000 - 2700, yaw: 0, text: 'CASTLE KEEP', bg: '#2a1f4a', fg: '#ffd34d' });
   return c.t;
 }

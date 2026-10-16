@@ -134,7 +134,9 @@ function frontOf(pos) {
 
 // a piece as it's built: a sweep laid on the ground needs no slab under it
 export function asBuilt(pc) {
-  const onGround = pc.kind === 'sweep' && Math.abs(pc.y || 0) < 8 && !(pc.rise > 0) && !(pc.pitch || pc.roll);
+  // (a bridge that climbs off the ground isn't on it: its supports would reach up through it)
+  const climbs = pc.path === 'bezier' && ((pc.to?.[1] || 0) > 8 || pc.fromPitch > 0.5);
+  const onGround = pc.kind === 'sweep' && Math.abs(pc.y || 0) < 8 && !(pc.rise > 0) && !climbs && !(pc.pitch || pc.roll);
   return onGround ? { ...pc, thick: pc.wallL || pc.wallR ? (pc.thick ?? 96) : 0, noBottom: true } : pc;
 }
 
@@ -550,8 +552,9 @@ function minimap(quads, route) {
   const n = (2 * FIELD) / MAP_UNIT;
   const grid = new Uint8Array(n * n);
   const onRoute = route && route.closed ? new Set(route.samples.map((s) => s.piece)) : null;
-  // with a lap to drive: the roads and platforms (not roofs, hills, tops of pillars)
-  const shown = (pc) => !onRoute || (pc && (pc.kind === 'sweep' || pc.kind === 'platform'));
+  // with a lap to drive: the roads and platforms (not roofs, hills, tops of pillars, nor
+  // scenery's platforms, noMap: a beach, a pool)
+  const shown = (pc) => !(pc && pc.noMap) && (!onRoute || (pc && (pc.kind === 'sweep' || pc.kind === 'platform')));
   for (const q of quads) {
     if (!(q.flags & FLAG_GROUND) || q.kindTag === 'ground' || !shown(q.src && q.src.piece)) continue;
     const value = onRoute && q.src && onRoute.has(q.src.piece) ? 3 : 2;
