@@ -38,8 +38,14 @@ const BANKS = {
   const: (s) => 1,
   in: (s) => smooth(s),
   out: (s) => 1 - smooth(s),
-  arc: (s) => Math.sin(Math.PI * s),
+  arc: (s) => Math.sin(Math.PI * s) ** 2,      // in and back out, easing at both ends
+  hold: (s) => smooth(Math.min(1, s / 0.3)) * smooth(Math.min(1, (1 - s) / 0.3)),   // in, held, out
 };
+const bankOf = (pc, s) => (pc.bank || 0) * (BANKS[pc.bankMode || 'const'] || BANKS.const)(s) * DEG;
+// a bank turns the road about its low edge (the outside of the turn rises, the inside stays where
+// it was, on whatever it's laid on): the middle line goes up half the width's rise. The ends'
+// connectors stay on the unbanked line (`base`), so pieces still meet
+const bankLift = (pc, bank) => (pc.width || BLOCK) / 2 * Math.abs(Math.sin(bank));
 
 // ---- sweeps: roads, curves, slopes, banks, half pipes, kickers ----
 
@@ -67,9 +73,9 @@ export function sweepFrame(pc, s) {
     const f = norm(d);
     const h = Math.hypot(f[0], f[2]) > 1e-6 ? norm([-f[2], 0, f[0]]) : [1, 0, 0];
     const up = norm(cross(h, f));
-    const bank = (pc.bank || 0) * (BANKS[pc.bankMode || 'const'] || BANKS.const)(s) * DEG;
+    const bank = bankOf(pc, s);
     const rb = norm(add(scale(h, Math.cos(bank)), scale(up, Math.sin(bank))));
-    return { p, f, r: rb, u: norm(cross(rb, f)), along: sweepLength(pc) };
+    return { p: madd(p, up, bankLift(pc, bank)), base: p, f, r: rb, u: norm(cross(rb, f)), along: sweepLength(pc) };
   }
   const angle = (pc.angle || 0) * DEG;
   const rise = pc.rise || 0;
@@ -92,10 +98,10 @@ export function sweepFrame(pc, s) {
   const f = norm([fx, dy, fz]);
   const right = norm([-fz, 0, fx]);
   const up = norm(cross(right, f));
-  const bank = (pc.bank || 0) * (BANKS[pc.bankMode || 'const'] || BANKS.const)(s) * DEG;
+  const bank = bankOf(pc, s);
   const rb = norm(add(scale(right, Math.cos(bank)), scale(up, Math.sin(bank))));
   const ub = norm(cross(rb, f));
-  return { p: [x, y, z], f, r: rb, u: ub, along };
+  return { p: madd([x, y, z], up, bankLift(pc, bank)), base: [x, y, z], f, r: rb, u: ub, along };
 }
 
 export function sweepLength(pc) {
@@ -547,8 +553,8 @@ export function connectors(pc) {
   if (pc.kind !== 'sweep') return [];
   const a = sweepFrame(pc, 0), b = sweepFrame(pc, 1);
   return [
-    { p: a.p, f: scale(a.f, -1), end: 0 },   // facing out of the piece, back the way in
-    { p: b.p, f: b.f, end: 1 },
+    { p: a.base, f: scale(a.f, -1), end: 0 },   // facing out of the piece, back the way in
+    { p: b.base, f: b.f, end: 1 },
   ];
 }
 

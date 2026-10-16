@@ -719,7 +719,7 @@ function coralCoaster(textures) {
     ['hump', { rise: 448, length: 2560 }],
     ['straight', { length: 3584 }]], pier);
   // the loop: three quarters round to the right, climbing, and over the pier
-  const loop = c.next('curve2', { ...pier, angle: -270, radius: 2560, rise: 1152, bank: -14, bankMode: 'const', wallR: 0 });
+  const loop = c.next('curve2', { ...pier, angle: -270, radius: 2560, rise: 1152, bank: -14, bankMode: 'hold', wallR: 0 });
   // west: over the pier, the drop, and off the end onto the island
   const drop = c.run([['straight', { length: 3328 }], ['curve2', { angle: 35, radius: 5120, rise: -1152 }], ['boost']], pier);
   c.jump(1280, 512, 1024, { ...pier, wallL: 0, wallR: 0 }, 'bigKicker');
