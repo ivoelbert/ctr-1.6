@@ -317,6 +317,11 @@ sector, sector count, name). The shared PS2 parts (the ISO reader, the GS swizzl
   depth linearly on screen, which only 1 / z is, and a linear depth bowed inside every triangle
   by tens of units on a big face seen low (the editor's grass showed through a road laid 4 units
   over it). A step is z^2 / 2^28 units: a third of a unit at 10,000.
+- Near clip: the level renderer clips faces at its `depthClipThreshold`, retail's screen
+  distance (256 units). The camera rides ~100 units over the road and the widescreen view is
+  squashed, so the road under it was cut off ~55 of 108 rows below the centre: the bottom rows
+  looked into the road's body, at the grass of the island it lies on (green triangles under
+  the kart in Sky islands' half pipe). Custom levels clip at 32 units.
 - Layers: the models lay trim, signs and window frames on their walls in the same plane (or a
   centimetre off, which CTR's 1.6 cm units round away), and the PS2 draws them after: with the
   depth buffer they fought, and flickered as the camera moved. `lift_layers` lifts each face

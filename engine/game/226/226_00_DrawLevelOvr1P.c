@@ -9755,6 +9755,17 @@ static void Ovr226_800a0d34_SetEntryGteAndCameraScratch(struct PushBuffer *pb)
 
 	// NOTE(aalhendi): Retail stores `(distanceToScreen_PREV >> 1) + 1` at scratch 0x5c for 4x1 depth clip flags.
 	DrawLevelOvr1P_Scratch()->depthClipThreshold = (pb->distanceToScreen_PREV >> 1) + 1;
+#ifdef CTR_NATIVE
+	// NOTE(ctr-dust2): the threshold is in half units, so retail clips faces at the screen's
+	// distance (256 units). The camera rides ~100 units over the road, so the road under it is
+	// cut off ~55 of 108 rows below the centre (the view is squashed for widescreen), and
+	// the bottom rows show into its body (and the grass of an island inside it). A custom
+	// level's faces all have exact depth, so they clip at 1/8 of it.
+	if (sDrawLevelOvr1P_CustomLevel)
+	{
+		DrawLevelOvr1P_Scratch()->depthClipThreshold = (pb->distanceToScreen_PREV >> 4) + 1;
+	}
+#endif
 	DrawLevelOvr1P_Scratch()->clipWindowPacked = DrawLevelOvr1P_ReadWord(&pb->rect, 4);
 }
 
