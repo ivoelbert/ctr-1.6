@@ -792,7 +792,12 @@ internal void NativeGpu_DilateAtlasPolygon(GrVertex *v, int n)
 		return;
 	}
 	const float side = (area2 > 0.0f) ? 1.0f : -1.0f;
+	float pw[4];
 
+	for (int i = 0; i < n; i++)
+	{
+		pw[i] = v[i].pw;
+	}
 	for (int i = 0; i < n; i++)
 	{
 		const GrVertex *p = &v[(i + n - 1) % n];
@@ -838,6 +843,28 @@ internal void NativeGpu_DilateAtlasPolygon(GrVertex *v, int n)
 		}
 		c->_p0 = (s8)lroundf(ox * 32.0f);
 		c->_p1 = (s8)lroundf(oy * 32.0f);
+		// the corner's depth where it moved to, on its face's plane (1 / z is affine on screen):
+		// kept as it was, a face seen low (the ground) came up nearer along its edges than a road
+		// laid just over it, and the grass showed through the road in lines (and a road's crack
+		// filler, pushed towards the camera, went behind the grass). Within a factor of 2: a
+		// sliver of a face by the horizon can reach past it
+		if (pw[0] > 0.0f)
+		{
+			float a1x = (float)(c->x - p->x) + c->px - p->px, a1y = (float)(c->y - p->y) + c->py - p->py;
+			float a2x = (float)(q->x - c->x) + q->px - c->px, a2y = (float)(q->y - c->y) + q->py - c->py;
+			float det = a1x * a2y - a1y * a2x;
+			if (fabsf(det) > 0.01f)
+			{
+				const int ip = (i + n - 1) % n, iq = (i + 1) % n;
+				float d1 = 1.0f / pw[i] - 1.0f / pw[ip], d2 = 1.0f / pw[iq] - 1.0f / pw[i];
+				float gx = (d1 * a2y - d2 * a1y) / det, gy = (a1x * d2 - a2x * d1) / det;
+				float inv = 1.0f / pw[i] + (gx * c->_p0 + gy * c->_p1) / 32.0f;
+				if (inv > 0.0f)
+				{
+					c->pw = fminf(fmaxf(1.0f / inv, pw[i] * 0.5f), pw[i] * 2.0f);
+				}
+			}
+		}
 	}
 }
 
