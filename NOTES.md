@@ -16,7 +16,15 @@ Dust 2 from a Sketchfab model of it, then moved every map to Counter-Strike's ow
   - `platform/native_precise.c` (PGXP-style): while a custom level draws, each GTE projection's
     exact position and depth follow its whole-pixel word into the polygons, which are drawn at
     sub-pixel positions with perspective-correct textures and culled by their exact winding
-    (whole pixels fold thin faces to nothing: holes once drawn exactly).
+    (whole pixels fold thin faces to nothing: holes once drawn exactly). A face missing a
+    corner's exact depth isn't depth-tested: it's painted in CTR's order, over whatever's
+    in front of it (grass over a road by the camera). Three ways they went missing, now fixed:
+    corners past the GTE's ±1024-pixel clamp (kept now, their exact place far from the
+    clamped one: the shadow's offsets are floats); `*dstA = *srcA` copies of the renderer's
+    scratch vertices in `226_00_DrawLevelOvr1P.c` (they copy the shadow too now); and the
+    shadow table, direct-mapped over 8 MiB, gave the scratchpad's vertices the same slots as
+    the primitives 8 MiB on (the scratchpad has a table of its own). A track editor lap has
+    no face without exact depths.
   - `platform/native_renderer.c` + `native_gpu.c`: `TF_VIRTUAL_ATLAS`, tpage colour mode 3
     samples `/assets/dust2/atlas.rgba`; CLUT = layer << 10 | (y / 32) << 5 | (x / 32). A
     "CTRA" atlas has the light baked in (Counter-Strike's maps); a "CTRV" atlas (Bayview) is
