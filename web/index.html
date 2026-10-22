@@ -53,6 +53,21 @@
     background: rgba(20, 14, 8, .92); color: var(--text); border: 1px solid var(--accent); border-radius: 8px;
     padding: 8px 14px; font: 13px/1.4 ui-monospace, monospace; pointer-events: none; opacity: 0; transition: opacity .3s; }
   #toast.show { opacity: 1; }
+  /* the keys: each action's two keys, a click and a key press to change one */
+  .keys td:last-child { text-align: right; white-space: nowrap; }
+  .keys button.key { min-width: 64px; margin-left: 4px; background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+    border-bottom-width: 2px; border-radius: 6px; padding: 3px 8px; font: 12px ui-monospace, monospace; cursor: pointer; }
+  .keys button.key:hover { border-color: var(--accent); }
+  .keys button.key.none { color: #6d5a43; }
+  .keys button.key.wait { border-color: var(--accent-2); color: var(--accent-2); animation: keywait 1s infinite; }
+  @keyframes keywait { 50% { opacity: .45; } }
+  .keys .fixed td:last-child { color: var(--muted); font-size: 12.5px; }
+  .keysbar { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+  .keysbar .note { margin: 0; flex: 1; }
+  .keysbar button { background: #3a2916; color: var(--text); border: 1px solid #6a4f2f; border-radius: 7px; padding: 5px 10px; cursor: pointer; font: 12.5px system-ui, sans-serif; }
+  #keysDialog { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: rgba(0, 0, 0, .55); font: 14px/1.45 system-ui, -apple-system, Segoe UI, sans-serif; color: var(--text); }
+  #keysDialog[hidden] { display: none; }
+  #keysDialog .panel { width: min(520px, calc(100% - 32px)); max-height: calc(100% - 32px); overflow: auto; }
   /* the editor under Free drive, the controls beside both */
   .grid { align-items: start; grid-template-rows: auto 1fr; }
   .grid > .panel:last-child { grid-column: 2; grid-row: 1 / span 2; }
@@ -69,6 +84,7 @@
 <div id="stage"><canvas id="canvas" tabindex="0" oncontextmenu="event.preventDefault()"></canvas></div>
 <div id="status"></div>
 <div id="toast"></div>
+<div id="keysDialog" hidden><div class="panel"><h2>Keys</h2><div id="keysInDialog"></div></div></div>
 
 <div id="launcher" hidden>
   <div class="wrap">
@@ -119,22 +135,9 @@
       </div>
       <div class="panel">
         <h2>Controls</h2>
-        <table>
-          <tr><td>Steer</td><td><kbd>←</kbd> <kbd>→</kbd></td></tr>
-          <tr><td>Gas</td><td><kbd>C</kbd></td></tr>
-          <tr><td>Brake / reverse</td><td><kbd>X</kbd></td></tr>
-          <tr><td>Hop, power slide</td><td><kbd>Right Shift</kbd> (hold while turning)</td></tr>
-          <tr><td>Slide boost</td><td><kbd>Left Shift</kbd> (the other shoulder)</td></tr>
-          <tr><td>Use item</td><td><kbd>V</kbd></td></tr>
-          <tr><td>Look back</td><td><kbd>A</kbd> or <kbd>Right Ctrl</kbd> (hold)</td></tr>
-          <tr><td>Camera distance</td><td><kbd>Left Ctrl</kbd></td></tr>
-          <tr><td>Skip the intro</td><td><kbd>Z</kbd></td></tr>
-          <tr><td>Pause</td><td><kbd>Enter</kbd></td></tr>
-          <tr><td>Full screen</td><td><kbd>F11</kbd> or the browser's (<kbd>⌃⌘F</kbd> on a Mac)</td></tr>
-          <tr><td>Copy where you are</td><td><kbd>P</kbd> (for bug reports)</td></tr>
-        </table>
-        <p class="note">A gamepad works too, with CTR's own buttons. Power slide: hold Right Shift
-          through a turn and tap Left Shift when the exhaust turns black (either Shift starts the
+        <div id="keysHere"></div>
+        <p class="note">A gamepad works too, with CTR's own buttons. Power slide: hold the hop key
+          through a turn and tap the slide boost key when the exhaust turns black (either one starts the
           slide, the other one boosts); three boosts in a row and you're flying.</p>
         <p class="note">Maps: Counter-Strike 1.6 © Valve (de_dust2 by Dave Johnston, de_aztec and
           de_inferno by Christopher "Narby" Auty). Crash Team Racing © 1999 Sony / Naughty Dog. Runs on
@@ -172,6 +175,142 @@
     for (const c of chunks) { all.set(c, o); o += c.length; }
     return all;
   }
+
+  // The keyboard: each of the pad's buttons on up to two keys, changed in the Controls panel (or
+  // the editor's Keys dialog) and kept in this browser. The page reads the keys and hands the
+  // engine the buttons they hold (NativeWeb_SetKeyButtons); a gamepad goes its own way.
+  const ctrKeys = (() => {
+    const ACTIONS = [
+      ['left', 'Steer left', 0x80, ['ArrowLeft']],
+      ['right', 'Steer right', 0x20, ['ArrowRight']],
+      ['gas', 'Gas', 0x4000, ['KeyC']],
+      ['brake', 'Brake / reverse', 0x8000, ['KeyX']],
+      ['hop', 'Hop, power slide', 0x800, ['ShiftRight']],
+      ['boost', 'Slide boost', 0x400, ['ShiftLeft']],
+      ['item', 'Use item', 0x2000, ['KeyV']],
+      ['back', 'Look back', 0x200, ['KeyA', 'ControlRight']],
+      ['camera', 'Camera distance', 0x100, ['ControlLeft']],
+      ['up', 'Up (menus, item ahead)', 0x10, ['ArrowUp']],
+      ['down', 'Down (menus, item behind)', 0x40, ['ArrowDown']],
+      ['triangle', 'Menu back, skip the intro', 0x1000, ['KeyZ']],
+      ['start', 'Pause', 0x8, ['Enter']],
+      ['select', 'Select', 0x1, ['Space']],
+    ].map(([id, label, bit, keys]) => ({ id, label, bit, keys }));
+    // the page's own keys (and the editor's while driving): not for the pad
+    const RESERVED = new Set(['Tab', 'Escape', 'Backspace', 'KeyP', 'F11', 'MetaLeft', 'MetaRight', 'AltLeft', 'AltRight']);
+    const STORE = 'ctr-keys';
+    let bind = {};
+    const defaults = () => Object.fromEntries(ACTIONS.map((a) => [a.id, [...a.keys]]));
+    try { bind = { ...defaults(), ...JSON.parse(localStorage.getItem(STORE) || '{}') }; } catch { bind = defaults(); }
+    for (const a of ACTIONS) bind[a.id] = (Array.isArray(bind[a.id]) ? bind[a.id] : []).filter((c) => typeof c === 'string').slice(0, 2);
+    const save = () => { try { localStorage.setItem(STORE, JSON.stringify(bind)); } catch { /* private */ } };
+    const NAMES = { ArrowLeft: '←', ArrowRight: '→', ArrowUp: '↑', ArrowDown: '↓', ShiftLeft: 'Left Shift', ShiftRight: 'Right Shift',
+      ControlLeft: 'Left Ctrl', ControlRight: 'Right Ctrl', Space: 'Space', Enter: 'Enter', Semicolon: ';', Quote: "'", Comma: ',',
+      Period: '.', Slash: '/', Backslash: '\\', BracketLeft: '[', BracketRight: ']', Minus: '-', Equal: '=', Backquote: '`',
+      CapsLock: 'Caps Lock', NumpadEnter: 'Num Enter', IntlBackslash: '§' };
+    const nameOf = (code) => NAMES[code] || code.replace(/^Key|^Digit/, '').replace(/^Numpad/, 'Num ');
+
+    // what's held: the buttons of every action one of whose keys is down
+    const down = new Set();
+    let sent = -1;
+    const send = () => {
+      let m = 0;
+      for (const a of ACTIONS) if (bind[a.id].some((c) => down.has(c))) m |= a.bit;
+      if (m !== sent && window.Module && Module._NativeWeb_SetKeyButtons) { Module._NativeWeb_SetKeyButtons(m); sent = m; }
+    };
+    const bound = (code) => ACTIONS.some((a) => bind[a.id].includes(code));
+    const typing = (e) => e.target && /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName);
+    // bubbling: the editor, building, keeps its keys (it stops them on the way down); key-ups always come
+    addEventListener('keydown', (e) => {
+      if (typing(e) || e.metaKey || !bound(e.code)) return;
+      down.add(e.code);
+      send();
+      if (launcher.hidden) e.preventDefault();
+    });
+    addEventListener('keyup', (e) => { if (down.delete(e.code)) send(); });
+    addEventListener('blur', () => { down.clear(); send(); });
+
+    // the tables (the launcher's, the dialog's): a click on a key, then the new one
+    let waiting = null;   // { id, slot, button }
+    const tables = new Set();
+    const renderAll = () => tables.forEach((t) => t());
+    addEventListener('keydown', (e) => {
+      if (!waiting) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      const { id, slot } = waiting;
+      if (e.code === 'Escape') { waiting = null; renderAll(); return; }
+      if (e.code === 'Backspace' || e.code === 'Delete') { bind[id][slot] = undefined; }
+      else if (RESERVED.has(e.code)) { toast(`${nameOf(e.code)} is the page's own key: pick another`); return; }
+      else {
+        // a key does one thing: off whatever had it
+        for (const a of ACTIONS) {
+          const k = bind[a.id].indexOf(e.code);
+          if (k >= 0 && !(a.id === id && k === slot)) { bind[a.id][k] = undefined; if (a.id !== id) toast(`${nameOf(e.code)} was ${a.label.toLowerCase()}: now it's ${ACTIONS.find((x) => x.id === id).label.toLowerCase()}`); }
+        }
+        bind[id][slot] = e.code;
+      }
+      for (const a of ACTIONS) bind[a.id] = bind[a.id].filter(Boolean);
+      waiting = null;
+      save(); down.clear(); send(); renderAll();
+    }, true);
+    addEventListener('keyup', (e) => { if (waiting) e.stopImmediatePropagation(); }, true);
+
+    function mount(box) {
+      const render = () => {
+        const table = document.createElement('table');
+        table.className = 'keys';
+        for (const a of ACTIONS) {
+          const tr = table.insertRow();
+          tr.insertCell().textContent = a.label;
+          const td = tr.insertCell();
+          // its keys, and a + for a second
+          const keys = bind[a.id];
+          for (let slot = 0; slot < Math.min(2, keys.length + 1); slot++) {
+            const code = keys[slot];
+            const wait = waiting && waiting.id === a.id && waiting.slot === slot;
+            const b = document.createElement('button');
+            b.className = 'key' + (wait ? ' wait' : code ? '' : ' none');
+            b.textContent = wait ? 'press a key…' : code ? nameOf(code) : '+';
+            b.title = code ? 'Click, then press the new key (Backspace: none, Esc: keep it)' : 'Click, then press a second key for it';
+            b.addEventListener('click', (e) => { e.stopPropagation(); waiting = { id: a.id, slot }; renderAll(); });
+            td.appendChild(b);
+          }
+        }
+        for (const [k, v] of [['Full screen', 'F11, or the browser\'s (⌃⌘F on a Mac)'], ['Copy where you are', 'P (for bug reports)']]) {
+          const tr = table.insertRow();
+          tr.className = 'fixed';
+          tr.insertCell().textContent = k;
+          tr.insertCell().textContent = v;
+        }
+        const bar = document.createElement('div');
+        bar.className = 'keysbar';
+        const note = document.createElement('p');
+        note.className = 'note';
+        note.textContent = 'Click a key and press the new one.';
+        const reset = document.createElement('button');
+        reset.textContent = 'Default keys';
+        reset.addEventListener('click', () => { bind = defaults(); waiting = null; save(); renderAll(); });
+        bar.append(note, reset);
+        box.replaceChildren(table, bar);
+      };
+      tables.add(render);
+      render();
+    }
+    // the dialog (the editor's Keys button): closed by a click outside it, or Esc
+    const dialog = document.getElementById('keysDialog');
+    mount(document.getElementById('keysInDialog'));
+    const close = () => { dialog.hidden = true; waiting = null; renderAll(); };
+    dialog.addEventListener('click', (e) => { if (e.target === dialog) close(); });
+    addEventListener('keydown', (e) => {
+      if (dialog.hidden || waiting) return;
+      e.stopImmediatePropagation();
+      if (e.code === 'Escape') { e.preventDefault(); close(); }
+    }, true);
+    return { ACTIONS, mount, open: () => { dialog.hidden = false; }, close, nameOf, keysOf: (id) => bind[id] || [], refresh: send };
+  })();
+  window.ctrKeys = ctrKeys;
+  ctrKeys.mount(document.getElementById('keysHere'));
 
   // Test hooks: what the game is doing, and a pad held down by code (engine/platform/native_web.c).
   const BUTTONS = { select: 0x1, start: 0x8, up: 0x10, right: 0x20, down: 0x40, left: 0x80,

@@ -231,6 +231,7 @@ const editor = {
       el('span', { class: 'sep' }),
       this.groundBtn, this.groundTex, this.skyInput, this.lightSel, this.weatherSel,
       el('span', { class: 'grow' }),
+      el('button', { title: 'The driving keys: change them', onclick: () => window.ctrKeys && window.ctrKeys.open() }, 'Keys'),
       el('button', { title: 'Help (H)', onclick: () => this.toggleHelp() }, '?'),
       el('button', { title: 'Drive from where the mouse points (Shift+Tab)', onclick: () => this.drive(true) }, '▶ Here'),
       el('button', { class: 'go', title: 'Drive the track from the start (Tab)', onclick: () => this.drive() }, '▶ DRIVE'));
@@ -340,6 +341,7 @@ const editor = {
       ['Tab', 'Drive it from the start, at once · Tab or Esc again: back here · Backspace while driving: start over'],
       ['Shift+Tab', 'Drive from where the mouse points'],
       ['Esc', 'Put the piece down / clear the selection'],
+      ['Keys (top right)', 'Change the driving keys'],
     ];
     this.help.replaceChildren(
       el('h2', {}, 'Track editor'),

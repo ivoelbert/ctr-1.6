@@ -70,6 +70,7 @@ void NativeWeb_ApplyBootOverride(struct GameTracker *gGT)
 
 #if defined(__EMSCRIPTEN__)
 extern int g_nativeWebHeldButtons;
+extern int g_nativeWebKeyButtons;
 
 // Test hooks for the page (window.ctr in web/index.html).
 
@@ -131,6 +132,12 @@ EMSCRIPTEN_KEEPALIVE int NativeWeb_AtlasExact(int *out)
 EMSCRIPTEN_KEEPALIVE void NativeWeb_SetButtons(int mask)
 {
 	g_nativeWebHeldButtons = mask & 0xffff;
+}
+
+// the pad bits the keyboard holds now (the page's key bindings, index.html)
+EMSCRIPTEN_KEEPALIVE void NativeWeb_SetKeyButtons(int mask)
+{
+	g_nativeWebKeyButtons = mask & 0xffff;
 }
 
 internal int NativeWeb_QuadIndex(const struct QuadBlock *quad)
