@@ -469,6 +469,9 @@ internal void NativeInput_ApplyController(s32 slot)
 // NOTE(web): PS1 pad bits (active high here) held down by the page's test hooks
 // (platform/native_web.c), merged into the keyboard pad.
 int g_nativeWebHeldButtons;
+// NOTE(web): the pad bits the keyboard holds, by the page's key bindings (index.html: they can be
+// changed there); the page reads the keyboard, so SDL's keyboard state isn't.
+int g_nativeWebKeyButtons;
 #endif
 
 internal u16 NativeInput_ReadKeyboard(void)
@@ -477,7 +480,8 @@ internal u16 NativeInput_ReadKeyboard(void)
 	u16 buttons = 0xffff;
 
 #if defined(__EMSCRIPTEN__)
-	buttons &= (u16)~g_nativeWebHeldButtons;
+	buttons &= (u16)~(g_nativeWebHeldButtons | g_nativeWebKeyButtons);
+	return buttons;
 #endif
 
 	if (s_keyboardState == NULL)
@@ -521,13 +525,6 @@ internal u16 NativeInput_ReadKeyboard(void)
 	{
 		buttons &= ~0x200;
 	}
-#if defined(__EMSCRIPTEN__)
-	// NOTE(web): Mac keyboards have no right Ctrl: A is R2 (look back) too.
-	if (s_keyboardState[SDL_SCANCODE_A])
-	{
-		buttons &= ~0x200;
-	}
-#endif
 	if (s_keyboardState[mapping->kc_r3])
 	{
 		buttons &= ~0x4;

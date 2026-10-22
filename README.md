@@ -75,6 +75,10 @@ CTR's textures: then it needs a CTR disc to show them.
 
 ## Controls (keyboard)
 
+The keys can be changed: in the launcher's Controls panel, or with the track editor's Keys
+button, click a key and press the new one (each action takes two). They're kept in the browser.
+The defaults:
+
 | | key | PS1 |
 |---|---|---|
 | Steer | arrows | D-pad |
