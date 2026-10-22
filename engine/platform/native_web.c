@@ -11,7 +11,7 @@
 EM_JS(int, NativeWeb_BootValue, (int index, int fallback), {
 	const boot = Module.ctrBoot;
 	if (!boot) return fallback;
-	const v = [boot.level, boot.mode, boot.character, boot.laps, boot.players][index];
+	const v = [boot.level, boot.mode, boot.character, boot.laps, boot.players, boot.superTurbo][index];
 	return (v === undefined || v === null || Number.isNaN(Number(v))) ? fallback : (Number(v) | 0);
 });
 
@@ -48,7 +48,13 @@ void NativeWeb_ApplyBootOverride(struct GameTracker *gGT)
 	gGT->numPlyrCurrGame = (u8)players;
 	gGT->numLaps = (u8)laps;
 	gGT->gameMode1 &= ~(BATTLE_MODE | ADVENTURE_MODE | TIME_TRIAL | ADVENTURE_ARENA | ARCADE_MODE | ADVENTURE_CUP);
-	gGT->gameMode2 &= ~(CUP_ANY_KIND);
+	gGT->gameMode2 &= ~(CUP_ANY_KIND | CHEAT_TURBO | CHEAT_WUMPA);
+	// free drive: a turbo always in hand (the game's own cheat: used, it stays), and the Wumpa
+	// fruit full (the other cheat) so it's a Super Turbo
+	if (NativeWeb_BootValue(5, 0) != 0)
+	{
+		gGT->gameMode2 |= CHEAT_TURBO | CHEAT_WUMPA;
+	}
 	if (mode == 0)
 	{
 		gGT->gameMode1 |= TIME_TRIAL;
